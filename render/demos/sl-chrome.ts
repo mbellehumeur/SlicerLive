@@ -44,7 +44,7 @@ export interface ChromeOpts {
   controls?: VizControl[];                                   // viz toggles (empty → branding only)
   selects?: SelectControl[];                                 // dropdowns, rendered above the toggles
   segments?: SegmentControls;                                // per-segment visibility list (swatch + toggle)
-  help?: { title: string; rows: [string, string][] }[] | false; // override the cheat-sheet; false = no "?" button (host has its own help)
+  help?: { title: string; rows: [string, string][] }[] | false; // override the cheat-sheet; false = no "?" button (host opens via Chrome.openHelp)
   onChange?: () => void;                                     // after a toggle (redraw)
   anchor?: HTMLElement;                                      // float the badge over this element's top-right corner (e.g. the 3D cell); falls back to the viewport corner when hidden/absent
   about?: { label?: string; url?: string } | false;         // "About" row at the popup bottom (default: About SlicerLive → repo); false to omit
@@ -53,7 +53,7 @@ export interface ChromeOpts {
 /** refresh() re-reads control state into the popup. destroy() removes all chrome DOM +
  *  listeners — REQUIRED for a host that opens/closes the viewer (e.g. SlicerRad), so the
  *  fixed badge/popup don't leak; single-page demos can ignore it. */
-export interface Chrome { refresh(): void; destroy(): void }
+export interface Chrome { refresh(): void; destroy(): void; openHelp(): void }
 
 const DEFAULT_HELP: { title: string; rows: [string, string][] }[] = [
   { title: "3D view", rows: [
@@ -81,12 +81,51 @@ function glass(el: HTMLElement, extra = "") {
     "border:1px solid rgba(255,255,255,.2);box-shadow:0 18px 50px rgba(0,0,0,.55);" + extra;
 }
 
+let helpEl: HTMLElement | null = null;
+function escClose(e: KeyboardEvent) { if (e.key === "Escape") closeChromeHelp(); }
+function closeChromeHelp() {
+  if (helpEl) {
+    helpEl.remove();
+    helpEl = null;
+    document.removeEventListener("keydown", escClose, true);
+  }
+}
+
+/** Mouse/keyboard cheat-sheet overlay (same content as the chrome "?" button). */
+export function openChromeHelp(
+  host: HTMLElement = document.body,
+  sheets: { title: string; rows: [string, string][] }[] = DEFAULT_HELP,
+): void {
+  if (helpEl) return;
+  helpEl = document.createElement("div");
+  helpEl.style.cssText = "position:fixed;inset:0;z-index:96;display:flex;align-items:center;justify-content:center;" +
+    "background:rgba(6,8,14,.55);font:13px/1.5 -apple-system,system-ui,sans-serif;color:#e8eeff;";
+  helpEl.addEventListener("mousedown", (e) => { if (e.target === helpEl) closeChromeHelp(); });
+  const panel = document.createElement("div");
+  panel.style.cssText = "max-width:min(640px,92vw);max-height:86vh;overflow-y:auto;padding:22px 26px;border-radius:16px;color:#eaf0ff;";
+  glass(panel);
+  panel.innerHTML = `<div style="font:800 20px -apple-system,system-ui,sans-serif;margin-bottom:4px">SlicerLive — controls</div>`;
+  for (const sec of sheets) {
+    const rows = sec.rows.map(([k, d]) =>
+      `<div style="font:600 12px ui-monospace,Menlo,monospace;color:#fff5d6;white-space:nowrap">${k}</div>` +
+      `<div style="color:rgba(232,238,255,.85)">${d}</div>`).join("");
+    panel.innerHTML += `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">` +
+      `<div style="font:700 11px -apple-system,system-ui,sans-serif;letter-spacing:1.1px;text-transform:uppercase;color:#9fe9ff;margin-bottom:9px">${sec.title}</div>` +
+      `<div style="display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;align-items:baseline">${rows}</div></div>`;
+  }
+  panel.innerHTML += `<div style="margin-top:16px;font-size:12px;color:rgba(232,238,255,.55)">Press <b style="color:#fff5d6">esc</b> or click outside to dismiss.</div>`;
+  helpEl.appendChild(panel);
+  host.appendChild(helpEl);
+  document.addEventListener("keydown", escClose, true);
+}
+
 export function installChrome(opts: ChromeOpts): Chrome {
   const controls = opts.controls ?? [];
   const host = opts.container ?? document.body;
-  const help = (opts.help === false ? [] : opts.help) ?? DEFAULT_HELP;
+  const help = opts.help === false ? DEFAULT_HELP : (opts.help ?? DEFAULT_HELP);
+  const openHelp = () => openChromeHelp(host, help);
 
-  // ---- "?" help button (top-left) — omitted when help === false (host supplies its own) ----
+  // ---- "?" help button (top-left) — omitted when help === false (host opens via openHelp) ----
   let helpBtn: HTMLButtonElement | null = null;
   if (opts.help !== false) {
     helpBtn = document.createElement("button");
@@ -99,33 +138,6 @@ export function installChrome(opts: ChromeOpts): Chrome {
     helpBtn.onclick = openHelp;
     host.appendChild(helpBtn);
   }
-
-  let helpEl: HTMLElement | null = null;
-  function openHelp() {
-    if (helpEl) return;
-    helpEl = document.createElement("div");
-    helpEl.style.cssText = "position:fixed;inset:0;z-index:96;display:flex;align-items:center;justify-content:center;" +
-      "background:rgba(6,8,14,.55);font:13px/1.5 -apple-system,system-ui,sans-serif;color:#e8eeff;";
-    helpEl.addEventListener("mousedown", (e) => { if (e.target === helpEl) closeHelp(); });
-    const panel = document.createElement("div");
-    panel.style.cssText = "max-width:min(640px,92vw);max-height:86vh;overflow-y:auto;padding:22px 26px;border-radius:16px;color:#eaf0ff;";
-    glass(panel);
-    panel.innerHTML = `<div style="font:800 20px -apple-system,system-ui,sans-serif;margin-bottom:4px">SlicerLive — controls</div>`;
-    for (const sec of help) {
-      const rows = sec.rows.map(([k, d]) =>
-        `<div style="font:600 12px ui-monospace,Menlo,monospace;color:#fff5d6;white-space:nowrap">${k}</div>` +
-        `<div style="color:rgba(232,238,255,.85)">${d}</div>`).join("");
-      panel.innerHTML += `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">` +
-        `<div style="font:700 11px -apple-system,system-ui,sans-serif;letter-spacing:1.1px;text-transform:uppercase;color:#9fe9ff;margin-bottom:9px">${sec.title}</div>` +
-        `<div style="display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;align-items:baseline">${rows}</div></div>`;
-    }
-    panel.innerHTML += `<div style="margin-top:16px;font-size:12px;color:rgba(232,238,255,.55)">Press <b style="color:#fff5d6">esc</b> or click outside to dismiss.</div>`;
-    helpEl.appendChild(panel);
-    host.appendChild(helpEl);
-    document.addEventListener("keydown", escClose, true);
-  }
-  function escClose(e: KeyboardEvent) { if (e.key === "Escape") closeHelp(); }
-  function closeHelp() { if (helpEl) { helpEl.remove(); helpEl = null; document.removeEventListener("keydown", escClose, true); } }
 
   // ---- SlicerLive logo BADGE (dark rounded mark + "SlicerLive" wordmark), floated over the corner
   // of the 3D view (opts.anchor) like the legacy demo — readable, and the hover target for the popup.
@@ -424,12 +436,11 @@ export function installChrome(opts: ChromeOpts): Chrome {
   const destroy = () => {
     globalThis.removeEventListener("resize", place);
     anchorRO?.disconnect();
-    document.removeEventListener("keydown", escClose, true);
+    closeChromeHelp();
     helpBtn?.remove();
-    helpEl?.remove();
     logo.remove();
     pop.remove();
   };
 
-  return { refresh, destroy };
+  return { refresh, destroy, openHelp };
 }

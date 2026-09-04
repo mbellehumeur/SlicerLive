@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en" data-theme="slicerlive">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SlicerLive - Integrated Reporting Application</title>
+<style>
+  :root, [data-theme='slicerlive'] {
+    color-scheme: dark;
+    --ira-bg: #05060a;
+    --ira-bar: #0b0e16;
+    --ira-border: #1b2740;
+    --ira-fg: #cdd7e6;
+    --ira-fg-muted: #9fb3d0;
+    --ira-surface: #121722;
+    --ira-surface-2: #1b2740;
+    --ira-accent: #4f95d8;
+  }
+  [data-theme='ohif'] {
+    --ira-bg: #090c14;
+    --ira-bar: #151a1f;
+    --ira-border: #2c3640;
+    --ira-fg: #d3d8de;
+    --ira-fg-muted: #91a0ad;
+    --ira-surface: #1c232b;
+    --ira-surface-2: #27313b;
+    --ira-accent: #348cfd;
+  }
+  html, body { height: 100%; margin: 0; background: var(--ira-bg); font: 13px -apple-system, system-ui, sans-serif; color: var(--ira-fg); }
+  #viewer { position: relative; display: flex; flex-direction: column; width: 100vw; height: 100vh; }
+  #ira-bar { display: flex; align-items: center; gap: 14px; padding: 7px 14px; background: var(--ira-bar); border-bottom: 1px solid var(--ira-border); }
+  #ira-bar .brand { font-weight: 700; color: #fff; }
+  #ira-bar #info { color: var(--ira-fg-muted); font-size: 12px; }
+  .ira-bar-spacer { flex: 1; min-width: 8px; }
+  .ira-bar-actions { display: flex; align-items: center; gap: 6px; }
+  .ira-menu-wrap { position: relative; }
+  .ira-icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; padding: 0; cursor: pointer;
+    border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); color: var(--ira-fg);
+  }
+  .ira-icon-btn:hover { background: var(--ira-surface-2); }
+  .ira-menu {
+    position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; padding: 4px; z-index: 40;
+    background: var(--ira-surface); border: 1px solid var(--ira-border); border-radius: 6px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.45);
+  }
+  .ira-menu[hidden] { display: none !important; }
+  .ira-menu-item {
+    display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 4px;
+    background: transparent; color: var(--ira-fg); font: inherit; cursor: pointer;
+  }
+  .ira-menu-item:hover { background: var(--ira-surface-2); }
+  .ira-menu-item[aria-checked='true'] { background: var(--ira-accent); color: #0b1220; }
+  .ira-menu-sep { height: 1px; margin: 4px 6px; background: var(--ira-border); }
+  .ira-cast-status { display: inline-flex; align-items: center; justify-content: center; color: var(--ira-fg-muted); }
+  .cast-radio-status-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+  .cast-radio-icon { display: block; width: 20px; height: 20px; }
+  .cast-radio-slash {
+    pointer-events: none; position: absolute; left: 50%; top: 50%; width: 2px; height: 130%;
+    transform: translate(-50%, -50%) rotate(45deg); border-radius: 999px; background: currentColor; opacity: .9;
+  }
+  .ira-cast-connected { color: #4ade80; }
+  .ira-cast-connecting { color: #facc15; }
+  .ira-cast-error, .ira-cast-disconnected { color: #f87171; }
+  .ira-cast-idle { color: var(--ira-fg-muted); }
+  .ira-cast-idle .cast-radio-icon { opacity: .5; }
+  .ira-cast-error .cast-radio-icon { opacity: .7; }
+  .ira-cast-pulse .cast-radio-status-icon { animation: ira-pulse 1.5s ease-in-out infinite; }
+  @keyframes ira-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  .ira-modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center;
+    justify-content: center; z-index: 50; padding: 20px;
+  }
+  .ira-modal-backdrop[hidden] { display: none !important; }
+  .ira-modal {
+    width: min(440px, 100%); background: var(--ira-bar); border: 1px solid var(--ira-border);
+    border-radius: 6px; box-shadow: 0 8px 28px rgba(0,0,0,.45);
+  }
+  .ira-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid var(--ira-border);
+  }
+  .ira-modal-header h2 { margin: 0; font-size: 14px; }
+  .ira-modal-body { padding: 14px; color: var(--ira-fg-muted); line-height: 1.45; }
+  .ira-modal-close { border: 0; background: transparent; color: var(--ira-fg-muted); font-size: 18px; cursor: pointer; }
+  .ira-kv { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; margin: 0; }
+  .ira-kv dt { color: var(--ira-fg-muted); }
+  .ira-kv dd { margin: 0; word-break: break-all; font-family: ui-monospace, monospace; font-size: 12px; color: var(--ira-fg); }
+  #grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; min-height: 0; background: var(--ira-border); }
+  #grid.has-max .cell { display: none; }
+  #grid.has-max .cell.max { display: block; grid-area: 1 / 1 / -1 / -1; }
+  .cell { position: relative; min-width: 0; min-height: 0; background: #000; }
+  .cell canvas { width: 100%; height: 100%; display: block; background: #000; touch-action: none; }
+  .cell canvas.ira-overlay { background: transparent; }
+  .cell .lab { position: absolute; top: 5px; left: 7px; font-weight: 700; font-size: 11px; opacity: .9; pointer-events: none; }
+  .lab.axial { color: #f05a5a; } .lab.coronal { color: #5ad07a; } .lab.sagittal { color: #f0d24a; } .lab.threeD { color: #9fb3d0; }
+  .orient { position: absolute; font-weight: 700; font-size: 12px; color: var(--ira-fg-muted); opacity: .8; pointer-events: none; }
+  .o-t { top: 5px; left: 50%; transform: translateX(-50%); } .o-b { bottom: 5px; left: 50%; transform: translateX(-50%); }
+  .o-l { left: 7px; top: 50%; transform: translateY(-50%); } .o-r { right: 7px; top: 50%; transform: translateY(-50%); }
+  .sr { position: absolute; bottom: 5px; left: 7px; font: 600 11px -apple-system, system-ui, sans-serif; color: #d6e2f2;
+        opacity: .9; font-variant-numeric: tabular-nums; background: rgba(11,14,22,.6); padding: 1px 6px; border-radius: 4px; }
+  .iuo { position: absolute; bottom: 5px; right: 7px; font: 700 9px -apple-system, system-ui, sans-serif; color: #8a1f1f; opacity: .9; letter-spacing: .5px; pointer-events: none; }
+  #status { position: fixed; bottom: 6px; left: 10px; z-index: 5; background: rgba(5,6,10,.78);
+            padding: 3px 12px; border-radius: 6px; color: var(--ira-fg-muted); font-family: ui-monospace, monospace; font-size: 11px;
+            max-width: 70vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+</style>
+</head>
+<body>
+  <div id="viewer">
+    <div id="ira-bar">
+      <span class="brand">SlicerLive - Integrated Reporting Application</span>
+      <span id="info"></span>
+      <select id="wl-readout" style="display:none"></select>
+      <div class="ira-bar-spacer"></div>
+      <div class="ira-bar-actions">
+        <div class="ira-menu-wrap">
+          <button type="button" id="iraCastStatusBtn" class="ira-icon-btn" aria-label="Cast Interface"
+            aria-haspopup="menu" aria-expanded="false" title="Cast Interface">
+            <div id="iraCastStatus" class="ira-cast-status ira-cast-idle" aria-hidden="true"></div>
+          </button>
+          <div id="iraCastStatusMenu" class="ira-menu" role="menu" hidden>
+            <button type="button" id="iraSessionInfoBtn" class="ira-menu-item" role="menuitem">Session info</button>
+            <button type="button" id="iraHubBtn" class="ira-menu-item" role="menuitem">Hub</button>
+          </div>
+        </div>
+        <div class="ira-menu-wrap">
+          <button type="button" id="iraSettingsBtn" class="ira-icon-btn" aria-label="Settings"
+            aria-haspopup="menu" aria-expanded="false" title="Settings">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.7"/>
+              <path d="M19.4 13a7.8 7.8 0 0 0 .05-2l2.05-1.6-2-3.46-2.45.55a7.7 7.7 0 0 0-1.73-1L14.8 2h-5.6L8.68 5.49a7.7 7.7 0 0 0-1.73 1L4.5 5.94l-2 3.46L4.55 11a7.8 7.8 0 0 0 0 2l-2.05 1.6 2 3.46 2.45-.55a7.7 7.7 0 0 0 1.73 1L9.2 22h5.6l.52-3.49a7.7 7.7 0 0 0 1.73-1l2.45.55 2-3.46L19.4 13Z"
+                stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div id="iraSettingsMenu" class="ira-menu" role="menu" hidden>
+            <button type="button" class="ira-menu-item" role="menuitemradio" aria-checked="true" data-theme-option="slicerlive">SlicerLive theme</button>
+            <button type="button" class="ira-menu-item" role="menuitemradio" aria-checked="false" data-theme-option="ohif">OHIF theme</button>
+            <div class="ira-menu-sep" role="separator"></div>
+            <button type="button" id="iraControlsBtn" class="ira-menu-item" role="menuitem">Controls…</button>
+            <button type="button" id="iraAboutBtn" class="ira-menu-item" role="menuitem">About…</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="grid">
+      <div class="cell" data-cell="axial">
+        <canvas id="c-axial"></canvas><span class="lab axial">Axial</span>
+        <span class="orient o-t">A</span><span class="orient o-b">P</span><span class="orient o-l">R</span><span class="orient o-r">L</span>
+        <span id="sr-axial" class="sr"></span><span class="iuo">INVESTIGATIONAL USE ONLY</span>
+      </div>
+      <div class="cell" data-cell="threeD">
+        <canvas id="c-threeD"></canvas><span class="lab threeD">3D</span>
+        <span class="iuo">INVESTIGATIONAL USE ONLY</span>
+      </div>
+      <div class="cell" data-cell="coronal">
+        <canvas id="c-coronal"></canvas><span class="lab coronal">Coronal</span>
+        <span class="orient o-t">S</span><span class="orient o-b">I</span><span class="orient o-l">R</span><span class="orient o-r">L</span>
+        <span id="sr-coronal" class="sr"></span><span class="iuo">INVESTIGATIONAL USE ONLY</span>
+      </div>
+      <div class="cell" data-cell="sagittal">
+        <canvas id="c-sagittal"></canvas><span class="lab sagittal">Sagittal</span>
+        <span class="orient o-t">S</span><span class="orient o-b">I</span><span class="orient o-l">A</span><span class="orient o-r">P</span>
+        <span id="sr-sagittal" class="sr"></span><span class="iuo">INVESTIGATIONAL USE ONLY</span>
+      </div>
+    </div>
+    <div id="status">loading…</div>
+  </div>
+
+  <div id="iraSessionModal" class="ira-modal-backdrop" hidden>
+    <div class="ira-modal" role="dialog" aria-labelledby="iraSessionTitle">
+      <div class="ira-modal-header">
+        <h2 id="iraSessionTitle">Session info</h2>
+        <button type="button" class="ira-modal-close" data-ira-close-modal aria-label="Close">×</button>
+      </div>
+      <div class="ira-modal-body"><dl id="iraSessionDl" class="ira-kv"></dl></div>
+    </div>
+  </div>
+  <div id="iraAboutModal" class="ira-modal-backdrop" hidden>
+    <div class="ira-modal" role="dialog" aria-labelledby="iraAboutTitle">
+      <div class="ira-modal-header">
+        <h2 id="iraAboutTitle">About</h2>
+        <button type="button" class="ira-modal-close" data-ira-close-modal aria-label="Close">×</button>
+      </div>
+      <div class="ira-modal-body">
+        <p>SlicerLive IRA — IHE Integrated Reporting Applications reader.</p>
+        <p>Joins a Cast hub as Image Display (<code>ID</code>) when opened with <code>topic</code> and <code>id-token</code> from the worklist.</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="ira.js?v=status-catchup-2"></script>
+</body>
+</html>
