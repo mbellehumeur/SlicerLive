@@ -178,6 +178,833 @@ function spacingFromIjkToRAS(ijkToRAS) {
   return [col(0), col(1), col(2)];
 }
 
+// render/fields.ts
+function transformedAABB(m, lo, hi) {
+  const mn2 = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < 8; i++) {
+    const c = applyMat4(m, [i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]]);
+    for (let a = 0; a < 3; a++) {
+      mn2[a] = Math.min(mn2[a], c[a]);
+      mx[a] = Math.max(mx[a], c[a]);
+    }
+  }
+  return [mn2, mx];
+}
+var ImageField = class {
+  kind = "img";
+  bindingCount = 2;
+  // volume (3d) + lut (2d)
+  volTex;
+  lutTex;
+  dev;
+  p2t;
+  clim;
+  shade;
+  unit;
+  stepMm;
+  box;
+  normScale = 1;
+  // r8unorm samples return raw/255; clim is packed /normScale so shader math is unchanged
+  dims;
+  constructor(dev, data, dims, spacing, lut, opts) {
+    this.dims = dims;
+    const center = opts.center ?? [0, 0, 0];
+    let src = data, fmt = "r32float", bpe = 4;
+    this.normScale = 1;
+    if (data instanceof Uint8Array) {
+      fmt = "r8unorm";
+      bpe = 1;
+      this.normScale = 255;
+    } else if (data instanceof Uint16Array) {
+      src = Float32Array.from(data);
+      fmt = "r32float";
+      bpe = 4;
+    }
+    this.volTex = dev.createTexture({ size: dims, dimension: "3d", format: fmt, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    {
+      const bytesPerRow = dims[0] * bpe, rowsPerImage = dims[1], sliceBytes = bytesPerRow * rowsPerImage;
+      const CHUNK = 256 * 1024 * 1024;
+      const slab = Math.max(1, Math.min(dims[2], Math.floor(CHUNK / Math.max(1, sliceBytes))));
+      for (let z2 = 0; z2 < dims[2]; z2 += slab) {
+        const depth = Math.min(slab, dims[2] - z2);
+        dev.queue.writeTexture(
+          { texture: this.volTex, origin: { x: 0, y: 0, z: z2 } },
+          src,
+          { offset: z2 * sliceBytes, bytesPerRow, rowsPerImage },
+          [dims[0], dims[1], depth]
+        );
+      }
+    }
+    this.lutTex = dev.createTexture({ size: [256, 1], format: "rgba8unorm", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    dev.queue.writeTexture({ texture: this.lutTex }, lut, { bytesPerRow: 256 * 4 }, [256, 1]);
+    if (opts.ijkToRAS) {
+      this.p2t = patientToTextureFromIjkToRAS(opts.ijkToRAS, dims);
+      this.box = volumeAABBFromIjkToRAS(opts.ijkToRAS, dims);
+      this.stepMm = Math.min(...spacingFromIjkToRAS(opts.ijkToRAS));
+    } else {
+      this.p2t = patientToTexture(dims, spacing, center);
+      this.box = volumeAABB(dims, spacing, center);
+      this.stepMm = Math.min(...spacing);
+    }
+    this.clim = opts.clim;
+    this.shade = opts.shade ?? [0.35, 0.75, 0.35, 20];
+    this.unit = opts.opacityUnitDistance ?? this.stepMm;
+    this.dev = dev;
+  }
+  /** Replace the 256-entry rgba8 color/opacity LUT in place (no texture/bind-group churn).
+   *  The bind group holds a stable view of lutTex, so the next render uses the new LUT. */
+  setLUT(lut) {
+    this.dev.queue.writeTexture({ texture: this.lutTex }, lut, { bytesPerRow: 256 * 4 }, [256, 1]);
+  }
+  /** The scalar range the LUT spans — window/level for the volume rendering. Re-packed into
+   *  the material uniform on the next syncUniforms()/render, so no pipeline rebuild. */
+  setClim(lo, hi) {
+    this.clim = [lo, hi];
+  }
+  getClim() {
+    return [this.clim[0], this.clim[1]];
+  }
+  /** Phong shading tuple [ka, kd, ks, shininess] — re-packed into the material uniform next
+   *  render (VR presets carry their own lighting). [1,0,0,1] = flat emission (no shading). */
+  setShade(shade) {
+    this.shade = [shade[0], shade[1], shade[2], shade[3]];
+  }
+  origP2t;
+  // sampling matrix + box at identity, for setWorldTransform
+  origBox;
+  uniformFloats() {
+    return 28;
+  }
+  // mat4(16) + clim(4) + shade(4) + params(4)
+  aabb() {
+    return this.box;
+  }
+  sampleStep() {
+    return this.stepMm;
+  }
+  /** The r32float 3D scalar texture (e.g. to share with a SliceRenderer for MPR). */
+  volumeTexture() {
+    return this.volTex;
+  }
+  /** r8unorm volumes sample /255, so clim is packed /normScale in the shader; a slice plane sharing this
+   *  texture must use the same factor. 1 for f32 volumes. */
+  normScaleOf() {
+    return this.normScale;
+  }
+  /** Centre of the volume in world (RAS) at identity — a natural pivot for a transform widget. */
+  worldCenter() {
+    const [lo, hi] = this.origBox ?? this.box;
+    return [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+  }
+  /** Place the volume in the world by a rigid transform M (worldFromLocal): the ray samples
+   *  at p2t·M⁻¹·wp, so the volume appears moved/rotated. A Tier-A interactive update — caller
+   *  does scene.syncUniforms() (which re-packs p2t AND refreshes the ray-entry AABB). */
+  setWorldTransform(m) {
+    if (!this.origP2t) {
+      this.origP2t = this.p2t;
+      this.origBox = this.box;
+    }
+    this.p2t = multiply(this.origP2t, invert(m));
+    this.box = transformedAABB(m, this.origBox[0], this.origBox[1]);
+  }
+  /** RAS(patient) -> texture[0,1] matrix (encodes the real ijkToRAS geometry). */
+  patientToTexture() {
+    return this.p2t;
+  }
+  /** Re-place the volume in RAS without re-uploading voxels (a parent transform moved it). */
+  setIjkToRAS(ijkToRAS) {
+    this.p2t = patientToTextureFromIjkToRAS(ijkToRAS, this.dims);
+    this.box = volumeAABBFromIjkToRAS(ijkToRAS, this.dims);
+    this.stepMm = Math.min(...spacingFromIjkToRAS(ijkToRAS));
+  }
+  structMembers(s) {
+    return [
+      `  img${s}_p2t : mat4x4<f32>,`,
+      `  img${s}_clim : vec4<f32>,`,
+      // lo, hi, _, _
+      `  img${s}_shade : vec4<f32>,`,
+      // ka, kd, ks, shininess
+      `  img${s}_params : vec4<f32>,`
+      // opacity_unit_distance, _, _, _
+    ].join("\n");
+  }
+  declareBindings(s, base) {
+    return [
+      `@group(0) @binding(${base}) var t_vol_img${s} : texture_3d<f32>;`,
+      `@group(0) @binding(${base + 1}) var t_lut_img${s} : texture_2d<f32>;`
+    ].join("\n");
+  }
+  samplingWGSL(s) {
+    return (
+      /* wgsl */
+      `
+fn sampc_img${s}(wp : vec3<f32>) -> f32 {
+  let t4 = u_material.img${s}_p2t * vec4<f32>(transform_point_img${s}(wp), 1.0);
+  return textureSampleLevel(t_vol_img${s}, s_lin, clamp(t4.xyz, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).r;
+}
+fn sample_field_img${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
+  let t4 = u_material.img${s}_p2t * vec4<f32>(transform_point_img${s}(wp), 1.0);
+  let tex = t4.xyz;
+  if (any(tex < vec3<f32>(0.0)) || any(tex > vec3<f32>(1.0))) { return vec4<f32>(0.0); }
+  let val = textureSampleLevel(t_vol_img${s}, s_lin, tex, 0.0).r;
+  let lo = u_material.img${s}_clim.x; let hi = u_material.img${s}_clim.y;
+  let tf = textureSampleLevel(t_lut_img${s}, s_lin, vec2<f32>(clamp((val - lo) / max(hi - lo, 1e-6), 0.0, 1.0), 0.5), 0.0);
+  let step = u_material.scene.x;
+  let unit = max(u_material.img${s}_params.x, 1e-3);
+  let opacity = clamp(1.0 - pow(1.0 - clamp(tf.a, 0.0, 1.0), step / unit), 0.0, 1.0);
+  if (opacity <= 0.001) { return vec4<f32>(0.0); }
+  let h = step * 2.0;   // wider central difference -> smoother normals (less shading aliasing on coarse volumes)
+  let g = vec3<f32>(
+    sampc_img${s}(wp + vec3<f32>(h,0,0)) - sampc_img${s}(wp - vec3<f32>(h,0,0)),
+    sampc_img${s}(wp + vec3<f32>(0,h,0)) - sampc_img${s}(wp - vec3<f32>(0,h,0)),
+    sampc_img${s}(wp + vec3<f32>(0,0,h)) - sampc_img${s}(wp - vec3<f32>(0,0,h))) / (2.0 * h);
+  let glen = length(g);
+  let ka = u_material.img${s}_shade.x; let kd = u_material.img${s}_shade.y;
+  let ks = u_material.img${s}_shade.z; let sh = u_material.img${s}_shade.w;
+  var lit_srgb = tf.rgb * ka;
+  if (glen > 1e-6) {
+    var n = g / glen;
+    if (dot(n, -rd) < 0.0) { n = -n; }
+    let view_dir = normalize(-rd);
+    let ldotn = dot(view_dir, n);
+    if (ldotn > 0.0) {
+      let refl = normalize(2.0 * ldotn * n - view_dir);
+      let rdotv = max(0.0, dot(refl, view_dir));
+      lit_srgb = tf.rgb * (ka + kd * ldotn) + vec3<f32>(ks * pow(rdotv, sh));
+    }
+  }
+  let lit = srgb2physical(clamp(lit_srgb, vec3<f32>(0.0), vec3<f32>(1.0)));
+  return vec4<f32>(lit * opacity, opacity);
+}`
+    );
+  }
+  fillUniforms(out, off) {
+    out.set(this.p2t, off);
+    out[off + 16] = this.clim[0] / this.normScale;
+    out[off + 17] = this.clim[1] / this.normScale;
+    out[off + 20] = this.shade[0];
+    out[off + 21] = this.shade[1];
+    out[off + 22] = this.shade[2];
+    out[off + 23] = this.shade[3];
+    out[off + 24] = this.unit;
+  }
+  bindEntries(_s, base) {
+    return [
+      { binding: base, resource: this.volTex.createView() },
+      { binding: base + 1, resource: this.lutTex.createView() }
+    ];
+  }
+};
+var SegmentField = class {
+  kind = "seg";
+  bindingCount;
+  // 1 (value texture) + 1 when an sdf attr (opacity) texture is bound
+  clippable;
+  tex;
+  attrTex;
+  // sdf per-voxel attributes (.r = opacity)
+  p2t;
+  box;
+  color;
+  opacity;
+  shade;
+  bandMm;
+  stepMm;
+  mode;
+  colorFromTex;
+  interfaceMode;
+  voxelMm = 1;
+  providesSkip;
+  constructor(tex, dims, spacing, opts) {
+    this.tex = tex;
+    const center = opts.center ?? [0, 0, 0];
+    let voxelMm;
+    if (opts.ijkToRAS) {
+      this.p2t = patientToTextureFromIjkToRAS(opts.ijkToRAS, dims);
+      this.box = volumeAABBFromIjkToRAS(opts.ijkToRAS, dims);
+      voxelMm = Math.min(...spacingFromIjkToRAS(opts.ijkToRAS));
+    } else {
+      this.p2t = patientToTexture(dims, spacing, center);
+      this.box = volumeAABB(dims, spacing, center);
+      voxelMm = Math.min(...spacing);
+    }
+    this.color = opts.color;
+    this.opacity = opts.opacity ?? 1;
+    this.shade = opts.shade ?? [0.2, 0.85, 0.3, 32];
+    this.bandMm = opts.bandMm ?? voxelMm;
+    this.stepMm = opts.sampleStepMm ?? Math.max(0.5 * voxelMm, 0.1);
+    this.clippable = opts.clippable ?? true;
+    this.voxelMm = voxelMm;
+    this.mode = opts.mode ?? "iso";
+    this.providesSkip = this.mode === "sdf";
+    this.colorFromTex = opts.colorFromTexture ?? false;
+    this.interfaceMode = this.mode === "sdf" && (opts.interfaceMode ?? false);
+    this.attrTex = this.mode === "sdf" ? opts.attrTexture : void 0;
+    this.bindingCount = this.attrTex ? 2 : 1;
+  }
+  /** Field-level opacity (multiplies every segment's per-label opacity in the shader). Live global
+   *  segmentation opacity — the caller does scene.syncUniforms() + redraw to apply. */
+  setOpacity(o) {
+    this.opacity = Math.max(0, Math.min(1, o));
+  }
+  uniformFloats() {
+    return 36;
+  }
+  // mat4(16) + color(4) + shade(4) + params(4) + bmin(4) + bmax(4)
+  aabb() {
+    return this.box;
+  }
+  sampleStep() {
+    return this.stepMm;
+  }
+  setTexture(tex, destroyPrev = true) {
+    if (destroyPrev && this.tex !== tex) this.tex.destroy();
+    this.tex = tex;
+  }
+  /** Empty-space skip for "sdf" mode: the texture .a is a TRUE distance-to-surface (mm), so the ray can
+   *  leap |sdf| minus the shell band toward the surface — sphere tracing. A one-voxel safety margin
+   *  absorbs the JFA distance approximation so the leap never overshoots a thin shell (image unchanged,
+   *  just far fewer march steps). Self-contained (no dependency on the sampling fns' emission order). */
+  skipWGSL(s) {
+    return (
+      /* wgsl */
+      `
+fn skip_seg${s}(wp : vec3<f32>) -> f32 {
+  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
+  let t = t4.xyz;
+  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) {
+    // OUTSIDE the SDF grid: leap only to the seg's AABB (a contract-valid lower bound), never past it.
+    let cen = (u_material.seg${s}_bmin.xyz + u_material.seg${s}_bmax.xyz) * 0.5;
+    let ext = (u_material.seg${s}_bmax.xyz - u_material.seg${s}_bmin.xyz) * 0.5;
+    let q = abs(transform_point_seg${s}(wp) - cen) - ext;
+    return max(0.0, length(max(q, vec3<f32>(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0));
+  }
+  let d = abs(textureSampleLevel(t_seg${s}, s_lin, t, 0.0).a);                  // |distance to surface| (mm)
+  return max(0.0, d - u_material.seg${s}_params.x - u_material.seg${s}_params.y);   // leap toward the shell (band + 1 voxel safe)
+}`
+    );
+  }
+  structMembers(s) {
+    return [
+      `  seg${s}_p2t : mat4x4<f32>,`,
+      `  seg${s}_color : vec4<f32>,`,
+      // rgb, opacity
+      `  seg${s}_shade : vec4<f32>,`,
+      // ka, kd, ks, shininess
+      `  seg${s}_params : vec4<f32>,`,
+      // band_mm, voxel_mm, _, _
+      `  seg${s}_bmin : vec4<f32>,`,
+      // aabb min (RAS) — for a contract-valid skip outside the texture
+      `  seg${s}_bmax : vec4<f32>,`
+    ].join("\n");
+  }
+  declareBindings(s, base) {
+    const value = `@group(0) @binding(${base}) var t_seg${s} : texture_3d<f32>;`;
+    return this.attrTex ? `${value}
+@group(0) @binding(${base + 1}) var t_attr${s} : texture_3d<f32>;` : value;
+  }
+  samplingWGSL(s) {
+    if (this.mode === "sdf") {
+      return (
+        /* wgsl */
+        `
+fn v_seg${s}(wp : vec3<f32>) -> f32 {   // signed distance (mm)
+  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
+  let t = t4.xyz;
+  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return 1e3; }   // far outside \u2192 culled
+  return textureSampleLevel(t_seg${s}, s_lin, t, 0.0).a;
+}
+fn vgrad_seg${s}(wp : vec3<f32>) -> f32 {   // signed distance for the NORMAL finite-difference
+  // A gradient tap that steps just outside the (padded) SDF texture must read BACKGROUND, not the
+  // out-of-volume cull sentinel (1e3) \u2014 a huge sentinel would fabricate an enormous fake gradient that
+  // points out through the volume face and unlights the surface (black speckle at the seg/boundary
+  // interface). Clamp to the texture edge: with the padded grid that edge IS background, so the normal
+  // near a cap stays correct. This is the "artificial background boundary sample" for the normal.
+  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
+  let t = clamp(t4.xyz, vec3<f32>(0.0), vec3<f32>(1.0));
+  return textureSampleLevel(t_seg${s}, s_lin, t, 0.0).a;
+}
+fn col_seg${s}(wp : vec3<f32>) -> vec3<f32> {   // per-label colour of the nearest region
+  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
+  let t = t4.xyz;
+  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return vec3<f32>(0.0); }
+  let pm = textureSampleLevel(t_seg${s}, s_lin, t, 0.0).rgb;   // PREMULTIPLIED (rgb\xB7opacity)${this.attrTex ? `
+  let a = textureSampleLevel(t_attr${s}, s_lin, t, 0.0).r;      // per-segment opacity (crisp) \u2014 un-premultiply to the true colour, so a hidden neighbour's colour doesn't bleed in
+  return pm / max(a, 1e-3);` : `
+  return pm;`}
+}${this.attrTex ? `
+fn attr_seg${s}(wp : vec3<f32>) -> vec2<f32> {   // per-segment (.x = opacity, .y = shading mode)
+  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
+  let t = t4.xyz;
+  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return vec2<f32>(0.0); }
+  return textureSampleLevel(t_attr${s}, s_lin, t, 0.0).rg;
+}` : ""}${this.interfaceMode ? `
+fn bdist_seg${s}(wp : vec3<f32>) -> f32 {   // SMOOTH (seam-blurred) interface distance from attr.b \u2014 for the normal only
+  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
+  let t = clamp(t4.xyz, vec3<f32>(0.0), vec3<f32>(1.0));
+  return textureSampleLevel(t_attr${s}, s_lin, t, 0.0).b;
+}
+fn pres_seg${s}(wp : vec3<f32>) -> f32 {   // CRISP in-segment presence (attr.a), linear-sampled for ~1-voxel AA
+  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
+  let t = t4.xyz;
+  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return 0.0; }
+  return textureSampleLevel(t_attr${s}, s_lin, t, 0.0).a;
+}
+fn g1_seg${s}(c : f32, wp : vec3<f32>, dir : vec3<f32>, h : f32) -> f32 {
+  // One-sided difference of the SMOOTH interface distance along dir, picking the STEEPER side. The
+  // unsigned distance has a V-crease at the surface: a central difference straddling it cancels (fake
+  // zero gradient \u2192 degenerate normal). Taking the steeper one-sided difference follows the true \xB11
+  // slope AWAY from the interface, so the normal stays well-defined right at the shell \u2014 computed on
+  // the fly only at shell samples, no stored normal. Uses the blurred distance (attr.b) so the normal
+  // is smooth (no JFA facets); the SHARP sdfTex.a still drives shell membership (surface stays at 0).
+  let dp = bdist_seg${s}(wp + dir * h) - c;
+  let dm = c - bdist_seg${s}(wp - dir * h);
+  return select(dm, dp, abs(dp) > abs(dm)) / h;
+}` : ""}
+// Shell (surface) contribution at wp: crisp Phong shell around sdf=0. Weighted by (1-mode) so it
+// morphs smoothly into the volume contribution across a blurred surface\u2194volume boundary.
+fn surface_seg${s}(wp : vec3<f32>, rd : vec3<f32>, sdf : f32, band : f32, step : f32, seg_op : f32, op0 : f32) -> vec4<f32> {
+  let d_mm = abs(sdf);
+  if (d_mm > band + step) { return vec4<f32>(0.0); }
+  let T = clamp(op0 * seg_op, 0.0, 1.0);      // TARGET surface opacity (per-segment \xD7 field)
+  if (T <= 0.0) { return vec4<f32>(0.0); }
+  let h = step;
+${this.interfaceMode ? `  let hg = 1.5 * step;
+  let dc = bdist_seg${s}(wp);
+  let g = vec3<f32>(
+    g1_seg${s}(dc, wp, vec3<f32>(1,0,0), hg),
+    g1_seg${s}(dc, wp, vec3<f32>(0,1,0), hg),
+    g1_seg${s}(dc, wp, vec3<f32>(0,0,1), hg));` : `  let g = vec3<f32>(
+    vgrad_seg${s}(wp + vec3<f32>(h,0,0)) - vgrad_seg${s}(wp - vec3<f32>(h,0,0)),
+    vgrad_seg${s}(wp + vec3<f32>(0,h,0)) - vgrad_seg${s}(wp - vec3<f32>(0,h,0)),
+    vgrad_seg${s}(wp + vec3<f32>(0,0,h)) - vgrad_seg${s}(wp - vec3<f32>(0,0,h))) / (2.0 * h);`}
+  let glen = length(g);
+  if (glen < 1e-5) { return vec4<f32>(0.0); }
+  var n = g / glen;
+  if (dot(n, -rd) < 0.0) { n = -n; }
+  // SURFACE opacity (Slicer polydata parity): the shell is a THIN surface of opacity T, not a solid
+  // band. A raymarch crosses it in several samples; giving each \u03B1=T lets the front-to-back OVER
+  // saturate toward opaque (50% looked like ~100%). Instead accumulate OPTICAL DEPTH with a shell
+  // profile \u03C1 = a/band that integrates to 1 across the crossing, scaled by -ln(1-T): \u03A3d\u03C4 = -ln(1-T),
+  // so net opacity = 1-e^(-\u03A3d\u03C4) = T EXACTLY \u2014 independent of band thickness and sample rate, and T\u21921
+  // stays crisply opaque. |dot(rd,n)| converts ray-step to shell-normal distance (\u21920 at grazing =
+  // built-in silhouette AA).
+  let a = max(1.0 - d_mm / band, 0.0);
+  if (a <= 0.0) { return vec4<f32>(0.0); }
+  // Convert ray-step to d_mm-distance. Outer: RAW gradient projection |dot(rd,g)| = |d(d_mm)/ds|
+  // (includes |grad sdf|, which the distance blur pulls below 1). Interface: the re-signed gradient has
+  // an arbitrary magnitude (a sign jump at the interface), so use the UNIT normal cosine |dot(rd,n)| \u2014
+  // still \u21920 at grazing (silhouette AA), and keeps opacity thickness-consistent.
+  let rate = max(abs(dot(rd, ${this.interfaceMode ? "n" : "g"})), 1e-3);
+  let tau = -log(1.0 - min(T, 0.9999)) * (a / band) * (step * rate);
+  var op = 1.0 - exp(-tau);
+${this.interfaceMode ? `  op = op * pres_seg${s}(wp);   // gate to GENUINELY in-segment voxels \u2014 kills the bled colour/opacity halo beyond the real edge` : ""}
+  if (op <= 0.0004) { return vec4<f32>(0.0); }
+  let ka = u_material.seg${s}_shade.x; let kd = u_material.seg${s}_shade.y;
+  let ks = u_material.seg${s}_shade.z; let sh = u_material.seg${s}_shade.w;
+  let ldn = max(dot(-rd, n), 0.0);
+  let refl = normalize(2.0 * ldn * n + rd);
+  let rdv = max(dot(refl, -rd), 0.0);
+  let col = col_seg${s}(wp);
+  var lit = col * ka + col * (kd * ldn) + vec3<f32>(ks * pow(rdv, max(sh, 1.0)));
+  lit = srgb2physical(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)));
+  return vec4<f32>(lit * op, op);
+}
+fn sample_field_seg${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
+  let op0 = u_material.seg${s}_color.a;
+  if (op0 <= 0.0) { return vec4<f32>(0.0); }
+  let sdf = v_seg${s}(wp);
+  let band = max(u_material.seg${s}_params.x, 1e-3);
+  let step = max(u_material.scene.x, 1e-3);
+${this.attrTex ? `  let at = attr_seg${s}(wp);        // (opacity, shading mode)
+  let seg_op = at.x;
+  if (seg_op <= 0.0) { return vec4<f32>(0.0); }
+  let mode = clamp(at.y, 0.0, 1.0);
+  // Surface and volume are BLENDED by the (seam-blurred, fractional) mode, so an opaque-surface
+  // segment and a translucent-volume segment meet with a smooth transition instead of a jagged,
+  // voxel-quantized classification edge.
+  var acc = vec4<f32>(0.0);
+  if (mode > 0.001 && sdf < 0.0) {
+    // VOLUME: translucent DVR fill of the interior (~24 mm opacity-unit-distance).
+    let vop = clamp(op0 * seg_op * step / 24.0, 0.0, 1.0);
+    if (vop > 0.0) {
+      let vcol = srgb2physical(clamp(col_seg${s}(wp), vec3<f32>(0.0), vec3<f32>(1.0)));
+      acc += mode * vec4<f32>(vcol * vop, vop);
+    }
+  }
+  if (mode < 0.999) {
+    acc += (1.0 - mode) * surface_seg${s}(wp, rd, sdf, band, step, seg_op, op0);
+  }
+  return acc;` : `  return surface_seg${s}(wp, rd, sdf, band, step, 1.0, op0);`}
+}`
+      );
+    }
+    const alphaWGSL = this.mode === "surface" ? (
+      /* wgsl */
+      `
+  let step = max(u_material.scene.x, 1e-3);
+  let op = clamp(op0 * glen * step, 0.0, 1.0);
+  if (op <= 0.0) { return vec4<f32>(0.0); }`
+    ) : (
+      /* wgsl */
+      `
+  // Local first-order signed distance to the v=0.5 isosurface (mm), then a
+  // 1-voxel opacity band around it: crisp opaque shell, sub-voxel anti-aliased.
+  let d_mm = abs((v - 0.5) / glen);
+  let band = max(u_material.seg${s}_params.x, 1e-3);
+  let a = 1.0 - clamp(d_mm / band, 0.0, 1.0);
+  if (a <= 0.0) { return vec4<f32>(0.0); }
+  let op = clamp(a * op0, 0.0, 1.0);`
+    );
+    const colWGSL = this.colorFromTex ? (
+      /* wgsl */
+      `
+fn col_seg${s}(wp : vec3<f32>) -> vec3<f32> {
+  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
+  let t = t4.xyz;
+  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return vec3<f32>(0.0); }
+  return textureSampleLevel(t_seg${s}, s_lin, t, 0.0).rgb;
+}`
+    ) : "";
+    const colExpr = this.colorFromTex ? `col_seg${s}(wp)` : `u_material.seg${s}_color.rgb`;
+    return (
+      /* wgsl */
+      `
+fn v_seg${s}(wp : vec3<f32>) -> f32 {
+  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
+  let t = t4.xyz;
+  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return 0.0; }
+  return textureSampleLevel(t_seg${s}, s_lin, t, 0.0).a;   // Gaussian-smoothed presence in .a
+}${colWGSL}
+fn sample_field_seg${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
+  let op0 = u_material.seg${s}_color.a;
+  if (op0 <= 0.0) { return vec4<f32>(0.0); }
+  let v = v_seg${s}(wp);
+  // Skip deep interior / exterior: |grad| ~ 0 there so no shell to emit.
+  if (v <= 0.02 || v >= 0.98) { return vec4<f32>(0.0); }
+  let h = max(u_material.scene.x, 1e-3);
+  let g = vec3<f32>(
+    v_seg${s}(wp + vec3<f32>(h,0,0)) - v_seg${s}(wp - vec3<f32>(h,0,0)),
+    v_seg${s}(wp + vec3<f32>(0,h,0)) - v_seg${s}(wp - vec3<f32>(0,h,0)),
+    v_seg${s}(wp + vec3<f32>(0,0,h)) - v_seg${s}(wp - vec3<f32>(0,0,h))) / (2.0 * h);
+  let glen = length(g);
+  if (glen < 1e-5) { return vec4<f32>(0.0); }${alphaWGSL}
+  // Phong from the same gradient, normal flipped to face the camera.
+  var n = g / glen;
+  if (dot(n, -rd) < 0.0) { n = -n; }
+  let ka = u_material.seg${s}_shade.x; let kd = u_material.seg${s}_shade.y;
+  let ks = u_material.seg${s}_shade.z; let sh = u_material.seg${s}_shade.w;
+  let ldn = max(dot(-rd, n), 0.0);
+  let refl = normalize(2.0 * ldn * n + rd);
+  let rdv = max(dot(refl, -rd), 0.0);
+  let col = ${colExpr};
+  var lit = col * ka + col * (kd * ldn) + vec3<f32>(ks * pow(rdv, max(sh, 1.0)));
+  lit = srgb2physical(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)));
+  return vec4<f32>(lit * op, op);
+}`
+    );
+  }
+  fillUniforms(out, off) {
+    out.set(this.p2t, off);
+    out[off + 16] = this.color[0];
+    out[off + 17] = this.color[1];
+    out[off + 18] = this.color[2];
+    out[off + 19] = this.opacity;
+    out[off + 20] = this.shade[0];
+    out[off + 21] = this.shade[1];
+    out[off + 22] = this.shade[2];
+    out[off + 23] = this.shade[3];
+    out[off + 24] = this.bandMm;
+    out[off + 25] = this.voxelMm;
+    out[off + 28] = this.box[0][0];
+    out[off + 29] = this.box[0][1];
+    out[off + 30] = this.box[0][2];
+    out[off + 32] = this.box[1][0];
+    out[off + 33] = this.box[1][1];
+    out[off + 34] = this.box[1][2];
+  }
+  bindEntries(_s, base) {
+    const e = [{ binding: base, resource: this.tex.createView() }];
+    if (this.attrTex) e.push({ binding: base + 1, resource: this.attrTex.createView() });
+    return e;
+  }
+};
+
+// render/zarr.ts
+var ZDT = {
+  "<f4": Float32Array,
+  "<f8": Float64Array,
+  "<i4": Int32Array,
+  "<u4": Uint32Array,
+  "<i2": Int16Array,
+  "<u2": Uint16Array,
+  "|i1": Int8Array,
+  "|u1": Uint8Array,
+  "<i1": Int8Array,
+  "<u1": Uint8Array
+};
+async function inflateDeflate(buf) {
+  const ds = new DecompressionStream("deflate");
+  return await new Response(new Response(buf).body.pipeThrough(ds)).arrayBuffer();
+}
+var blobFetch = (url) => fetch(url);
+async function fetchZarrVolume(blobBase, z2, onBytes, concurrency = 12) {
+  const zv = await fetchZarrVolumeNative(blobBase, z2, onBytes, concurrency);
+  const data = zv.data instanceof Float32Array ? zv.data : Float32Array.from(zv.data);
+  return { data, dims: zv.dims, range: zv.range };
+}
+async function fetchZarrVolumeNative(blobBase, z2, onBytes, concurrency = 12) {
+  const Ctor = ZDT[z2.dtype] ?? Int16Array;
+  const [nz, ny, nx] = z2.shape, [cz, cy, cx] = z2.chunks, [ncz, ncy, ncx] = z2.chunkGrid;
+  const hashes = z2.chunkHashes;
+  const posBase = blobBase + z2.dir + "/" + z2.dataset + "/";
+  const chunkUrl = (kk, jj, ii) => hashes ? blobBase + hashes[kk + "." + jj + "." + ii] : posBase + kk + "." + jj + "." + ii;
+  const out = new Ctor(nz * ny * nx);
+  let lo = Infinity, hi = -Infinity;
+  const jobs = [];
+  for (let kk = 0; kk < ncz; kk++) for (let jj = 0; jj < ncy; jj++) for (let ii = 0; ii < ncx; ii++) jobs.push([kk, jj, ii]);
+  let idx = 0;
+  const worker = async () => {
+    while (idx < jobs.length) {
+      const [kk, jj, ii] = jobs[idx++];
+      const resp = await blobFetch(chunkUrl(kk, jj, ii));
+      let gz;
+      if (resp.body && onBytes) {
+        const parts = [];
+        const rd = resp.body.getReader();
+        let total = 0;
+        for (; ; ) {
+          const { done, value } = await rd.read();
+          if (done) break;
+          parts.push(value);
+          total += value.byteLength;
+          onBytes(value.byteLength);
+        }
+        const all = new Uint8Array(total);
+        let o = 0;
+        for (const p of parts) {
+          all.set(p, o);
+          o += p.byteLength;
+        }
+        gz = all.buffer;
+      } else {
+        gz = await resp.arrayBuffer();
+        onBytes?.(gz.byteLength);
+      }
+      const chunk = new Ctor(await inflateDeflate(gz));
+      const z0 = kk * cz, y0 = jj * cy, x0 = ii * cx;
+      const zw = Math.min(cz, nz - z0), yw = Math.min(cy, ny - y0), xw = Math.min(cx, nx - x0);
+      for (let zz = 0; zz < zw; zz++) {
+        for (let yy = 0; yy < yw; yy++) {
+          const src = (zz * cy + yy) * cx;
+          const dst = ((z0 + zz) * ny + (y0 + yy)) * nx + x0;
+          for (let xx = 0; xx < xw; xx++) {
+            const v2 = chunk[src + xx];
+            out[dst + xx] = v2;
+            if (v2 < lo) lo = v2;
+            if (v2 > hi) hi = v2;
+          }
+        }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, worker));
+  return { data: out, dtype: z2.dtype, dims: [nx, ny, nz], range: [lo, hi] };
+}
+
+// render/mrson.ts
+var TYPE_TO_CLASS = {
+  image: "vtkMRMLScalarVolumeNode",
+  mesh: "vtkMRMLModelNode",
+  segmentation: "vtkMRMLSegmentationNode",
+  markup: "vtkMRMLMarkupsFiducialNode",
+  transform: "vtkMRMLLinearTransformNode",
+  camera: "vtkMRMLCameraNode",
+  view: "vtkMRMLViewNode",
+  transferFunction: "vtkMRMLVolumePropertyNode",
+  scalarVolumeDisplay: "vtkMRMLScalarVolumeDisplayNode",
+  volumeRenderingDisplay: "vtkMRMLGPURayCastVolumeRenderingDisplayNode",
+  modelDisplay: "vtkMRMLModelDisplayNode",
+  markupDisplay: "vtkMRMLMarkupsDisplayNode"
+};
+function isMrsonScene(raw) {
+  const r = raw;
+  if (!r || typeof r !== "object") return false;
+  if (r.mrson !== void 0) return true;
+  return !!r.nodes && Object.values(r.nodes).some((n) => typeof n?.type === "string");
+}
+var colorRows = (a) => Array.isArray(a) ? a.map((s) => [s.value, s.rgba[0], s.rgba[1], s.rgba[2]]) : [];
+var opacityRows = (a) => Array.isArray(a) ? a.map((s) => [s.value, s.opacity]) : [];
+function adaptMrsonScene(scene) {
+  const nodes = scene.nodes ?? {};
+  const out = {};
+  for (const [id, n] of Object.entries(nodes)) {
+    const cls = n.source?.mrmlClass ?? TYPE_TO_CLASS[n.type] ?? n.type;
+    const refs = { ...n.refs ?? {} };
+    const attrs = {};
+    switch (n.type) {
+      case "image":
+        attrs.zarr = n.zarr;
+        attrs.ijkToRAS = n.ijkToRAS;
+        attrs.dims = n.dims;
+        attrs.comps = n.comps;
+        break;
+      case "transferFunction":
+        attrs.color = colorRows(n.colorStops);
+        attrs.scalarOpacity = opacityRows(n.scalarOpacity);
+        attrs.gradientOpacity = opacityRows(n.gradientOpacity);
+        attrs.shade = n.shade;
+        break;
+      case "scalarVolumeDisplay":
+        attrs.window = n.window;
+        attrs.level = n.level;
+        attrs.color = n.color;
+        attrs.visibility = n.visible ? 1 : 0;
+        break;
+      case "volumeRenderingDisplay":
+        if (n.refs?.transferFunction) refs.volumeProperty = n.refs.transferFunction;
+        break;
+      case "markup": {
+        attrs.controlPoints = n.controlPoints;
+        const dc = (n.refs?.display ?? []).map((d) => nodes[d]?.color).find(Boolean);
+        if (dc) attrs.color = dc.slice(0, 3);
+        break;
+      }
+      case "camera":
+        attrs.position = n.position;
+        attrs.focalPoint = n.focalPoint;
+        attrs.viewUp = n.viewUp;
+        attrs.viewAngle = n.viewAngle;
+        attrs.parallelScale = n.parallelScale;
+        break;
+      default:
+        break;
+    }
+    out[id] = { id, class: cls, name: n.name, refs, attrs, blobs: [] };
+  }
+  return { blobBase: scene.blobBase, nodes: out };
+}
+
+// render/scene-volume.ts
+function interpTF(tf, s, comps) {
+  if (!tf.length) return new Array(comps).fill(0);
+  if (s <= tf[0][0]) return tf[0].slice(1, 1 + comps);
+  const last = tf[tf.length - 1];
+  if (s >= last[0]) return last.slice(1, 1 + comps);
+  for (let i = 1; i < tf.length; i++) {
+    if (s <= tf[i][0]) {
+      const a = tf[i - 1], b = tf[i];
+      const u = (s - a[0]) / Math.max(b[0] - a[0], 1e-9);
+      return Array.from({ length: comps }, (_2, c) => a[1 + c] + u * (b[1 + c] - a[1 + c]));
+    }
+  }
+  return last.slice(1, 1 + comps);
+}
+function lutFromTransferFunctions(colorTF, opacityTF, clim) {
+  const lut = new Uint8Array(256 * 4);
+  for (let i = 0; i < 256; i++) {
+    const s = clim[0] + i / 255 * (clim[1] - clim[0]);
+    const [r, g, b] = interpTF(colorTF, s, 3);
+    const [a] = interpTF(opacityTF, s, 1);
+    lut[i * 4 + 0] = Math.round(Math.max(0, Math.min(1, r)) * 255);
+    lut[i * 4 + 1] = Math.round(Math.max(0, Math.min(1, g)) * 255);
+    lut[i * 4 + 2] = Math.round(Math.max(0, Math.min(1, b)) * 255);
+    lut[i * 4 + 3] = Math.round(Math.max(0, Math.min(1, a)) * 255);
+  }
+  return lut;
+}
+function lutFromWindowLevel() {
+  const lut = new Uint8Array(256 * 4);
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255;
+    const g = Math.round(t * 255);
+    lut[i * 4 + 0] = lut[i * 4 + 1] = lut[i * 4 + 2] = g;
+    lut[i * 4 + 3] = Math.round(Math.max(0, Math.min(1, (t - 0.15) / 0.85)) * 200);
+  }
+  return lut;
+}
+function parseMarkups(nodes) {
+  const out = [];
+  for (const n of Object.values(nodes)) {
+    if (!/Markups.*Node$/.test(n.class)) continue;
+    const cps = n.attrs?.controlPoints ?? n.attrs?.markups;
+    if (!Array.isArray(cps)) continue;
+    const color = n.attrs?.color ?? [1, 0.85, 0.2];
+    cps.forEach((cp, i) => {
+      const c = cp;
+      const p = c.position ?? cp;
+      if (!Array.isArray(p) || p.length < 3) return;
+      out.push({ ras: [p[0], p[1], p[2]], label: c.label ?? `${n.name ?? "F"}-${i + 1}`, color });
+    });
+  }
+  return out;
+}
+async function loadSceneVolumeField(dev, sceneUrl, onBytes, opts = {}) {
+  const raw = await (await fetch(sceneUrl)).json();
+  const adapted = isMrsonScene(raw) ? adaptMrsonScene(raw) : raw;
+  const wrapper = adapted.nodes ? adapted : { nodes: adapted };
+  const nodes = wrapper.nodes;
+  const pageBase = globalThis.location?.href ?? "file:///";
+  const sceneAbs = new URL(sceneUrl, pageBase).href;
+  const blobBase = new URL(wrapper.blobBase ?? "./blobs/", sceneAbs).href;
+  const vol = Object.values(nodes).find((n) => n.class === "vtkMRMLScalarVolumeNode" && n.attrs?.zarr);
+  if (!vol) throw new Error("no zarr ScalarVolumeNode in scene");
+  const z2 = vol.attrs.zarr;
+  let ijkToRAS = vol.attrs.ijkToRAS;
+  if (!ijkToRAS) throw new Error("volume node has no ijkToRAS");
+  if (opts.extraTranslationRAS) {
+    const t = opts.extraTranslationRAS;
+    ijkToRAS = ijkToRAS.slice();
+    ijkToRAS[3] += t[0];
+    ijkToRAS[7] += t[1];
+    ijkToRAS[11] += t[2];
+  }
+  const zv = await fetchZarrVolume(blobBase, z2, onBytes);
+  let vp;
+  for (const dispId of vol.refs?.display ?? []) {
+    const disp = nodes[dispId];
+    for (const vpId of disp?.refs?.volumeProperty ?? []) {
+      if (nodes[vpId]?.class === "vtkMRMLVolumePropertyNode") vp = nodes[vpId];
+    }
+  }
+  let lut, clim, shade;
+  if (vp?.attrs?.color && vp?.attrs?.scalarOpacity) {
+    const colorTF = vp.attrs.color, opacityTF = vp.attrs.scalarOpacity;
+    const lo2 = colorTF[0][0], hi2 = colorTF[colorTF.length - 1][0];
+    clim = [lo2, hi2];
+    lut = lutFromTransferFunctions(colorTF, opacityTF, clim);
+    shade = vp.attrs.shade ? [0.25, 0.75, 0.5, 24] : [1, 0, 0, 1];
+  } else {
+    const disp = nodes[(vol.refs?.display ?? [])[0]]?.attrs ?? {};
+    const win2 = disp.window ?? zv.range[1] - zv.range[0];
+    const lev2 = disp.level ?? (zv.range[0] + zv.range[1]) / 2;
+    clim = [lev2 - win2 / 2, lev2 + win2 / 2];
+    lut = lutFromWindowLevel();
+    shade = [0.25, 0.75, 0.5, 24];
+  }
+  const disp0 = nodes[(vol.refs?.display ?? [])[0]]?.attrs ?? {};
+  const win = disp0.window ?? zv.range[1] - zv.range[0];
+  const lev = disp0.level ?? (zv.range[0] + zv.range[1]) / 2;
+  const field = new ImageField(dev, zv.data, zv.dims, [1, 1, 1], lut, { clim, ijkToRAS, shade });
+  const [lo, hi] = field.aabb();
+  const center = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+  const radius = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
+  return {
+    field,
+    voxels: zv.data,
+    dims: zv.dims,
+    ijkToRAS,
+    name: vol.name ?? "volume",
+    range: zv.range,
+    center,
+    radius,
+    win,
+    lev,
+    markups: parseMarkups(nodes),
+    vr: { lut, clim, shade }
+  };
+}
+
 // render/slice-renderer.ts
 var DEFAULT_FORMAT = "rgba8unorm-srgb";
 var SHADER = (
@@ -2095,558 +2922,6 @@ ${pickDispatch}
     target.destroy();
     buf.destroy();
     return out;
-  }
-};
-
-// render/fields.ts
-function transformedAABB(m, lo, hi) {
-  const mn2 = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
-  for (let i = 0; i < 8; i++) {
-    const c = applyMat4(m, [i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]]);
-    for (let a = 0; a < 3; a++) {
-      mn2[a] = Math.min(mn2[a], c[a]);
-      mx[a] = Math.max(mx[a], c[a]);
-    }
-  }
-  return [mn2, mx];
-}
-var ImageField = class {
-  kind = "img";
-  bindingCount = 2;
-  // volume (3d) + lut (2d)
-  volTex;
-  lutTex;
-  dev;
-  p2t;
-  clim;
-  shade;
-  unit;
-  stepMm;
-  box;
-  normScale = 1;
-  // r8unorm samples return raw/255; clim is packed /normScale so shader math is unchanged
-  dims;
-  constructor(dev, data, dims, spacing, lut, opts) {
-    this.dims = dims;
-    const center = opts.center ?? [0, 0, 0];
-    let src = data, fmt = "r32float", bpe = 4;
-    this.normScale = 1;
-    if (data instanceof Uint8Array) {
-      fmt = "r8unorm";
-      bpe = 1;
-      this.normScale = 255;
-    } else if (data instanceof Uint16Array) {
-      src = Float32Array.from(data);
-      fmt = "r32float";
-      bpe = 4;
-    }
-    this.volTex = dev.createTexture({ size: dims, dimension: "3d", format: fmt, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-    {
-      const bytesPerRow = dims[0] * bpe, rowsPerImage = dims[1], sliceBytes = bytesPerRow * rowsPerImage;
-      const CHUNK = 256 * 1024 * 1024;
-      const slab = Math.max(1, Math.min(dims[2], Math.floor(CHUNK / Math.max(1, sliceBytes))));
-      for (let z2 = 0; z2 < dims[2]; z2 += slab) {
-        const depth = Math.min(slab, dims[2] - z2);
-        dev.queue.writeTexture(
-          { texture: this.volTex, origin: { x: 0, y: 0, z: z2 } },
-          src,
-          { offset: z2 * sliceBytes, bytesPerRow, rowsPerImage },
-          [dims[0], dims[1], depth]
-        );
-      }
-    }
-    this.lutTex = dev.createTexture({ size: [256, 1], format: "rgba8unorm", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-    dev.queue.writeTexture({ texture: this.lutTex }, lut, { bytesPerRow: 256 * 4 }, [256, 1]);
-    if (opts.ijkToRAS) {
-      this.p2t = patientToTextureFromIjkToRAS(opts.ijkToRAS, dims);
-      this.box = volumeAABBFromIjkToRAS(opts.ijkToRAS, dims);
-      this.stepMm = Math.min(...spacingFromIjkToRAS(opts.ijkToRAS));
-    } else {
-      this.p2t = patientToTexture(dims, spacing, center);
-      this.box = volumeAABB(dims, spacing, center);
-      this.stepMm = Math.min(...spacing);
-    }
-    this.clim = opts.clim;
-    this.shade = opts.shade ?? [0.35, 0.75, 0.35, 20];
-    this.unit = opts.opacityUnitDistance ?? this.stepMm;
-    this.dev = dev;
-  }
-  /** Replace the 256-entry rgba8 color/opacity LUT in place (no texture/bind-group churn).
-   *  The bind group holds a stable view of lutTex, so the next render uses the new LUT. */
-  setLUT(lut) {
-    this.dev.queue.writeTexture({ texture: this.lutTex }, lut, { bytesPerRow: 256 * 4 }, [256, 1]);
-  }
-  /** The scalar range the LUT spans — window/level for the volume rendering. Re-packed into
-   *  the material uniform on the next syncUniforms()/render, so no pipeline rebuild. */
-  setClim(lo, hi) {
-    this.clim = [lo, hi];
-  }
-  getClim() {
-    return [this.clim[0], this.clim[1]];
-  }
-  /** Phong shading tuple [ka, kd, ks, shininess] — re-packed into the material uniform next
-   *  render (VR presets carry their own lighting). [1,0,0,1] = flat emission (no shading). */
-  setShade(shade) {
-    this.shade = [shade[0], shade[1], shade[2], shade[3]];
-  }
-  origP2t;
-  // sampling matrix + box at identity, for setWorldTransform
-  origBox;
-  uniformFloats() {
-    return 28;
-  }
-  // mat4(16) + clim(4) + shade(4) + params(4)
-  aabb() {
-    return this.box;
-  }
-  sampleStep() {
-    return this.stepMm;
-  }
-  /** The r32float 3D scalar texture (e.g. to share with a SliceRenderer for MPR). */
-  volumeTexture() {
-    return this.volTex;
-  }
-  /** r8unorm volumes sample /255, so clim is packed /normScale in the shader; a slice plane sharing this
-   *  texture must use the same factor. 1 for f32 volumes. */
-  normScaleOf() {
-    return this.normScale;
-  }
-  /** Centre of the volume in world (RAS) at identity — a natural pivot for a transform widget. */
-  worldCenter() {
-    const [lo, hi] = this.origBox ?? this.box;
-    return [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
-  }
-  /** Place the volume in the world by a rigid transform M (worldFromLocal): the ray samples
-   *  at p2t·M⁻¹·wp, so the volume appears moved/rotated. A Tier-A interactive update — caller
-   *  does scene.syncUniforms() (which re-packs p2t AND refreshes the ray-entry AABB). */
-  setWorldTransform(m) {
-    if (!this.origP2t) {
-      this.origP2t = this.p2t;
-      this.origBox = this.box;
-    }
-    this.p2t = multiply(this.origP2t, invert(m));
-    this.box = transformedAABB(m, this.origBox[0], this.origBox[1]);
-  }
-  /** RAS(patient) -> texture[0,1] matrix (encodes the real ijkToRAS geometry). */
-  patientToTexture() {
-    return this.p2t;
-  }
-  /** Re-place the volume in RAS without re-uploading voxels (a parent transform moved it). */
-  setIjkToRAS(ijkToRAS) {
-    this.p2t = patientToTextureFromIjkToRAS(ijkToRAS, this.dims);
-    this.box = volumeAABBFromIjkToRAS(ijkToRAS, this.dims);
-    this.stepMm = Math.min(...spacingFromIjkToRAS(ijkToRAS));
-  }
-  structMembers(s) {
-    return [
-      `  img${s}_p2t : mat4x4<f32>,`,
-      `  img${s}_clim : vec4<f32>,`,
-      // lo, hi, _, _
-      `  img${s}_shade : vec4<f32>,`,
-      // ka, kd, ks, shininess
-      `  img${s}_params : vec4<f32>,`
-      // opacity_unit_distance, _, _, _
-    ].join("\n");
-  }
-  declareBindings(s, base) {
-    return [
-      `@group(0) @binding(${base}) var t_vol_img${s} : texture_3d<f32>;`,
-      `@group(0) @binding(${base + 1}) var t_lut_img${s} : texture_2d<f32>;`
-    ].join("\n");
-  }
-  samplingWGSL(s) {
-    return (
-      /* wgsl */
-      `
-fn sampc_img${s}(wp : vec3<f32>) -> f32 {
-  let t4 = u_material.img${s}_p2t * vec4<f32>(transform_point_img${s}(wp), 1.0);
-  return textureSampleLevel(t_vol_img${s}, s_lin, clamp(t4.xyz, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).r;
-}
-fn sample_field_img${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
-  let t4 = u_material.img${s}_p2t * vec4<f32>(transform_point_img${s}(wp), 1.0);
-  let tex = t4.xyz;
-  if (any(tex < vec3<f32>(0.0)) || any(tex > vec3<f32>(1.0))) { return vec4<f32>(0.0); }
-  let val = textureSampleLevel(t_vol_img${s}, s_lin, tex, 0.0).r;
-  let lo = u_material.img${s}_clim.x; let hi = u_material.img${s}_clim.y;
-  let tf = textureSampleLevel(t_lut_img${s}, s_lin, vec2<f32>(clamp((val - lo) / max(hi - lo, 1e-6), 0.0, 1.0), 0.5), 0.0);
-  let step = u_material.scene.x;
-  let unit = max(u_material.img${s}_params.x, 1e-3);
-  let opacity = clamp(1.0 - pow(1.0 - clamp(tf.a, 0.0, 1.0), step / unit), 0.0, 1.0);
-  if (opacity <= 0.001) { return vec4<f32>(0.0); }
-  let h = step * 2.0;   // wider central difference -> smoother normals (less shading aliasing on coarse volumes)
-  let g = vec3<f32>(
-    sampc_img${s}(wp + vec3<f32>(h,0,0)) - sampc_img${s}(wp - vec3<f32>(h,0,0)),
-    sampc_img${s}(wp + vec3<f32>(0,h,0)) - sampc_img${s}(wp - vec3<f32>(0,h,0)),
-    sampc_img${s}(wp + vec3<f32>(0,0,h)) - sampc_img${s}(wp - vec3<f32>(0,0,h))) / (2.0 * h);
-  let glen = length(g);
-  let ka = u_material.img${s}_shade.x; let kd = u_material.img${s}_shade.y;
-  let ks = u_material.img${s}_shade.z; let sh = u_material.img${s}_shade.w;
-  var lit_srgb = tf.rgb * ka;
-  if (glen > 1e-6) {
-    var n = g / glen;
-    if (dot(n, -rd) < 0.0) { n = -n; }
-    let view_dir = normalize(-rd);
-    let ldotn = dot(view_dir, n);
-    if (ldotn > 0.0) {
-      let refl = normalize(2.0 * ldotn * n - view_dir);
-      let rdotv = max(0.0, dot(refl, view_dir));
-      lit_srgb = tf.rgb * (ka + kd * ldotn) + vec3<f32>(ks * pow(rdotv, sh));
-    }
-  }
-  let lit = srgb2physical(clamp(lit_srgb, vec3<f32>(0.0), vec3<f32>(1.0)));
-  return vec4<f32>(lit * opacity, opacity);
-}`
-    );
-  }
-  fillUniforms(out, off) {
-    out.set(this.p2t, off);
-    out[off + 16] = this.clim[0] / this.normScale;
-    out[off + 17] = this.clim[1] / this.normScale;
-    out[off + 20] = this.shade[0];
-    out[off + 21] = this.shade[1];
-    out[off + 22] = this.shade[2];
-    out[off + 23] = this.shade[3];
-    out[off + 24] = this.unit;
-  }
-  bindEntries(_s, base) {
-    return [
-      { binding: base, resource: this.volTex.createView() },
-      { binding: base + 1, resource: this.lutTex.createView() }
-    ];
-  }
-};
-var SegmentField = class {
-  kind = "seg";
-  bindingCount;
-  // 1 (value texture) + 1 when an sdf attr (opacity) texture is bound
-  clippable;
-  tex;
-  attrTex;
-  // sdf per-voxel attributes (.r = opacity)
-  p2t;
-  box;
-  color;
-  opacity;
-  shade;
-  bandMm;
-  stepMm;
-  mode;
-  colorFromTex;
-  interfaceMode;
-  voxelMm = 1;
-  providesSkip;
-  constructor(tex, dims, spacing, opts) {
-    this.tex = tex;
-    const center = opts.center ?? [0, 0, 0];
-    let voxelMm;
-    if (opts.ijkToRAS) {
-      this.p2t = patientToTextureFromIjkToRAS(opts.ijkToRAS, dims);
-      this.box = volumeAABBFromIjkToRAS(opts.ijkToRAS, dims);
-      voxelMm = Math.min(...spacingFromIjkToRAS(opts.ijkToRAS));
-    } else {
-      this.p2t = patientToTexture(dims, spacing, center);
-      this.box = volumeAABB(dims, spacing, center);
-      voxelMm = Math.min(...spacing);
-    }
-    this.color = opts.color;
-    this.opacity = opts.opacity ?? 1;
-    this.shade = opts.shade ?? [0.2, 0.85, 0.3, 32];
-    this.bandMm = opts.bandMm ?? voxelMm;
-    this.stepMm = opts.sampleStepMm ?? Math.max(0.5 * voxelMm, 0.1);
-    this.clippable = opts.clippable ?? true;
-    this.voxelMm = voxelMm;
-    this.mode = opts.mode ?? "iso";
-    this.providesSkip = this.mode === "sdf";
-    this.colorFromTex = opts.colorFromTexture ?? false;
-    this.interfaceMode = this.mode === "sdf" && (opts.interfaceMode ?? false);
-    this.attrTex = this.mode === "sdf" ? opts.attrTexture : void 0;
-    this.bindingCount = this.attrTex ? 2 : 1;
-  }
-  /** Field-level opacity (multiplies every segment's per-label opacity in the shader). Live global
-   *  segmentation opacity — the caller does scene.syncUniforms() + redraw to apply. */
-  setOpacity(o) {
-    this.opacity = Math.max(0, Math.min(1, o));
-  }
-  uniformFloats() {
-    return 36;
-  }
-  // mat4(16) + color(4) + shade(4) + params(4) + bmin(4) + bmax(4)
-  aabb() {
-    return this.box;
-  }
-  sampleStep() {
-    return this.stepMm;
-  }
-  setTexture(tex, destroyPrev = true) {
-    if (destroyPrev && this.tex !== tex) this.tex.destroy();
-    this.tex = tex;
-  }
-  /** Empty-space skip for "sdf" mode: the texture .a is a TRUE distance-to-surface (mm), so the ray can
-   *  leap |sdf| minus the shell band toward the surface — sphere tracing. A one-voxel safety margin
-   *  absorbs the JFA distance approximation so the leap never overshoots a thin shell (image unchanged,
-   *  just far fewer march steps). Self-contained (no dependency on the sampling fns' emission order). */
-  skipWGSL(s) {
-    return (
-      /* wgsl */
-      `
-fn skip_seg${s}(wp : vec3<f32>) -> f32 {
-  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
-  let t = t4.xyz;
-  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) {
-    // OUTSIDE the SDF grid: leap only to the seg's AABB (a contract-valid lower bound), never past it.
-    let cen = (u_material.seg${s}_bmin.xyz + u_material.seg${s}_bmax.xyz) * 0.5;
-    let ext = (u_material.seg${s}_bmax.xyz - u_material.seg${s}_bmin.xyz) * 0.5;
-    let q = abs(transform_point_seg${s}(wp) - cen) - ext;
-    return max(0.0, length(max(q, vec3<f32>(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0));
-  }
-  let d = abs(textureSampleLevel(t_seg${s}, s_lin, t, 0.0).a);                  // |distance to surface| (mm)
-  return max(0.0, d - u_material.seg${s}_params.x - u_material.seg${s}_params.y);   // leap toward the shell (band + 1 voxel safe)
-}`
-    );
-  }
-  structMembers(s) {
-    return [
-      `  seg${s}_p2t : mat4x4<f32>,`,
-      `  seg${s}_color : vec4<f32>,`,
-      // rgb, opacity
-      `  seg${s}_shade : vec4<f32>,`,
-      // ka, kd, ks, shininess
-      `  seg${s}_params : vec4<f32>,`,
-      // band_mm, voxel_mm, _, _
-      `  seg${s}_bmin : vec4<f32>,`,
-      // aabb min (RAS) — for a contract-valid skip outside the texture
-      `  seg${s}_bmax : vec4<f32>,`
-    ].join("\n");
-  }
-  declareBindings(s, base) {
-    const value = `@group(0) @binding(${base}) var t_seg${s} : texture_3d<f32>;`;
-    return this.attrTex ? `${value}
-@group(0) @binding(${base + 1}) var t_attr${s} : texture_3d<f32>;` : value;
-  }
-  samplingWGSL(s) {
-    if (this.mode === "sdf") {
-      return (
-        /* wgsl */
-        `
-fn v_seg${s}(wp : vec3<f32>) -> f32 {   // signed distance (mm)
-  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
-  let t = t4.xyz;
-  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return 1e3; }   // far outside \u2192 culled
-  return textureSampleLevel(t_seg${s}, s_lin, t, 0.0).a;
-}
-fn vgrad_seg${s}(wp : vec3<f32>) -> f32 {   // signed distance for the NORMAL finite-difference
-  // A gradient tap that steps just outside the (padded) SDF texture must read BACKGROUND, not the
-  // out-of-volume cull sentinel (1e3) \u2014 a huge sentinel would fabricate an enormous fake gradient that
-  // points out through the volume face and unlights the surface (black speckle at the seg/boundary
-  // interface). Clamp to the texture edge: with the padded grid that edge IS background, so the normal
-  // near a cap stays correct. This is the "artificial background boundary sample" for the normal.
-  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
-  let t = clamp(t4.xyz, vec3<f32>(0.0), vec3<f32>(1.0));
-  return textureSampleLevel(t_seg${s}, s_lin, t, 0.0).a;
-}
-fn col_seg${s}(wp : vec3<f32>) -> vec3<f32> {   // per-label colour of the nearest region
-  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
-  let t = t4.xyz;
-  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return vec3<f32>(0.0); }
-  let pm = textureSampleLevel(t_seg${s}, s_lin, t, 0.0).rgb;   // PREMULTIPLIED (rgb\xB7opacity)${this.attrTex ? `
-  let a = textureSampleLevel(t_attr${s}, s_lin, t, 0.0).r;      // per-segment opacity (crisp) \u2014 un-premultiply to the true colour, so a hidden neighbour's colour doesn't bleed in
-  return pm / max(a, 1e-3);` : `
-  return pm;`}
-}${this.attrTex ? `
-fn attr_seg${s}(wp : vec3<f32>) -> vec2<f32> {   // per-segment (.x = opacity, .y = shading mode)
-  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
-  let t = t4.xyz;
-  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return vec2<f32>(0.0); }
-  return textureSampleLevel(t_attr${s}, s_lin, t, 0.0).rg;
-}` : ""}${this.interfaceMode ? `
-fn bdist_seg${s}(wp : vec3<f32>) -> f32 {   // SMOOTH (seam-blurred) interface distance from attr.b \u2014 for the normal only
-  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
-  let t = clamp(t4.xyz, vec3<f32>(0.0), vec3<f32>(1.0));
-  return textureSampleLevel(t_attr${s}, s_lin, t, 0.0).b;
-}
-fn pres_seg${s}(wp : vec3<f32>) -> f32 {   // CRISP in-segment presence (attr.a), linear-sampled for ~1-voxel AA
-  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
-  let t = t4.xyz;
-  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return 0.0; }
-  return textureSampleLevel(t_attr${s}, s_lin, t, 0.0).a;
-}
-fn g1_seg${s}(c : f32, wp : vec3<f32>, dir : vec3<f32>, h : f32) -> f32 {
-  // One-sided difference of the SMOOTH interface distance along dir, picking the STEEPER side. The
-  // unsigned distance has a V-crease at the surface: a central difference straddling it cancels (fake
-  // zero gradient \u2192 degenerate normal). Taking the steeper one-sided difference follows the true \xB11
-  // slope AWAY from the interface, so the normal stays well-defined right at the shell \u2014 computed on
-  // the fly only at shell samples, no stored normal. Uses the blurred distance (attr.b) so the normal
-  // is smooth (no JFA facets); the SHARP sdfTex.a still drives shell membership (surface stays at 0).
-  let dp = bdist_seg${s}(wp + dir * h) - c;
-  let dm = c - bdist_seg${s}(wp - dir * h);
-  return select(dm, dp, abs(dp) > abs(dm)) / h;
-}` : ""}
-// Shell (surface) contribution at wp: crisp Phong shell around sdf=0. Weighted by (1-mode) so it
-// morphs smoothly into the volume contribution across a blurred surface\u2194volume boundary.
-fn surface_seg${s}(wp : vec3<f32>, rd : vec3<f32>, sdf : f32, band : f32, step : f32, seg_op : f32, op0 : f32) -> vec4<f32> {
-  let d_mm = abs(sdf);
-  if (d_mm > band + step) { return vec4<f32>(0.0); }
-  let T = clamp(op0 * seg_op, 0.0, 1.0);      // TARGET surface opacity (per-segment \xD7 field)
-  if (T <= 0.0) { return vec4<f32>(0.0); }
-  let h = step;
-${this.interfaceMode ? `  let hg = 1.5 * step;
-  let dc = bdist_seg${s}(wp);
-  let g = vec3<f32>(
-    g1_seg${s}(dc, wp, vec3<f32>(1,0,0), hg),
-    g1_seg${s}(dc, wp, vec3<f32>(0,1,0), hg),
-    g1_seg${s}(dc, wp, vec3<f32>(0,0,1), hg));` : `  let g = vec3<f32>(
-    vgrad_seg${s}(wp + vec3<f32>(h,0,0)) - vgrad_seg${s}(wp - vec3<f32>(h,0,0)),
-    vgrad_seg${s}(wp + vec3<f32>(0,h,0)) - vgrad_seg${s}(wp - vec3<f32>(0,h,0)),
-    vgrad_seg${s}(wp + vec3<f32>(0,0,h)) - vgrad_seg${s}(wp - vec3<f32>(0,0,h))) / (2.0 * h);`}
-  let glen = length(g);
-  if (glen < 1e-5) { return vec4<f32>(0.0); }
-  var n = g / glen;
-  if (dot(n, -rd) < 0.0) { n = -n; }
-  // SURFACE opacity (Slicer polydata parity): the shell is a THIN surface of opacity T, not a solid
-  // band. A raymarch crosses it in several samples; giving each \u03B1=T lets the front-to-back OVER
-  // saturate toward opaque (50% looked like ~100%). Instead accumulate OPTICAL DEPTH with a shell
-  // profile \u03C1 = a/band that integrates to 1 across the crossing, scaled by -ln(1-T): \u03A3d\u03C4 = -ln(1-T),
-  // so net opacity = 1-e^(-\u03A3d\u03C4) = T EXACTLY \u2014 independent of band thickness and sample rate, and T\u21921
-  // stays crisply opaque. |dot(rd,n)| converts ray-step to shell-normal distance (\u21920 at grazing =
-  // built-in silhouette AA).
-  let a = max(1.0 - d_mm / band, 0.0);
-  if (a <= 0.0) { return vec4<f32>(0.0); }
-  // Convert ray-step to d_mm-distance. Outer: RAW gradient projection |dot(rd,g)| = |d(d_mm)/ds|
-  // (includes |grad sdf|, which the distance blur pulls below 1). Interface: the re-signed gradient has
-  // an arbitrary magnitude (a sign jump at the interface), so use the UNIT normal cosine |dot(rd,n)| \u2014
-  // still \u21920 at grazing (silhouette AA), and keeps opacity thickness-consistent.
-  let rate = max(abs(dot(rd, ${this.interfaceMode ? "n" : "g"})), 1e-3);
-  let tau = -log(1.0 - min(T, 0.9999)) * (a / band) * (step * rate);
-  var op = 1.0 - exp(-tau);
-${this.interfaceMode ? `  op = op * pres_seg${s}(wp);   // gate to GENUINELY in-segment voxels \u2014 kills the bled colour/opacity halo beyond the real edge` : ""}
-  if (op <= 0.0004) { return vec4<f32>(0.0); }
-  let ka = u_material.seg${s}_shade.x; let kd = u_material.seg${s}_shade.y;
-  let ks = u_material.seg${s}_shade.z; let sh = u_material.seg${s}_shade.w;
-  let ldn = max(dot(-rd, n), 0.0);
-  let refl = normalize(2.0 * ldn * n + rd);
-  let rdv = max(dot(refl, -rd), 0.0);
-  let col = col_seg${s}(wp);
-  var lit = col * ka + col * (kd * ldn) + vec3<f32>(ks * pow(rdv, max(sh, 1.0)));
-  lit = srgb2physical(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)));
-  return vec4<f32>(lit * op, op);
-}
-fn sample_field_seg${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
-  let op0 = u_material.seg${s}_color.a;
-  if (op0 <= 0.0) { return vec4<f32>(0.0); }
-  let sdf = v_seg${s}(wp);
-  let band = max(u_material.seg${s}_params.x, 1e-3);
-  let step = max(u_material.scene.x, 1e-3);
-${this.attrTex ? `  let at = attr_seg${s}(wp);        // (opacity, shading mode)
-  let seg_op = at.x;
-  if (seg_op <= 0.0) { return vec4<f32>(0.0); }
-  let mode = clamp(at.y, 0.0, 1.0);
-  // Surface and volume are BLENDED by the (seam-blurred, fractional) mode, so an opaque-surface
-  // segment and a translucent-volume segment meet with a smooth transition instead of a jagged,
-  // voxel-quantized classification edge.
-  var acc = vec4<f32>(0.0);
-  if (mode > 0.001 && sdf < 0.0) {
-    // VOLUME: translucent DVR fill of the interior (~24 mm opacity-unit-distance).
-    let vop = clamp(op0 * seg_op * step / 24.0, 0.0, 1.0);
-    if (vop > 0.0) {
-      let vcol = srgb2physical(clamp(col_seg${s}(wp), vec3<f32>(0.0), vec3<f32>(1.0)));
-      acc += mode * vec4<f32>(vcol * vop, vop);
-    }
-  }
-  if (mode < 0.999) {
-    acc += (1.0 - mode) * surface_seg${s}(wp, rd, sdf, band, step, seg_op, op0);
-  }
-  return acc;` : `  return surface_seg${s}(wp, rd, sdf, band, step, 1.0, op0);`}
-}`
-      );
-    }
-    const alphaWGSL = this.mode === "surface" ? (
-      /* wgsl */
-      `
-  let step = max(u_material.scene.x, 1e-3);
-  let op = clamp(op0 * glen * step, 0.0, 1.0);
-  if (op <= 0.0) { return vec4<f32>(0.0); }`
-    ) : (
-      /* wgsl */
-      `
-  // Local first-order signed distance to the v=0.5 isosurface (mm), then a
-  // 1-voxel opacity band around it: crisp opaque shell, sub-voxel anti-aliased.
-  let d_mm = abs((v - 0.5) / glen);
-  let band = max(u_material.seg${s}_params.x, 1e-3);
-  let a = 1.0 - clamp(d_mm / band, 0.0, 1.0);
-  if (a <= 0.0) { return vec4<f32>(0.0); }
-  let op = clamp(a * op0, 0.0, 1.0);`
-    );
-    const colWGSL = this.colorFromTex ? (
-      /* wgsl */
-      `
-fn col_seg${s}(wp : vec3<f32>) -> vec3<f32> {
-  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
-  let t = t4.xyz;
-  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return vec3<f32>(0.0); }
-  return textureSampleLevel(t_seg${s}, s_lin, t, 0.0).rgb;
-}`
-    ) : "";
-    const colExpr = this.colorFromTex ? `col_seg${s}(wp)` : `u_material.seg${s}_color.rgb`;
-    return (
-      /* wgsl */
-      `
-fn v_seg${s}(wp : vec3<f32>) -> f32 {
-  let t4 = u_material.seg${s}_p2t * vec4<f32>(transform_point_seg${s}(wp), 1.0);
-  let t = t4.xyz;
-  if (any(t < vec3<f32>(0.0)) || any(t > vec3<f32>(1.0))) { return 0.0; }
-  return textureSampleLevel(t_seg${s}, s_lin, t, 0.0).a;   // Gaussian-smoothed presence in .a
-}${colWGSL}
-fn sample_field_seg${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
-  let op0 = u_material.seg${s}_color.a;
-  if (op0 <= 0.0) { return vec4<f32>(0.0); }
-  let v = v_seg${s}(wp);
-  // Skip deep interior / exterior: |grad| ~ 0 there so no shell to emit.
-  if (v <= 0.02 || v >= 0.98) { return vec4<f32>(0.0); }
-  let h = max(u_material.scene.x, 1e-3);
-  let g = vec3<f32>(
-    v_seg${s}(wp + vec3<f32>(h,0,0)) - v_seg${s}(wp - vec3<f32>(h,0,0)),
-    v_seg${s}(wp + vec3<f32>(0,h,0)) - v_seg${s}(wp - vec3<f32>(0,h,0)),
-    v_seg${s}(wp + vec3<f32>(0,0,h)) - v_seg${s}(wp - vec3<f32>(0,0,h))) / (2.0 * h);
-  let glen = length(g);
-  if (glen < 1e-5) { return vec4<f32>(0.0); }${alphaWGSL}
-  // Phong from the same gradient, normal flipped to face the camera.
-  var n = g / glen;
-  if (dot(n, -rd) < 0.0) { n = -n; }
-  let ka = u_material.seg${s}_shade.x; let kd = u_material.seg${s}_shade.y;
-  let ks = u_material.seg${s}_shade.z; let sh = u_material.seg${s}_shade.w;
-  let ldn = max(dot(-rd, n), 0.0);
-  let refl = normalize(2.0 * ldn * n + rd);
-  let rdv = max(dot(refl, -rd), 0.0);
-  let col = ${colExpr};
-  var lit = col * ka + col * (kd * ldn) + vec3<f32>(ks * pow(rdv, max(sh, 1.0)));
-  lit = srgb2physical(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)));
-  return vec4<f32>(lit * op, op);
-}`
-    );
-  }
-  fillUniforms(out, off) {
-    out.set(this.p2t, off);
-    out[off + 16] = this.color[0];
-    out[off + 17] = this.color[1];
-    out[off + 18] = this.color[2];
-    out[off + 19] = this.opacity;
-    out[off + 20] = this.shade[0];
-    out[off + 21] = this.shade[1];
-    out[off + 22] = this.shade[2];
-    out[off + 23] = this.shade[3];
-    out[off + 24] = this.bandMm;
-    out[off + 25] = this.voxelMm;
-    out[off + 28] = this.box[0][0];
-    out[off + 29] = this.box[0][1];
-    out[off + 30] = this.box[0][2];
-    out[off + 32] = this.box[1][0];
-    out[off + 33] = this.box[1][1];
-    out[off + 34] = this.box[1][2];
-  }
-  bindEntries(_s, base) {
-    const e = [{ binding: base, resource: this.tex.createView() }];
-    if (this.attrTex) e.push({ binding: base + 1, resource: this.attrTex.createView() });
-    return e;
   }
 };
 
@@ -7986,35 +8261,6 @@ globalThis.__slicerLiveIdc = {
   downloadStudyWithDialog
 };
 
-// render/scene-volume.ts
-function interpTF(tf, s, comps) {
-  if (!tf.length) return new Array(comps).fill(0);
-  if (s <= tf[0][0]) return tf[0].slice(1, 1 + comps);
-  const last = tf[tf.length - 1];
-  if (s >= last[0]) return last.slice(1, 1 + comps);
-  for (let i = 1; i < tf.length; i++) {
-    if (s <= tf[i][0]) {
-      const a = tf[i - 1], b = tf[i];
-      const u = (s - a[0]) / Math.max(b[0] - a[0], 1e-9);
-      return Array.from({ length: comps }, (_2, c) => a[1 + c] + u * (b[1 + c] - a[1 + c]));
-    }
-  }
-  return last.slice(1, 1 + comps);
-}
-function lutFromTransferFunctions(colorTF, opacityTF, clim) {
-  const lut = new Uint8Array(256 * 4);
-  for (let i = 0; i < 256; i++) {
-    const s = clim[0] + i / 255 * (clim[1] - clim[0]);
-    const [r, g, b] = interpTF(colorTF, s, 3);
-    const [a] = interpTF(opacityTF, s, 1);
-    lut[i * 4 + 0] = Math.round(Math.max(0, Math.min(1, r)) * 255);
-    lut[i * 4 + 1] = Math.round(Math.max(0, Math.min(1, g)) * 255);
-    lut[i * 4 + 2] = Math.round(Math.max(0, Math.min(1, b)) * 255);
-    lut[i * 4 + 3] = Math.round(Math.max(0, Math.min(1, a)) * 255);
-  }
-  return lut;
-}
-
 // render/ct-vr-presets.ts
 var CT_VR_PRESETS = [
   {
@@ -10277,15 +10523,38 @@ var Jn = {
 
 // render/demos/ira/ira-cast.ts
 var LOG = "[ira-cast]";
-var HUB = {
+var HUB_CREDENTIALS = {
+  client_id: "client_id_3d_Slicer",
+  client_secret: "client_secret_3d_Slicer"
+};
+var LOCAL_HUB = {
   name: "local",
   version: "1.0",
   hub_endpoint: "http://127.0.0.1:2018/api/hub",
   authorization_endpoint: "http://127.0.0.1:2018/oauth/authorize",
   token_endpoint: "http://127.0.0.1:2018/oauth/token",
-  client_id: "client_id_3d_Slicer",
-  client_secret: "client_secret_3d_Slicer"
+  ...HUB_CREDENTIALS
 };
+function isHostedOnCastHub(location2 = globalThis.location) {
+  return String(location2?.pathname || "").startsWith("/slicerlive");
+}
+function shouldUseSameOriginHub(location2 = globalThis.location) {
+  return isHostedOnCastHub(location2) || We(location2);
+}
+function resolveHubConfig(location2 = globalThis.location) {
+  if (!shouldUseSameOriginHub(location2)) {
+    return LOCAL_HUB;
+  }
+  const origin = location2.origin;
+  return {
+    name: "hub",
+    version: "1.0",
+    hub_endpoint: `${origin}/api/hub`,
+    authorization_endpoint: `${origin}/oauth/authorize`,
+    token_endpoint: `${origin}/oauth/token`,
+    ...HUB_CREDENTIALS
+  };
+}
 var EMPTY_CAST_CONTEXT = { "context.type": "", context: [] };
 var ID_ACTOR = "ID";
 var WORKLIST_ACTOR = "WORKLIST_CLIENT";
@@ -10299,6 +10568,7 @@ var STUDY_URL_KEYS = [
   "patient",
   "modality",
   "collection",
+  "scene",
   "StudyInstanceUIDs",
   "SeriesInstanceUIDs",
   "studyUID",
@@ -10344,7 +10614,7 @@ function readPersistedCredentials() {
 function iraUrlHasStudyParams() {
   const p = new URLSearchParams(globalThis.location.search);
   return Boolean(
-    p.get("series") || p.get("StudyInstanceUIDs") || p.get("studyUID")
+    p.get("series") || p.get("StudyInstanceUIDs") || p.get("studyUID") || p.get("scene")
   );
 }
 function assignIraLocation(studyParams = {}) {
@@ -10367,11 +10637,11 @@ function getIraCastSessionInfo() {
     subscriberName: subscriberName || client?.getSessionConfig?.()?.subscriberName || "",
     connection,
     connectionDetail,
-    hubEndpoint: client?.getHubConfig?.()?.hub_endpoint || HUB.hub_endpoint
+    hubEndpoint: client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint
   };
 }
 function getIraHubAdminUrl() {
-  const endpoint = client?.getHubConfig?.()?.hub_endpoint || HUB.hub_endpoint;
+  const endpoint = client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
   return nn(endpoint) || endpoint;
 }
 function setConnection(next, detail) {
@@ -10473,15 +10743,11 @@ async function requestStatusFromWorklist() {
     return;
   }
   if (statusRequestState !== "idle") return;
-  if (iraUrlHasStudyParams()) {
-    console.warn(`${LOG} STATUS skip: URL already has study params`);
-    statusRequestState = "done";
-    return;
-  }
-  if (lastImagingStudyOpenContext.length) {
-    console.warn(`${LOG} STATUS skip: already have ImagingStudy context`);
-    statusRequestState = "done";
-    return;
+  const skipApplyStudy = iraUrlHasStudyParams() || lastImagingStudyOpenContext.length > 0;
+  if (skipApplyStudy) {
+    console.warn(
+      `${LOG} STATUS presence only (already have study URL or context)`
+    );
   }
   const subscriber = subscriberName || client.getSessionConfig()?.subscriberName?.trim() || "";
   if (!subscriber) {
@@ -10504,7 +10770,8 @@ async function requestStatusFromWorklist() {
     };
     console.warn(`${LOG} STATUS request \u2192 ${WORKLIST_ACTOR}`, {
       subscriber,
-      topic
+      topic,
+      presenceOnly: skipApplyStudy
     });
     const result = await client.request(message);
     console.warn(`${LOG} STATUS response`, {
@@ -10516,7 +10783,7 @@ async function requestStatusFromWorklist() {
       statusRequestState = "idle";
       return;
     }
-    if (lastImagingStudyOpenContext.length || iraUrlHasStudyParams()) {
+    if (skipApplyStudy || lastImagingStudyOpenContext.length || iraUrlHasStudyParams()) {
       statusRequestState = "done";
       return;
     }
@@ -10597,8 +10864,9 @@ async function connectIraCast() {
   stripCastParamsFromUrl();
   setConnection("connecting", "Connecting to Cast hub\u2026");
   subscriberName = be("IRA");
+  const hub = resolveHubConfig();
   client = Jn.newInstance({
-    hub: HUB,
+    hub,
     session: {
       subscriberName,
       productName: "SLICERLIVE-IRA",
@@ -10703,12 +10971,6 @@ function applyTheme(theme) {
   const next = theme === THEME_OHIF ? THEME_OHIF : THEME_SLICERLIVE;
   document.documentElement.dataset.theme = next;
   setStoredTheme(next);
-  document.querySelectorAll("[data-theme-option]").forEach((btn) => {
-    btn.setAttribute(
-      "aria-checked",
-      btn.dataset.themeOption === next ? "true" : "false"
-    );
-  });
 }
 function fillSessionDl(dl) {
   const info = getIraCastSessionInfo();
@@ -10741,16 +11003,14 @@ function installIraHeader() {
   setIraCastStatusListener(() => refreshRadio());
   const castBtn = document.getElementById("iraCastStatusBtn");
   const castMenu = document.getElementById("iraCastStatusMenu");
-  const settingsBtn = document.getElementById("iraSettingsBtn");
-  const settingsMenu = document.getElementById("iraSettingsMenu");
+  const helpBtn = document.getElementById("iraSettingsBtn");
   const sessionModal = document.getElementById("iraSessionModal");
   const aboutModal = document.getElementById("iraAboutModal");
   const sessionDl = document.getElementById("iraSessionDl");
+  if (!castBtn || !castMenu) return;
   const closeMenus = () => {
     castMenu.hidden = true;
-    settingsMenu.hidden = true;
     castBtn.setAttribute("aria-expanded", "false");
-    settingsBtn.setAttribute("aria-expanded", "false");
   };
   castBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
@@ -10759,43 +11019,26 @@ function installIraHeader() {
     castMenu.hidden = !open;
     castBtn.setAttribute("aria-expanded", open ? "true" : "false");
   });
-  settingsBtn.addEventListener("click", (ev) => {
+  helpBtn?.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    const open = settingsMenu.hidden;
     closeMenus();
-    settingsMenu.hidden = !open;
-    settingsBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    openChromeHelp();
   });
   document.addEventListener("click", () => closeMenus());
   castMenu.addEventListener("click", (ev) => ev.stopPropagation());
-  settingsMenu.addEventListener("click", (ev) => ev.stopPropagation());
   document.getElementById("iraSessionInfoBtn")?.addEventListener("click", () => {
-    fillSessionDl(sessionDl);
-    sessionModal.hidden = false;
+    if (sessionDl) fillSessionDl(sessionDl);
+    if (sessionModal) sessionModal.hidden = false;
     closeMenus();
   });
   document.getElementById("iraHubBtn")?.addEventListener("click", () => {
     window.open(getIraHubAdminUrl(), "_blank", "noopener,noreferrer");
     closeMenus();
   });
-  document.querySelectorAll("[data-theme-option]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      applyTheme(btn.dataset.themeOption || THEME_SLICERLIVE);
-      closeMenus();
-    });
-  });
-  document.getElementById("iraControlsBtn")?.addEventListener("click", () => {
-    closeMenus();
-    openChromeHelp();
-  });
-  document.getElementById("iraAboutBtn")?.addEventListener("click", () => {
-    aboutModal.hidden = false;
-    closeMenus();
-  });
   document.querySelectorAll("[data-ira-close-modal]").forEach((el) => {
     el.addEventListener("click", () => {
-      sessionModal.hidden = true;
-      aboutModal.hidden = true;
+      if (sessionModal) sessionModal.hidden = true;
+      if (aboutModal) aboutModal.hidden = true;
     });
   });
 }
@@ -10875,6 +11118,61 @@ function studyParamsFromIdcSource(source) {
   if (source.m) params.modality = source.m;
   if (source.col) params.collection = source.col;
   return params;
+}
+
+// render/demos/ira/ira-scene.ts
+function looksLikeSceneJson(f) {
+  const name = String(f.fileName || "").toLowerCase();
+  const url = String(f.url || "").toLowerCase();
+  if (name.endsWith(".json")) return true;
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return path.endsWith(".json");
+  } catch {
+    return url.includes(".json");
+  }
+}
+function sceneUrlFromOpenContext(context) {
+  const plan = Tn(context);
+  if (!plan || plan.mode !== "files") return null;
+  const files = Array.isArray(plan.files) ? plan.files : [];
+  const sceneFile = files.find(looksLikeSceneJson) || files[0];
+  const url = String(sceneFile?.url || "").trim();
+  if (!url) return null;
+  if (!looksLikeSceneJson(sceneFile || {})) return null;
+  return url;
+}
+function studyParamsFromSceneUrl(sceneUrl) {
+  return { scene: String(sceneUrl || "").trim() };
+}
+function modalityFromSceneName(name) {
+  const n = String(name || "").toUpperCase();
+  if (/\bMR\b/.test(n) || n.includes("MRHEAD") || n.startsWith("MR")) return "MR";
+  return "CT";
+}
+function ctVolumeFromSceneVolume(sv) {
+  return {
+    vol: sv.voxels,
+    dims: sv.dims,
+    ijkToRAS: sv.ijkToRAS,
+    win: sv.win,
+    lev: sv.lev,
+    dtype: "float32",
+    modality: modalityFromSceneName(sv.name)
+  };
+}
+function vrPresetFromSceneVolume(sv) {
+  if (!sv.vr) return null;
+  return {
+    lut: sv.vr.lut,
+    clim: [sv.vr.clim[0], sv.vr.clim[1]],
+    shade: [
+      sv.vr.shade[0],
+      sv.vr.shade[1],
+      sv.vr.shade[2],
+      sv.vr.shade[3]
+    ]
+  };
 }
 
 // render/demos/ira/ira-browser.ts
@@ -11027,10 +11325,16 @@ async function main() {
   installIraHeader();
   void connectIraCast();
   setIraImagingStudyOpenHandler(async (ctx) => {
+    const sceneUrl2 = sceneUrlFromOpenContext(ctx);
+    if (sceneUrl2) {
+      status("Opening scene\u2026");
+      assignIraLocation(studyParamsFromSceneUrl(sceneUrl2));
+      return;
+    }
     const idcSource = sourceFromIdcOpenContext(ctx);
     if (!idcSource) {
       status(
-        "Cast ImagingStudy-open: unsupported context (need idc CRDC prefix URLs)",
+        "Cast ImagingStudy-open: unsupported context (need scene JSON or idc CRDC prefix URLs)",
         true
       );
       return;
@@ -11064,6 +11368,11 @@ async function main() {
   const setLoad = (m) => {
     status(m);
   };
+  const sceneUrl = (P2.get("scene") || "").trim();
+  if (sceneUrl) {
+    await mountStudyFromSource({ sceneUrl }, gpu, preferred, srgb, names, cv, cx);
+    return;
+  }
   const source = await resolveSource(setLoad);
   if (!source) {
     const resizeEmpty = () => {
@@ -11086,22 +11395,51 @@ async function main() {
   }
   await mountStudyFromSource(source, gpu, preferred, srgb, names, cv, cx);
 }
-async function mountStudyFromSource(source, gpu, preferred, srgb, names, cv, cx) {
-  const mosaic = createMosaic(document.getElementById("viewer"));
-  mosaic.status("contacting the NCI Imaging Data Commons\u2026");
-  const setLoadMosaic = (m) => {
-    status(m);
-    mosaic.status(m);
-  };
-  const res = await loadSeries(source, {
-    onProgress: (p) => {
-      setLoadMosaic(`${p.msg}${p.frac ? ` \u2014 ${Math.round(p.frac * 100)}%` : ""}`);
-    },
-    onSliceCount: (n) => mosaic.setCount(n),
-    onThumb: (n, w2, h, rgba) => mosaic.thumb(n, w2, h, rgba)
-  });
-  const sc = buildSegrouletteScene(gpu, srgb, res.ct, res.seg);
-  const vd = res.ct.vol;
+async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx) {
+  let source;
+  let ct2;
+  let seg;
+  let sceneVr = null;
+  let mosaic = null;
+  if ("sceneUrl" in input) {
+    status("loading scene\u2026");
+    let mb = 0;
+    const sv = await loadSceneVolumeField(gpu.device, input.sceneUrl, (n) => {
+      mb += n;
+      status(`streaming scene\u2026 ${(mb / 1e6).toFixed(1)} MB`);
+    });
+    ct2 = ctVolumeFromSceneVolume(sv);
+    sceneVr = vrPresetFromSceneVolume(sv);
+    source = {
+      c: "",
+      cb: "",
+      m: ct2.modality || "CT",
+      col: "SlicerLive",
+      st: "",
+      sd: `${sv.name} \xB7 SlicerLive scene`,
+      lic: "SlicerLive"
+    };
+  } else {
+    source = input;
+    mosaic = createMosaic(document.getElementById("viewer"));
+    mosaic.status("contacting the NCI Imaging Data Commons\u2026");
+    const setLoadMosaic = (m) => {
+      status(m);
+      mosaic.status(m);
+    };
+    const res = await loadSeries(source, {
+      onProgress: (p) => {
+        setLoadMosaic(`${p.msg}${p.frac ? ` \u2014 ${Math.round(p.frac * 100)}%` : ""}`);
+      },
+      onSliceCount: (n) => mosaic.setCount(n),
+      onThumb: (n, w2, h, rgba) => mosaic.thumb(n, w2, h, rgba)
+    });
+    ct2 = res.ct;
+    seg = res.seg;
+  }
+  const sc = buildSegrouletteScene(gpu, srgb, ct2, seg);
+  if (sceneVr) sc.setVolumePreset(sceneVr);
+  const vd = ct2.vol;
   let vmin = Infinity, vmax = -Infinity;
   const vstride = Math.max(1, Math.floor(vd.length / 2e6));
   for (let i = 0; i < vd.length; i += vstride) {
@@ -11110,7 +11448,7 @@ async function mountStudyFromSource(source, gpu, preferred, srgb, names, cv, cx)
     if (v2 > vmax) vmax = v2;
   }
   const dataRange = () => [vmin, vmax];
-  sc.setVolumeOpacity(0.5);
+  sc.setVolumeOpacity(seg ? 0.5 : 1);
   let sliceOutline = false;
   let roiEnabled = false, roiVisible = false, roiFirstEnable = true;
   let annOn = true;
@@ -11137,8 +11475,8 @@ async function mountStudyFromSource(source, gpu, preferred, srgb, names, cv, cx)
         return e;
       };
       const pid = (source.sd.split("\xB7")[0] || "").trim() || source.col;
-      mk("tl", `${pid}<br>${source.col} \xB7 ${res.ct.modality}`);
-      mk("tr", `${res.ct.modality} \xB7 ${sc.dims[2]} slices${sc.hasSeg ? " \xB7 SEG" : ""}<br>${sc.dims[0]}\xD7${sc.dims[1]}`);
+      mk("tl", `${pid}<br>${source.col} \xB7 ${ct2.modality}`);
+      mk("tr", `${ct2.modality} \xB7 ${sc.dims[2]} slices${sc.hasSeg ? " \xB7 SEG" : ""}<br>${sc.dims[0]}\xD7${sc.dims[1]}`);
       annEls[p] = { br: mk("br", "") };
     }
     updateAnnWL();
@@ -11227,7 +11565,7 @@ async function mountStudyFromSource(source, gpu, preferred, srgb, names, cv, cx)
     },
     segVisible: (num) => sc.isSegmentVisible(num)
   });
-  segCards.setScene(res.ct, res.seg ?? null, sc.segments);
+  segCards.setScene(ct2, seg ?? null, sc.segments);
   const drawAll = () => {
     for (const p of PLANES) drawSlice(p);
     draw3d();
@@ -11323,7 +11661,7 @@ async function mountStudyFromSource(source, gpu, preferred, srgb, names, cv, cx)
     resetViews: () => sliceControls.forEach((c) => c.resetView()),
     close: () => status("This is the SlicerLive Basic Image Review demo \u2014 reload to restart."),
     jumpAll,
-    modality: res.ct.modality,
+    modality: ct2.modality,
     extraTools: [
       {
         id: "idc-share",
@@ -11424,8 +11762,9 @@ async function mountStudyFromSource(source, gpu, preferred, srgb, names, cv, cx)
   let vrPreset = null;
   let vrShift = 0;
   const shiftRange = Math.max(200, (vmax - vmin) / 2);
-  const bakeOf = (name) => name ? presetLUT(CT_VR_PRESETS.find((p) => p.name === name)) : null;
-  const presetLabel = () => vrPreset ? CT_VR_PRESETS.find((p) => p.name === vrPreset)?.label ?? vrPreset : "Default (W/L)";
+  const defaultVrBake = sceneVr;
+  const bakeOf = (name) => name ? presetLUT(CT_VR_PRESETS.find((p) => p.name === name)) : defaultVrBake;
+  const presetLabel = () => vrPreset ? CT_VR_PRESETS.find((p) => p.name === vrPreset)?.label ?? vrPreset : defaultVrBake ? "Scene TF" : "Default (W/L)";
   const applyVrPreset = (name) => {
     vrPreset = name;
     sc.setVolumePreset(bakeOf(name));
@@ -11446,7 +11785,7 @@ async function mountStudyFromSource(source, gpu, preferred, srgb, names, cv, cx)
     if (savedSeg > 0) sc.setSegOpacity(0);
     if (savedOp < 1) sc.setVolumeOpacity(1);
     const entries = [
-      { name: null, label: "Default (W/L)" },
+      { name: null, label: defaultVrBake ? "Scene TF" : "Default (W/L)" },
       ...CT_VR_PRESETS.map((p) => ({ name: p.name, label: p.label }))
     ];
     const items = [];
@@ -11590,7 +11929,7 @@ async function mountStudyFromSource(source, gpu, preferred, srgb, names, cv, cx)
   buildAnnotations();
   applyAnn();
   resize();
-  mosaic.done();
+  mosaic?.done();
   status("");
 }
 main().catch((e) => status("error: " + (e?.message ?? e), true));

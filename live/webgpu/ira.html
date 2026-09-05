@@ -121,27 +121,18 @@
             <div id="iraCastStatus" class="ira-cast-status ira-cast-idle" aria-hidden="true"></div>
           </button>
           <div id="iraCastStatusMenu" class="ira-menu" role="menu" hidden>
+            <button type="button" class="ira-menu-item" role="menuitem">Conferencing</button>
+            <button type="button" class="ira-menu-item" role="menuitem">Lung Screening</button>
+            <button type="button" class="ira-menu-item" role="menuitem">Total Segmentator</button>
+            <button type="button" class="ira-menu-item" role="menuitem">Subcortical segmentation</button>
+            <div class="ira-menu-sep" role="separator"></div>
             <button type="button" id="iraSessionInfoBtn" class="ira-menu-item" role="menuitem">Session info</button>
             <button type="button" id="iraHubBtn" class="ira-menu-item" role="menuitem">Hub</button>
           </div>
         </div>
-        <div class="ira-menu-wrap">
-          <button type="button" id="iraSettingsBtn" class="ira-icon-btn" aria-label="Settings"
-            aria-haspopup="menu" aria-expanded="false" title="Settings">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.7"/>
-              <path d="M19.4 13a7.8 7.8 0 0 0 .05-2l2.05-1.6-2-3.46-2.45.55a7.7 7.7 0 0 0-1.73-1L14.8 2h-5.6L8.68 5.49a7.7 7.7 0 0 0-1.73 1L4.5 5.94l-2 3.46L4.55 11a7.8 7.8 0 0 0 0 2l-2.05 1.6 2 3.46 2.45-.55a7.7 7.7 0 0 0 1.73 1L9.2 22h5.6l.52-3.49a7.7 7.7 0 0 0 1.73-1l2.45.55 2-3.46L19.4 13Z"
-                stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-            </svg>
-          </button>
-          <div id="iraSettingsMenu" class="ira-menu" role="menu" hidden>
-            <button type="button" class="ira-menu-item" role="menuitemradio" aria-checked="true" data-theme-option="slicerlive">SlicerLive theme</button>
-            <button type="button" class="ira-menu-item" role="menuitemradio" aria-checked="false" data-theme-option="ohif">OHIF theme</button>
-            <div class="ira-menu-sep" role="separator"></div>
-            <button type="button" id="iraControlsBtn" class="ira-menu-item" role="menuitem">Controls…</button>
-            <button type="button" id="iraAboutBtn" class="ira-menu-item" role="menuitem">About…</button>
-          </div>
-        </div>
+        <button type="button" id="iraSettingsBtn" class="ira-icon-btn" aria-label="Controls & key bindings"
+          title="Controls & key bindings"
+          style="font:700 15px -apple-system,system-ui,sans-serif">?</button>
       </div>
     </div>
     <div id="grid">
@@ -190,6 +181,6 @@
     </div>
   </div>
 
-  <script type="module" src="ira.js?v=status-catchup-2"></script>
+  <script type="module" src="ira.js?v=help-direct-1"></script>
 </body>
 </html>

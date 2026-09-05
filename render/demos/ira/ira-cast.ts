@@ -7,21 +7,60 @@ import CastClient, {
   castRadioStatusVisual,
   generateSubscriberName,
   isRequestEvent,
+  isRunningInCloud,
   requestEventFor,
   resolveCastHubAdminUrl,
 } from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
 
 const LOG = "[ira-cast]";
 
-const HUB = {
+const HUB_CREDENTIALS = {
+  client_id: "client_id_3d_Slicer",
+  client_secret: "client_secret_3d_Slicer",
+} as const;
+
+/** Standalone / local demos default (localhost Cast hub). */
+const LOCAL_HUB = {
   name: "local",
   version: "1.0",
   hub_endpoint: "http://127.0.0.1:2018/api/hub",
   authorization_endpoint: "http://127.0.0.1:2018/oauth/authorize",
   token_endpoint: "http://127.0.0.1:2018/oauth/token",
-  client_id: "client_id_3d_Slicer",
-  client_secret: "client_secret_3d_Slicer",
+  ...HUB_CREDENTIALS,
 };
+
+type HubConfig = typeof LOCAL_HUB;
+
+/** True when served from the Cast hub `/slicerlive` SPA mount. */
+function isHostedOnCastHub(
+  location: Location = globalThis.location
+): boolean {
+  return String(location?.pathname || "").startsWith("/slicerlive");
+}
+
+function shouldUseSameOriginHub(
+  location: Location = globalThis.location
+): boolean {
+  return isHostedOnCastHub(location) || isRunningInCloud(location);
+}
+
+/** Local hub for demos; same-origin endpoints when hosted on hub / in cloud. */
+function resolveHubConfig(
+  location: Location = globalThis.location
+): HubConfig {
+  if (!shouldUseSameOriginHub(location)) {
+    return LOCAL_HUB;
+  }
+  const origin = location.origin;
+  return {
+    name: "hub",
+    version: "1.0",
+    hub_endpoint: `${origin}/api/hub`,
+    authorization_endpoint: `${origin}/oauth/authorize`,
+    token_endpoint: `${origin}/oauth/token`,
+    ...HUB_CREDENTIALS,
+  };
+}
 
 const EMPTY_CAST_CONTEXT = { "context.type": "", context: [] as unknown[] };
 const ID_ACTOR = "ID";
@@ -38,6 +77,7 @@ const STUDY_URL_KEYS = [
   "patient",
   "modality",
   "collection",
+  "scene",
   "StudyInstanceUIDs",
   "SeriesInstanceUIDs",
   "studyUID",
@@ -106,13 +146,14 @@ function readPersistedCredentials(): { topic: string; token: string } {
   }
 }
 
-/** True when the URL still names a study (direct-S3 or IID). */
+/** True when the URL still names a study (direct-S3, IID, or SlicerLive scene). */
 export function iraUrlHasStudyParams(): boolean {
   const p = new URLSearchParams(globalThis.location.search);
   return Boolean(
     p.get("series") ||
       p.get("StudyInstanceUIDs") ||
-      p.get("studyUID")
+      p.get("studyUID") ||
+      p.get("scene")
   );
 }
 
@@ -154,13 +195,13 @@ export function getIraCastSessionInfo(): {
       subscriberName || client?.getSessionConfig?.()?.subscriberName || "",
     connection,
     connectionDetail,
-    hubEndpoint: client?.getHubConfig?.()?.hub_endpoint || HUB.hub_endpoint,
+    hubEndpoint: client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint,
   };
 }
 
 export function getIraHubAdminUrl(): string {
   const endpoint =
-    client?.getHubConfig?.()?.hub_endpoint || HUB.hub_endpoint;
+    client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
   return resolveCastHubAdminUrl(endpoint) || endpoint;
 }
 
@@ -299,6 +340,7 @@ type StatusResponseItem = {
 
 /**
  * Ask the worklist for current STATUS once the websocket is connected.
+ * Always sends so the worklist can mark this Image Display connected.
  * If it reports an open ImagingStudy and we are not already loading one, open it.
  */
 async function requestStatusFromWorklist(): Promise<void> {
@@ -308,16 +350,12 @@ async function requestStatusFromWorklist(): Promise<void> {
   }
   if (statusRequestState !== "idle") return;
 
-  // Already loading from URL (or a prior STATUS/open reload) — do not re-open.
-  if (iraUrlHasStudyParams()) {
-    console.warn(`${LOG} STATUS skip: URL already has study params`);
-    statusRequestState = "done";
-    return;
-  }
-  if (lastImagingStudyOpenContext.length) {
-    console.warn(`${LOG} STATUS skip: already have ImagingStudy context`);
-    statusRequestState = "done";
-    return;
+  const skipApplyStudy =
+    iraUrlHasStudyParams() || lastImagingStudyOpenContext.length > 0;
+  if (skipApplyStudy) {
+    console.warn(
+      `${LOG} STATUS presence only (already have study URL or context)`
+    );
   }
 
   const subscriber =
@@ -346,6 +384,7 @@ async function requestStatusFromWorklist(): Promise<void> {
     console.warn(`${LOG} STATUS request → ${WORKLIST_ACTOR}`, {
       subscriber,
       topic,
+      presenceOnly: skipApplyStudy,
     });
     const result = await client.request(message);
     console.warn(`${LOG} STATUS response`, {
@@ -359,8 +398,8 @@ async function requestStatusFromWorklist(): Promise<void> {
       return;
     }
 
-    // ImagingStudy-open may have arrived while the request was in flight.
-    if (lastImagingStudyOpenContext.length || iraUrlHasStudyParams()) {
+    // Presence ping done; do not re-open a study we already have from URL/open.
+    if (skipApplyStudy || lastImagingStudyOpenContext.length || iraUrlHasStudyParams()) {
       statusRequestState = "done";
       return;
     }
@@ -470,8 +509,9 @@ export async function connectIraCast(): Promise<void> {
   setConnection("connecting", "Connecting to Cast hub…");
 
   subscriberName = generateSubscriberName("IRA");
+  const hub = resolveHubConfig();
   client = CastClient.newInstance({
-    hub: HUB,
+    hub,
     session: {
       subscriberName,
       productName: "SLICERLIVE-IRA",

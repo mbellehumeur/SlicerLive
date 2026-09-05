@@ -1,5 +1,5 @@
 /**
- * IRA top-bar Cast radio + settings menus (theme / Controls / About / Session / Hub).
+ * IRA top-bar Cast radio menu (Session / Hub) + ? opens controls help.
  */
 import {
   castRadioStatusMarkup,
@@ -38,14 +38,6 @@ function applyTheme(theme: string): void {
   const next = theme === THEME_OHIF ? THEME_OHIF : THEME_SLICERLIVE;
   document.documentElement.dataset.theme = next;
   setStoredTheme(next);
-  document
-    .querySelectorAll<HTMLButtonElement>("[data-theme-option]")
-    .forEach((btn) => {
-      btn.setAttribute(
-        "aria-checked",
-        btn.dataset.themeOption === next ? "true" : "false"
-      );
-    });
 }
 
 function fillSessionDl(dl: HTMLElement): void {
@@ -82,19 +74,17 @@ export function installIraHeader(): void {
   refreshRadio();
   setIraCastStatusListener(() => refreshRadio());
 
-  const castBtn = document.getElementById("iraCastStatusBtn") as HTMLButtonElement;
-  const castMenu = document.getElementById("iraCastStatusMenu") as HTMLElement;
-  const settingsBtn = document.getElementById("iraSettingsBtn") as HTMLButtonElement;
-  const settingsMenu = document.getElementById("iraSettingsMenu") as HTMLElement;
-  const sessionModal = document.getElementById("iraSessionModal") as HTMLElement;
-  const aboutModal = document.getElementById("iraAboutModal") as HTMLElement;
-  const sessionDl = document.getElementById("iraSessionDl") as HTMLElement;
+  const castBtn = document.getElementById("iraCastStatusBtn");
+  const castMenu = document.getElementById("iraCastStatusMenu");
+  const helpBtn = document.getElementById("iraSettingsBtn");
+  const sessionModal = document.getElementById("iraSessionModal");
+  const aboutModal = document.getElementById("iraAboutModal");
+  const sessionDl = document.getElementById("iraSessionDl");
+  if (!castBtn || !castMenu) return;
 
   const closeMenus = () => {
     castMenu.hidden = true;
-    settingsMenu.hidden = true;
     castBtn.setAttribute("aria-expanded", "false");
-    settingsBtn.setAttribute("aria-expanded", "false");
   };
 
   castBtn.addEventListener("click", (ev) => {
@@ -104,44 +94,27 @@ export function installIraHeader(): void {
     castMenu.hidden = !open;
     castBtn.setAttribute("aria-expanded", open ? "true" : "false");
   });
-  settingsBtn.addEventListener("click", (ev) => {
+  helpBtn?.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    const open = settingsMenu.hidden;
     closeMenus();
-    settingsMenu.hidden = !open;
-    settingsBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    openChromeHelp();
   });
   document.addEventListener("click", () => closeMenus());
   castMenu.addEventListener("click", (ev) => ev.stopPropagation());
-  settingsMenu.addEventListener("click", (ev) => ev.stopPropagation());
 
   document.getElementById("iraSessionInfoBtn")?.addEventListener("click", () => {
-    fillSessionDl(sessionDl);
-    sessionModal.hidden = false;
+    if (sessionDl) fillSessionDl(sessionDl);
+    if (sessionModal) sessionModal.hidden = false;
     closeMenus();
   });
   document.getElementById("iraHubBtn")?.addEventListener("click", () => {
     window.open(getIraHubAdminUrl(), "_blank", "noopener,noreferrer");
     closeMenus();
   });
-  document.querySelectorAll<HTMLButtonElement>("[data-theme-option]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      applyTheme(btn.dataset.themeOption || THEME_SLICERLIVE);
-      closeMenus();
-    });
-  });
-  document.getElementById("iraControlsBtn")?.addEventListener("click", () => {
-    closeMenus();
-    openChromeHelp();
-  });
-  document.getElementById("iraAboutBtn")?.addEventListener("click", () => {
-    aboutModal.hidden = false;
-    closeMenus();
-  });
   document.querySelectorAll("[data-ira-close-modal]").forEach((el) => {
     el.addEventListener("click", () => {
-      sessionModal.hidden = true;
-      aboutModal.hidden = true;
+      if (sessionModal) sessionModal.hidden = true;
+      if (aboutModal) aboutModal.hidden = true;
     });
   });
 }

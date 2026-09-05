@@ -121,22 +121,18 @@
             <div id="iraCastStatus" class="ira-cast-status ira-cast-idle" aria-hidden="true"></div>
           </button>
           <div id="iraCastStatusMenu" class="ira-menu" role="menu" hidden>
+            <button type="button" class="ira-menu-item" role="menuitem">Conferencing</button>
+            <button type="button" class="ira-menu-item" role="menuitem">Lung Screening</button>
+            <button type="button" class="ira-menu-item" role="menuitem">Total Segmentator</button>
+            <button type="button" class="ira-menu-item" role="menuitem">Subcortical segmentation</button>
+            <div class="ira-menu-sep" role="separator"></div>
             <button type="button" id="iraSessionInfoBtn" class="ira-menu-item" role="menuitem">Session info</button>
             <button type="button" id="iraHubBtn" class="ira-menu-item" role="menuitem">Hub</button>
           </div>
         </div>
-        <div class="ira-menu-wrap">
-          <button type="button" id="iraSettingsBtn" class="ira-icon-btn" aria-label="Settings"
-            aria-haspopup="menu" aria-expanded="false" title="Settings"
-            style="font:700 15px -apple-system,system-ui,sans-serif">?</button>
-          <div id="iraSettingsMenu" class="ira-menu" role="menu" hidden>
-            <button type="button" class="ira-menu-item" role="menuitemradio" aria-checked="true" data-theme-option="slicerlive">SlicerLive theme</button>
-            <button type="button" class="ira-menu-item" role="menuitemradio" aria-checked="false" data-theme-option="ohif">OHIF theme</button>
-            <div class="ira-menu-sep" role="separator"></div>
-            <button type="button" id="iraControlsBtn" class="ira-menu-item" role="menuitem">Controls…</button>
-            <button type="button" id="iraAboutBtn" class="ira-menu-item" role="menuitem">About…</button>
-          </div>
-        </div>
+        <button type="button" id="iraSettingsBtn" class="ira-icon-btn" aria-label="Controls & key bindings"
+          title="Controls & key bindings"
+          style="font:700 15px -apple-system,system-ui,sans-serif">?</button>
       </div>
     </div>
     <div id="grid">
@@ -185,6 +181,6 @@
     </div>
   </div>
 
-  <script type="module" src="ira.js?v=status-catchup-2"></script>
+  <script type="module" src="ira.js?v=help-direct-1"></script>
 </body>
 </html>
