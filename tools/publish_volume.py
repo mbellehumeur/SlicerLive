@@ -15,6 +15,8 @@ this machine. This script is self-contained: it only produces what SlicerLive's 
 (`render/scene-volume.ts`) actually consumes —
 
   * chunked, DEFLATE-compressed zarr blobs  (zlib format == DecompressionStream('deflate'))
+  * a multiscale pyramid under `<id>.zarr/<level>/k.j.i` (level 0 = full res) plus
+    `attrs.zarrLevels` / `meta.json` so IRA can coarse→fine LOD
   * a {blobBase, nodes} wrapper carrying `zarr`, `dims`, `ijkToRAS`, window/level and the
     VR transfer functions (color / scalarOpacity / shade) read off the VolumePropertyNode
 
@@ -65,24 +67,77 @@ def mcp(code: str):
 EXPORT_SRC = r'''
 import slicer, vtk, numpy as np, os, json, zlib, shutil
 
-def export_volume_scene(vol, outdir, node_id="vtkMRMLScalarVolumeNode1", chunks=(64,128,128)):
-    if os.path.isdir(outdir): shutil.rmtree(outdir)
-    arr = np.ascontiguousarray(slicer.util.arrayFromVolume(vol).astype(np.int16))  # (K,J,I)
+COARSE_MAX = 192  # stop pyramiding once the largest dim is this small (matches tools/zarr_convert.ts)
+
+def _halve(arr):
+    """2x box-downsample mean; arr is (K,J,I)."""
+    nz, ny, nx = arr.shape
+    oz, oy, ox = max(1, nz // 2), max(1, ny // 2), max(1, nx // 2)
+    a = arr[:oz * 2, :oy * 2, :ox * 2].astype(np.float32, copy=False)
+    return a.reshape(oz, 2, oy, 2, ox, 2).mean(axis=(1, 3, 5))
+
+def _scaled_ijk(base, factor):
+    m = list(base)
+    for r in range(3):
+        for c in range(3):
+            m[r * 4 + c] *= factor
+    return m
+
+def _write_zarr_level(arr, zdir, chunks, dtype_str):
+    """Write one level as deflate-padded chunks. arr (K,J,I). Returns (shape, chunkGrid, bytes)."""
     nz, ny, nx = arr.shape
     cz, cy, cx = chunks
-    gz = (-(-nz//cz), -(-ny//cy), -(-nx//cx))
-    zdir = os.path.join(outdir, node_id + ".zarr", "0"); os.makedirs(zdir, exist_ok=True)
+    gz = (-(-nz // cz), -(-ny // cy), -(-nx // cx))
+    os.makedirs(zdir, exist_ok=True)
     total = 0
+    if dtype_str == "<i2":
+        np_dtype = np.int16
+    elif dtype_str == "<u1":
+        np_dtype = np.uint8
+    else:
+        np_dtype = np.float32
     for kk in range(gz[0]):
         for jj in range(gz[1]):
             for ii in range(gz[2]):
-                blk = np.zeros((cz,cy,cx), dtype=np.int16)      # zarr pads partial chunks
+                blk = np.zeros((cz, cy, cx), dtype=np_dtype)
                 sub = arr[kk*cz:kk*cz+cz, jj*cy:jj*cy+cy, ii*cx:ii*cx+cx]
-                blk[:sub.shape[0], :sub.shape[1], :sub.shape[2]] = sub
+                # cast for coarser levels that may be float means of int16
+                sub_c = np.ascontiguousarray(sub).astype(np_dtype, copy=False)
+                blk[:sub_c.shape[0], :sub_c.shape[1], :sub_c.shape[2]] = sub_c
                 raw = zlib.compress(blk.tobytes(), 6)
-                open(os.path.join(zdir, "%d.%d.%d" % (kk,jj,ii)), "wb").write(raw); total += len(raw)
+                open(os.path.join(zdir, "%d.%d.%d" % (kk, jj, ii)), "wb").write(raw)
+                total += len(raw)
+    return [nz, ny, nx], list(gz), total
+
+def export_volume_scene(vol, outdir, node_id="vtkMRMLScalarVolumeNode1", chunks=(64,128,128)):
+    if os.path.isdir(outdir): shutil.rmtree(outdir)
+    arr0 = np.ascontiguousarray(slicer.util.arrayFromVolume(vol).astype(np.float32))  # (K,J,I)
+    # Prefer int16 storage for CT-like ranges at full res; coarser levels stay float32 means → store as <i2 clipped
+    full = np.ascontiguousarray(slicer.util.arrayFromVolume(vol).astype(np.int16))
+    levels_arr = [full]
+    cur = arr0
+    while max(cur.shape) > COARSE_MAX:
+        cur = _halve(cur)
+        levels_arr.append(np.ascontiguousarray(np.round(cur).astype(np.int16)))
+
     m = vtk.vtkMatrix4x4(); vol.GetIJKToRASMatrix(m)
-    ijk = [m.GetElement(r,c) for r in range(4) for c in range(4)]   # row-major, as the loader expects
+    ijk0 = [m.GetElement(r, c) for r in range(4) for c in range(4)]
+    cz, cy, cx = chunks
+    zarr_levels = []
+    meta_levels = []
+    total_all = 0
+    for lev, arr in enumerate(levels_arr):
+        zdir = os.path.join(outdir, node_id + ".zarr", str(lev))
+        shape, gz, total = _write_zarr_level(arr, zdir, chunks, "<i2")
+        total_all += total
+        nz, ny, nx = shape
+        desc = {"level": lev, "dir": node_id + ".zarr", "dataset": str(lev),
+                "shape": shape, "chunks": [cz, cy, cx], "chunkGrid": gz,
+                "dtype": "<i2", "bytes": total,
+                "ijkToRAS": _scaled_ijk(ijk0, 2 ** lev), "dims": [nx, ny, nz]}
+        zarr_levels.append(desc)
+        meta_levels.append(desc)
+
     disp = vol.GetDisplayNode()
     nodes = {"vtkMRMLScalarVolumeDisplayNode1": {
         "id":"vtkMRMLScalarVolumeDisplayNode1","class":"vtkMRMLScalarVolumeDisplayNode",
@@ -111,13 +166,23 @@ def export_volume_scene(vol, outdir, node_id="vtkMRMLScalarVolumeNode1", chunks=
             "refs":{"volumeProperty":["vtkMRMLVolumePropertyNode1"]},"blobs":{},
             "attrs":{"visibility":1,"kind":"volumeRendering"}}
         refs_display.append("vtkMRMLGPURayCastVolumeRenderingDisplayNode1")
+    # Back-compat: attrs.zarr describes level 0; attrs.zarrLevels enables coarse→fine LOD in IRA.
+    L0 = zarr_levels[0]
     nodes[node_id] = {"id":node_id,"class":"vtkMRMLScalarVolumeNode","name":vol.GetName(),
         "refs":{"display":refs_display},"blobs":{},
-        "attrs":{"zarr":{"dir":node_id+".zarr","dataset":"0","shape":[nz,ny,nx],
-                          "chunks":[cz,cy,cx],"chunkGrid":list(gz),"dtype":"<i2","bytes":total},
-                 "dims":[nx,ny,nz],"comps":1,"ijkToRAS":ijk}}
+        "attrs":{"zarr":{"dir":L0["dir"],"dataset":L0["dataset"],"shape":L0["shape"],
+                          "chunks":L0["chunks"],"chunkGrid":L0["chunkGrid"],"dtype":L0["dtype"],
+                          "bytes":L0["bytes"]},
+                 "zarrLevels": zarr_levels,
+                 "dims":L0["dims"],"comps":1,"ijkToRAS":ijk0}}
     json.dump({"blobBase":"REPLACE_ME","nodes":nodes}, open(os.path.join(outdir,"scene.json"),"w"))
-    return {"chunks": gz[0]*gz[1]*gz[2], "compressedMB": round(total/1e6,1), "dims":[nx,ny,nz]}
+    meta = {"name": vol.GetName(), "levels": meta_levels, "ijkToRAS": ijk0, "dims": L0["dims"],
+            "zarr": {"dir":L0["dir"],"dataset":L0["dataset"],"shape":L0["shape"],
+                     "chunks":L0["chunks"],"chunkGrid":L0["chunkGrid"],"dtype":L0["dtype"]},
+            "bytes": L0["bytes"]}
+    json.dump(meta, open(os.path.join(outdir, "meta.json"), "w"))
+    return {"levels": len(zarr_levels), "chunks": sum(L["chunkGrid"][0]*L["chunkGrid"][1]*L["chunkGrid"][2] for L in zarr_levels),
+            "compressedMB": round(total_all/1e6,1), "dims": L0["dims"]}
 '''
 
 

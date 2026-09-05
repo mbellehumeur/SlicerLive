@@ -103,6 +103,20 @@ export interface SegrouletteScene {
   reclip(): void;
   /** Add/replace demo-supplied fields (CardFields, …) that composite in the SAME 3D ray-march. */
   setExtraFields(fields: Field[]): void;
+  /** Patch a z-range of the volume texture from a full-volume Float32Array (progressive zarr). */
+  patchVolumeScalars(data: Float32Array, zStart: number, zCount: number): void;
+  /** Remap patient geometry after a progressive load finalizes true ijkToRAS (no voxel reupload). */
+  updateGeometry(ijkToRAS: number[]): void;
+  /**
+   * Replace the background volume ImageField (coarse→fine LOD). Rebinds MPR/VR, destroys the
+   * previous texture, and keeps the current VR LUT/clim/opacity/shift. Camera framing uses the
+   * new AABB (caller may shift the camera by the center delta).
+   */
+  swapVolumeField(field: ImageField, dims: [number, number, number], ijkToRAS: number[]): void;
+  /** Mount SEG after a volume-only build (progressive IDC: anatomy first, labelmap when ready). */
+  attachSegmentation(seg: SegLabelmap): void;
+  /** Current SEG labelmap (voxel = SegmentNumber), if attached — for export / tools. */
+  labelmap(): SegLabelmap | undefined;
   /** Free the 3D segmentation GPU resources (call before dropping a scene on Spin). */
   destroy(): void;
 }
@@ -113,7 +127,13 @@ export function buildSegrouletteScene(
   format: GPUTextureFormat,
   ct: CTVolume,
   seg?: SegLabelmap,
-  opts: { sdfMaxDim?: number; sdfMaxVoxels?: number; refineDelayMs?: number } = {},
+  opts: {
+    sdfMaxDim?: number;
+    sdfMaxVoxels?: number;
+    refineDelayMs?: number;
+    /** Reuse a progressive/LOD ImageField instead of uploading ct.vol again. */
+    volumeField?: ImageField;
+  } = {},
 ): SegrouletteScene {
   const dev = gpu.device;
   const dims = ct.dims;
@@ -138,25 +158,37 @@ export function buildSegrouletteScene(
     for (let i = 0; i < 256; i++) l[i * 4 + 3] = Math.round(l[i * 4 + 3] * o);
     return l;
   };
-  const volumeField = new ImageField(dev, data, dims, [1, 1, 1], baseVolLut, {
+  let volumeField = opts.volumeField ?? new ImageField(dev, data, dims, [1, 1, 1], baseVolLut, {
     clim, ijkToRAS: ct.ijkToRAS, shade: baseShade,
   });
+  if (opts.volumeField) {
+    // Progressive/LOD field was built with the scene LUT; switch to modality VR defaults.
+    volumeField.setLUT(baseVolLut);
+    volumeField.setClim(baseClim[0], baseClim[1]);
+    volumeField.setShade(baseShade);
+  }
 
   // Pass 1: enumerate renderable segments (skip background/black/whole-grid labels) + build the
   // 256-entry colour palette. No GPU baking yet — we decide iso vs colorized from the count first.
   const segments: { num: number; name: string; color: [number, number, number]; voxels: number }[] = [];
   const palette = new Float32Array(256 * 4);
-  if (seg) {
-    const total = dims[0] * dims[1] * dims[2];
-    for (const [num, r, g, b] of seg.colors) {
+  let activeSeg: SegLabelmap | undefined = seg;
+  let volDims: [number, number, number] = [dims[0], dims[1], dims[2]];
+
+  const fillSegmentsFrom = (labmap: SegLabelmap) => {
+    segments.length = 0;
+    palette.fill(0);
+    const total = volDims[0] * volDims[1] * volDims[2];
+    for (const [num, r, g, b] of labmap.colors) {
       if (num === 0 || (r === 0 && g === 0 && b === 0)) continue;   // background / unlabeled
       let n = 0;
-      for (let i = 0; i < seg.lab.length; i++) if (seg.lab[i] === num) n++;
+      for (let i = 0; i < labmap.lab.length; i++) if (labmap.lab[i] === num) n++;
       if (!n || n > total * 0.6) continue;                          // empty, or covers most of the grid
       if (num < 256) { palette[num * 4] = r; palette[num * 4 + 1] = g; palette[num * 4 + 2] = b; palette[num * 4 + 3] = 1; }
-      segments.push({ num, name: seg.names[num] ?? `Segment ${num}`, color: [r, g, b], voxels: n });
+      segments.push({ num, name: labmap.names[num] ?? `Segment ${num}`, color: [r, g, b], voxels: n });
     }
-  }
+  };
+  if (activeSeg) fillSegmentsFrom(activeSeg);
 
   // Per-segment opacity (tri-state in the UI: 1 → 0.5 → 0 → 1). Default 1 (opaque); 0 = hidden, 0.5 =
   // translucent surface. Baking uses a palette whose alpha is the per-segment opacity (the colorized
@@ -170,7 +202,7 @@ export function buildSegrouletteScene(
   };
 
   // 2D slice overlay: full-res colorized labelmap (crisp per-voxel fill; visPalette() alpha 0 hides).
-  let colorTex = seg ? bakeColorizeRGBA(dev, seg.lab, dims, visPalette(), 1.5) : undefined;
+  let colorTex = activeSeg ? bakeColorizeRGBA(dev, activeSeg.lab, dims, visPalette(), 1.5) : undefined;
 
   // 3D segmentation = ONE unified colorized signed-distance-field surface (algorithms/ + logic/): the
   // whole labelmap (downsampled to the SDF cap) → JFA-SDF → a single SegmentField. Per-segment colour
@@ -179,12 +211,13 @@ export function buildSegrouletteScene(
   let mode: "sdf" | "volume" = "volume";
   let segLogic: SegmentationLogic | undefined;
   let editable: EditableSegmentation | undefined;
-  if (seg && segments.length > 0) {
+  const bakeSegSdf = (labmap: SegLabelmap) => {
+    if (segments.length === 0) return;
     // ISOTROPIC resample (capacity-gated): thick-slice CTs must upsample the slice axis toward
     // isotropic or a near-slice-parallel surface falls between slices and the SDF shell misses it →
     // holes (user report: lung/liver tops vanish when rotated). sdfMaxVoxels caps memory so a weaker
     // device coarsens instead of OOMing; `coarsened` → we surfaced fewer voxels than ideal.
-    const cap = resampleIsotropic(seg.lab, dims, ct.ijkToRAS, opts.sdfMaxDim ?? SDF_MAX_DIM, opts.sdfMaxVoxels);
+    const cap = resampleIsotropic(labmap.lab, volDims, ct.ijkToRAS, opts.sdfMaxDim ?? SDF_MAX_DIM, opts.sdfMaxVoxels);
     if (cap.coarsened) console.warn(`SEGRoulette: SDF grid coarsened to fit the device memory budget (${cap.dims.join("×")}, ${cap.vox.toFixed(2)}mm) — a remote render server would allow full resolution.`);
     editable = new EditableSegmentation(dev, cap.dims, { ijkToRAS: cap.ijkToRAS });
     // Real data often has EMBEDDED/adjacent labels (tumor in liver, cyst clusters): auto-pick the
@@ -196,8 +229,9 @@ export function buildSegrouletteScene(
     editable.loadLabelmap(cap.lab);   // fast bake
     segLogic.refineNow();             // static scene → high-quality bake now
     mode = "sdf";
-  }
-  const hasSeg = !!segLogic;
+  };
+  if (activeSeg && segments.length > 0) bakeSegSdf(activeSeg);
+  let hasSeg = !!segLogic;
 
   const scene = new SceneRenderer(gpu, format);
   const [rasLo, rasHi] = volumeField.aabb();
@@ -226,8 +260,8 @@ export function buildSegrouletteScene(
   // opacity). The 3D seg is the SDF field (updated separately via setLabelOpacity); this feeds only
   // the MPR overlay. Cheap enough for an occasional toggle.
   const rebakeColorized = () => {
-    if (!seg) return;
-    const nt = bakeColorizeRGBA(dev, seg.lab, dims, visPalette(), 1.5);
+    if (!activeSeg) return;
+    const nt = bakeColorizeRGBA(dev, activeSeg.lab, volDims, visPalette(), 1.5);
     const old = colorTex;
     colorTex = nt;
     slice.setTextures(volumeField.volumeTexture(), colorTex);
@@ -238,11 +272,11 @@ export function buildSegrouletteScene(
   slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
   slice.setTextures(volumeField.volumeTexture(), colorTex);
   slice.setWindowLevel(ct.win, ct.lev);
-  slice.setOverlayOpacity(seg ? 0.5 : 0);
+  slice.setOverlayOpacity(activeSeg ? 0.5 : 0);
 
   const center: Vec3 = [(rasLo[0] + rasHi[0]) / 2, (rasLo[1] + rasHi[1]) / 2, (rasLo[2] + rasHi[2]) / 2];
   const radius = Math.hypot(rasHi[0] - rasLo[0], rasHi[1] - rasLo[1], rasHi[2] - rasLo[2]) / 2;
-  return {
+  const out: SegrouletteScene = {
     scene, slice, center, radius, rasLo, rasHi, ijkToRAS: ct.ijkToRAS, dims, win: ct.win, lev: ct.lev,
     segments, mode, hasSeg, roi,
     setLayers(sv, ss) { this.setVolumeOpacity(sv ? 1 : 0); this.setSegOpacity(ss ? 1 : 0); },
@@ -269,7 +303,7 @@ export function buildSegrouletteScene(
     volumeShift: () => volShift,
     setSegOpacity(o) {
       segLayerOpacity = Math.max(0, Math.min(1, o));
-      const was = showSeg; showSeg = hasSeg && segLayerOpacity > 0.001;
+      const was = showSeg; showSeg = out.hasSeg && segLayerOpacity > 0.001;
       segLogic?.setGlobalOpacity(segLayerOpacity);
       if (was !== showSeg) rebuild(); else scene.syncUniforms();   // op0 is a uniform → re-pack in place
     },
@@ -300,7 +334,57 @@ export function buildSegrouletteScene(
     roiEnabled: () => roiEnabled,
     roiVisible: () => roiVisible,
     setExtraFields(fields: Field[]) { extraFields = fields; rebuild(); },
+    patchVolumeScalars(data, zStart, zCount) {
+      volumeField.updateScalars(data, zStart, zCount);
+    },
+    updateGeometry(m) {
+      volumeField.setIjkToRAS(m);
+      const [lo, hi] = volumeField.aabb();
+      rasLo[0] = lo[0]; rasLo[1] = lo[1]; rasLo[2] = lo[2];
+      rasHi[0] = hi[0]; rasHi[1] = hi[1]; rasHi[2] = hi[2];
+      out.ijkToRAS = m;
+      out.center = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+      out.radius = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
+      slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
+      scene.syncUniforms();
+    },
+    swapVolumeField(field, nextDims, ijkToRAS) {
+      const old = volumeField;
+      volumeField = field;
+      volDims = [nextDims[0], nextDims[1], nextDims[2]];
+      out.dims = volDims;
+      out.ijkToRAS = ijkToRAS;
+      // Re-apply live VR controls onto the new field (preset / grayscale + opacity + shift).
+      volumeField.setLUT(scaledVolLut(volumeOpacity));
+      volumeField.setClim(baseClim[0] + volShift, baseClim[1] + volShift);
+      volumeField.setShade(baseShade);
+      const [lo, hi] = volumeField.aabb();
+      rasLo[0] = lo[0]; rasLo[1] = lo[1]; rasLo[2] = lo[2];
+      rasHi[0] = hi[0]; rasHi[1] = hi[1]; rasHi[2] = hi[2];
+      out.center = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+      out.radius = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
+      slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
+      slice.setTextures(volumeField.volumeTexture(), colorTex);
+      rebuild();
+      old.destroy();
+    },
+    attachSegmentation(labmap) {
+      if (out.hasSeg || segLogic) return;                 // already has SEG
+      activeSeg = labmap;
+      fillSegmentsFrom(labmap);
+      if (segments.length === 0) return;
+      bakeSegSdf(labmap);
+      if (!segLogic) return;
+      out.hasSeg = true;
+      out.mode = mode;
+      showSeg = segLayerOpacity > 0.001;
+      rebakeColorized();
+      slice.setOverlayOpacity(0.5);
+      rebuild();
+    },
+    labelmap: () => activeSeg,
     reclip() { if (roiEnabled) scene.setClipBox(roi.lo(), roi.hi()); else scene.clearClip(); scene.syncUniforms(); },
     destroy() { segLogic?.destroy(); editable?.destroy(); },
   };
+  return out;
 }

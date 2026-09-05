@@ -1,8 +1,8 @@
 // ira-browser.ts — SlicerLive "Integrated Reporting Applications" gallery demo.
 //
-// Loads a study only when the URL supplies series/StudyInstanceUID params (OHIF/IID/direct-S3).
-// With no params the viewer stays empty — Cast/worklist opens studies later. Optional KiTS
-// default source is kept below for manual testing but is not auto-loaded.
+// Loads a study when the URL supplies series/StudyInstanceUID (OHIF/IID/direct-S3) or
+// ?scene=<SlicerLive scene JSON URL>. With no params the viewer stays empty — Cast/worklist
+// opens studies later.
 //
 // Bundle for the gallery (idc-worker.js must sit next to the output):
 //   deno run -A npm:esbuild@0.21.5 render/demos/ira/ira-browser.ts --bundle --format=esm \
@@ -11,6 +11,8 @@
 //   cp render/demos/ira/ira.html live/webgpu/ira.html
 // then add a gallery tile linking webgpu/ira.html.
 import { initDevice } from "../../device.ts";
+import { loadSceneVolumeFieldProgressive, type SceneVolume } from "../../scene-volume.ts";
+import type { ImageField } from "../../fields.ts";
 import { slicerDefaultOffset01 } from "../../slice-renderer.ts";
 import { offset01ToMm, SliceInteractor } from "../../slice-interactor.ts";
 import { buildSegrouletteScene, type SegrouletteScene } from "../segroulette-scene.ts";
@@ -20,13 +22,14 @@ import { attachSliceControls } from "../slice-control.ts";
 import { attachDoubleClick, attachViewGrid } from "../view-grid.ts";
 import { attachWidgetControls } from "../widget-control.ts";
 import type { Box, HandleMeta } from "../roi-widget.ts";
-import { createMosaic } from "../mosaic.ts";
 import { installChrome, type VizControl } from "../sl-chrome.ts";
 import { buildFontAtlas } from "../../sdf-text.ts";
 import { mountSegmentCards } from "../../segment-cards.ts";
 import { loadSeries } from "../../vendor/idc_tools/index.js";
+import type { CTVolume, SegLabelmap } from "../../vendor/idc_tools/types.js";
 import { type IraApi, mountIra, type Plane } from "./ira.ts";
 import { downloadStudyWithDialog, type SeriesRef, shareStudy } from "../idc-share.ts";
+import { downloadStl, pickSegment, safeStlFileName, segmentToStl } from "../segment-stl.ts";
 import { CT_VR_PRESETS, presetLUT } from "../../ct-vr-presets.ts";
 import { openVrPresetMenu, type VrPresetItem } from "../vr-preset-menu.ts";
 import type { Vec3 } from "../../mat4.ts";
@@ -42,14 +45,20 @@ import {
   sourceFromIdcOpenContext,
   studyParamsFromIdcSource,
 } from "./ira-idc.ts";
-
+import {
+  ctVolumeFromSceneVolume,
+  sceneUrlFromOpenContext,
+  studyParamsFromSceneUrl,
+  vrPresetFromSceneVolume,
+} from "./ira-scene.ts";
 // The demo case: an arbitrary KiTS kidney-tumour study (IDC c4kc_kits · KiTS-00051) — the
 // noncontrast CT (95 slices) WITH its DICOM SEG (kidney + tumour). Which case loads is
 // resolved from the URL (see resolveSource) — a drop-in for OHIF on the IDC portal:
 //   OHIF / IDC-portal form:  ?StudyInstanceUIDs=<uid>[&SeriesInstanceUIDs=<uid[,uid]>]
 //   IHE IID form:            ?requestType=STUDY&studyUID=<uid>[&seriesUID=<uid>]
 //   Fast direct-S3 form:     ?series=<crdc_uuid>&bucket=<b>[&seg=<uuid>&segBucket=<b>]
-//   (no params → the default KiTS-00051 CT+SEG demo)
+//   SlicerLive scene form:   ?scene=<https://…/Scene.json>
+//   (no params → empty; Cast/worklist opens a study later)
 const P = new URLSearchParams(location.search);
 
 interface Source {
@@ -255,10 +264,16 @@ async function main() {
   // Close/reopen via full reload (preserves Cast topic/token in the URL). Avoids tearing
   // down WebGPU mounts; works from empty or already-loaded IRA.
   setIraImagingStudyOpenHandler(async (ctx) => {
+    const sceneUrl = sceneUrlFromOpenContext(ctx);
+    if (sceneUrl) {
+      status("Opening scene…");
+      assignIraLocation(studyParamsFromSceneUrl(sceneUrl));
+      return;
+    }
     const idcSource = sourceFromIdcOpenContext(ctx);
     if (!idcSource) {
       status(
-        "Cast ImagingStudy-open: unsupported context (need idc CRDC prefix URLs)",
+        "Cast ImagingStudy-open: unsupported context (need scene JSON or idc CRDC prefix URLs)",
         true,
       );
       return;
@@ -293,10 +308,15 @@ async function main() {
   }
 
   // Which case? Resolve the URL — OHIF/IID StudyInstanceUID (via the IDC index), direct S3
-  // prefix, or empty (no auto-load). This is what makes it a drop-in for OHIF on the IDC portal.
+  // prefix, SlicerLive scene JSON, or empty (no auto-load).
   const setLoad = (m: string) => {
     status(m);
   };
+  const sceneUrl = (P.get("scene") || "").trim();
+  if (sceneUrl) {
+    await mountStudyFromSource({ sceneUrl }, gpu, preferred, srgb, names, cv, cx);
+    return;
+  }
   const source = await resolveSource(setLoad);
   if (!source) {
     const resizeEmpty = () => {
@@ -321,7 +341,7 @@ async function main() {
 }
 
 async function mountStudyFromSource(
-  source: Source,
+  input: Source | { sceneUrl: string },
   gpu: Awaited<ReturnType<typeof initDevice>>,
   preferred: GPUTextureFormat,
   srgb: GPUTextureFormat,
@@ -329,38 +349,189 @@ async function mountStudyFromSource(
   cv: Record<string, HTMLCanvasElement>,
   cx: Record<string, GPUCanvasContext>,
 ): Promise<void> {
-  // Download-progress mosaic (the SEGRoulette loading visual): the series' slice thumbnails
-  // tile in as the DICOM streams from S3 — informative + a little fun instead of a blank wait.
-  const mosaic = createMosaic(document.getElementById("viewer")!);
-  mosaic.status("contacting the NCI Imaging Data Commons…");
-  const setLoadMosaic = (m: string) => {
-    status(m);
-    mosaic.status(m);
-  };
+  let source: Source;
+  let ct: CTVolume;
+  let seg: SegLabelmap | undefined;
+  let sceneVr: {
+    lut: Uint8Array;
+    clim: [number, number];
+    shade: [number, number, number, number];
+  } | null = null;
+  let sceneStream: {
+    patch: (data: Float32Array, zStart: number, zCount: number) => void;
+    redraw: () => void;
+    upgrade?: (sv: SceneVolume) => void;
+  } | null = null;
+  let sceneStreamDone: Promise<unknown> | null = null;
+  let sceneRedrawRaf = 0;
+  /** LOD upgrade that arrived before sceneStream was wired. */
+  let pendingLodUpgrade: SceneVolume | null = null;
+  /** Late SEG from IDC progressive path (attached after mount). */
+  let pendingIdcSeg: SegLabelmap | undefined;
+  /** Host volume filled by IDC slabs (same buffer passed to buildSegrouletteScene). */
+  let idcStreamVol: Float32Array | null = null;
+  /** Set when the worker posts the final full CT (assemble done; SEG may still be loading). */
+  let idcCtAssembled = false;
+  /** Scene/camera for mid-stream ctgeom refinements (set after mount). */
+  let scHold: SegrouletteScene | null = null;
+  let applyIdcGeom: ((ijkToRAS: number[]) => void) | null = null;
 
-  // Load the series straight from S3, reconstruct + build the scene (grayscale MPR + 3D VR).
-  const res = await loadSeries(source, {
-    onProgress: (p: { msg: string; frac?: number }) => {
-      setLoadMosaic(`${p.msg}${p.frac ? ` — ${Math.round(p.frac * 100)}%` : ""}`);
-    },
-    onSliceCount: (n: number) => mosaic.setCount(n),
-    onThumb: (n: number, w: number, h: number, rgba: ArrayBuffer) => mosaic.thumb(n, w, h, rgba),
+  let sceneLodField: ImageField | undefined;
+  if ("sceneUrl" in input) {
+    status("loading scene…");
+    let mb = 0;
+    let resolveReady!: (sv: SceneVolume) => void;
+    const ready = new Promise<SceneVolume>((r) => {
+      resolveReady = r;
+    });
+    sceneStreamDone = loadSceneVolumeFieldProgressive(gpu.device, input.sceneUrl, {
+      onBytes: (n) => {
+        mb += n;
+        status(`streaming scene… ${(mb / 1e6).toFixed(1)} MB`);
+      },
+      onReady: (sv) => {
+        sceneLodField = sv.field;
+        resolveReady(sv);
+      },
+      onSlab: (zStart, zCount, sv) => {
+        if (sceneStream) {
+          sceneStream.patch(sv.voxels, zStart, zCount);
+          if (!sceneRedrawRaf) {
+            sceneRedrawRaf = requestAnimationFrame(() => {
+              sceneRedrawRaf = 0;
+              sceneStream?.redraw();
+            });
+          }
+        }
+      },
+      onUpgrade: (sv) => {
+        status(`refining… ${sv.dims.join("×")}`);
+        sceneLodField = sv.field;
+        if (sceneStream?.upgrade) sceneStream.upgrade(sv);
+        else pendingLodUpgrade = sv;
+      },
+    });
+    const sv = await ready;
+    ct = ctVolumeFromSceneVolume(sv);
+    sceneVr = vrPresetFromSceneVolume(sv);
+    source = {
+      c: "",
+      cb: "",
+      m: ct.modality || "CT",
+      col: "SlicerLive",
+      st: "",
+      sd: `${sv.name} · SlicerLive scene`,
+      lic: "SlicerLive",
+    };
+  } else {
+    source = input;
+    status("contacting the NCI Imaging Data Commons…");
+    let resolveReady!: (v: CTVolume) => void;
+    const ready = new Promise<CTVolume>((r) => {
+      resolveReady = r;
+    });
+    const modality = ({ CT: "CT", MR: "MR", PT: "PET" } as Record<string, string>)[source.m] || source.m;
+    sceneStreamDone = loadSeries(source, {
+      onProgress: (p: { msg: string; frac?: number }) => {
+        status(`${p.msg}${p.frac ? ` — ${Math.round(p.frac * 100)}%` : ""}`);
+      },
+      onCTReady: (meta) => {
+        const [nx, ny, nz] = meta.dims;
+        // Below-window fill so unset slices read as black (zeros window to mid-gray).
+        const empty = meta.lev - meta.win / 2 - 1;
+        idcStreamVol = new Float32Array(nx * ny * nz);
+        idcStreamVol.fill(empty);
+        resolveReady({
+          vol: idcStreamVol,
+          dims: meta.dims,
+          ijkToRAS: meta.ijkToRAS,
+          win: meta.win,
+          lev: meta.lev,
+          dtype: "float32",
+          modality: meta.modality || modality,
+        });
+      },
+      onCTGeom: (meta) => {
+        if (ct) {
+          ct.ijkToRAS = meta.ijkToRAS;
+          if (Number.isFinite(meta.win!)) ct.win = meta.win!;
+          if (Number.isFinite(meta.lev!)) ct.lev = meta.lev!;
+        }
+        applyIdcGeom?.(meta.ijkToRAS);
+      },
+      onCTSlab: (info) => {
+        const host = idcStreamVol;
+        if (!host) return;
+        const [nx, ny] = info.dims;
+        host.set(info.data, info.zStart * nx * ny);
+        if (sceneStream) {
+          sceneStream.patch(host, info.zStart, info.zCount);
+          if (!sceneRedrawRaf) {
+            sceneRedrawRaf = requestAnimationFrame(() => {
+              sceneRedrawRaf = 0;
+              sceneStream?.redraw();
+            });
+          }
+        }
+      },
+      onCT: (full) => {
+        // Keep host buffer in sync if the final transfer landed a fresh ArrayBuffer.
+        if (idcStreamVol && full.vol instanceof Float32Array && full.vol !== idcStreamVol) {
+          idcStreamVol.set(full.vol);
+        }
+        if (ct && Number.isFinite(full.win) && Number.isFinite(full.lev)) {
+          ct.win = full.win;
+          ct.lev = full.lev;
+        }
+        idcCtAssembled = true;
+        if (sceneStream && idcStreamVol) {
+          sceneStream.patch(idcStreamVol, 0, full.dims[2]);
+          sceneStream.redraw();
+        }
+      },
+      onLabelmap: (lab) => {
+        pendingIdcSeg = lab;
+      },
+    }, {
+      // Cache-bust the classic worker (browsers often keep idc-worker.js sticky across IRA reloads).
+      workerUrl: new URL("./idc-worker.js?v=idc-fetch-10", import.meta.url),
+    }).then((res) => {
+      if (res.seg) pendingIdcSeg = res.seg;
+      return res;
+    });
+    ct = await ready;
+    seg = undefined; // SEG attaches after mount when the labelmap is ready
+  }
+
+  const sc: SegrouletteScene = buildSegrouletteScene(gpu, srgb, ct, seg, {
+    volumeField: sceneLodField,
   });
-  const sc: SegrouletteScene = buildSegrouletteScene(gpu, srgb, res.ct, res.seg);
+  scHold = sc;
+  if (sceneVr) sc.setVolumePreset(sceneVr);
   // Sampled scalar range of the loaded volume: drives the W/L drag gain (Slicer's
   // vtkMRMLWindowLevelWidget scales by the scalar range) and the VR shift-slider span.
-  const vd = res.ct.vol;
+  // For progressive scenes this is recomputed after the stream finishes.
   let vmin = Infinity, vmax = -Infinity;
-  const vstride = Math.max(1, Math.floor(vd.length / 2_000_000));
-  for (let i = 0; i < vd.length; i += vstride) { const v = vd[i]; if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+  const sampleRange = () => {
+    vmin = Infinity;
+    vmax = -Infinity;
+    const buf = ct.vol;
+    const vstride = Math.max(1, Math.floor(buf.length / 2_000_000));
+    for (let i = 0; i < buf.length; i += vstride) {
+      const v = buf[i];
+      if (v < vmin) vmin = v;
+      if (v > vmax) vmax = v;
+    }
+  };
+  sampleRange();
   const dataRange = (): [number, number] => [vmin, vmax];
-  sc.setVolumeOpacity(0.5); // 3D volume rendering starts semi-transparent (composites with SEG)
+  sc.setVolumeOpacity(seg ? 0.5 : 1); // with SEG: translucent VR; scene-only: full VR
 
   // SlicerLive display state (toggled from the badge popup, below).
   let sliceOutline = false; // segmentation overlay: fill (default) vs outline
   let roiEnabled = false, roiVisible = false, roiFirstEnable = true; // 3D volume-render crop box
   let annOn = true; // DICOM corner annotations (IHE IRA §4.16.4.2.2.5.8 "official radiology look")
-  let labelsOn = true; // 3D segment label cards (SEGRoulette-style), on by default
+  let labelsOn = true; // 3D segment label cards, on by default
 
   const dpr3 = Math.min(2, globalThis.devicePixelRatio || 1);
   const cardFont = buildFontAtlas({
@@ -392,8 +563,8 @@ async function mountStudyFromSource(
         return e;
       };
       const pid = (source.sd.split("·")[0] || "").trim() || source.col;
-      mk("tl", `${pid}<br>${source.col} · ${res.ct.modality}`);
-      mk("tr", `${res.ct.modality} · ${sc.dims[2]} slices${sc.hasSeg ? " · SEG" : ""}<br>${sc.dims[0]}×${sc.dims[1]}`);
+      mk("tl", `${pid}<br>${source.col} · ${ct.modality}`);
+      mk("tr", `${ct.modality} · ${sc.dims[2]} slices${sc.hasSeg ? " · SEG" : ""}<br>${sc.dims[0]}×${sc.dims[1]}`);
       annEls[p] = { br: mk("br", "") };
     }
     updateAnnWL();
@@ -412,7 +583,7 @@ async function mountStudyFromSource(
     coronal: slicerDefaultOffset01("coronal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
     sagittal: slicerDefaultOffset01("sagittal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
   };
-  const sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
+  let sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
   const camera = framedCamera(sc.center, sc.radius);
   const wl = { win: sc.win, lev: sc.lev };
   let ira: IraApi | null = null;
@@ -485,11 +656,61 @@ async function mountStudyFromSource(
     },
     segVisible: (num) => sc.isSegmentVisible(num),
   });
-  segCards.setScene(res.ct, res.seg ?? null, sc.segments);
+  segCards.setScene(ct, seg ?? null, sc.segments);
   const drawAll = () => {
     for (const p of PLANES) drawSlice(p);
     draw3d();
     xhair?.redraw();
+  };
+  // Progressive stream: patch + redraw while slabs arrive (zarr or IDC); LOD field swaps.
+  if (sceneStreamDone) {
+    const applyLodUpgrade = (sv: SceneVolume) => {
+      const oldCenter = [sc.center[0], sc.center[1], sc.center[2]] as [number, number, number];
+      sc.swapVolumeField(sv.field, sv.dims, sv.ijkToRAS);
+      ct.vol = sv.voxels;
+      ct.dims = sv.dims;
+      ct.ijkToRAS = sv.ijkToRAS;
+      for (let i = 0; i < 3; i++) {
+        const d = sc.center[i] - oldCenter[i];
+        camera.position[i] += d;
+        camera.focalPoint[i] += d;
+      }
+      sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
+      // Re-default slice offsets to mid-volume on the new grid.
+      off.axial = slicerDefaultOffset01("axial", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
+      off.coronal = slicerDefaultOffset01("coronal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
+      off.sagittal = slicerDefaultOffset01("sagittal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
+      sampleRange();
+      drawAll();
+    };
+    sceneStream = {
+      patch: (data, zStart, zCount) => sc.patchVolumeScalars(data, zStart, zCount),
+      redraw: () => drawAll(),
+      upgrade: applyLodUpgrade,
+    };
+    // Catch slabs that landed between onReady and this wiring (host buffer is ahead of GPU).
+    const [nx, ny, nz] = ct.dims;
+    if (ct.vol instanceof Float32Array && nz > 0) {
+      sc.patchVolumeScalars(ct.vol, 0, nz);
+    }
+    if (pendingLodUpgrade) {
+      const u = pendingLodUpgrade;
+      pendingLodUpgrade = null;
+      applyLodUpgrade(u);
+    }
+  }
+  // Mid-stream / final ctgeom: update patient matrix and shift the camera by the center
+  // delta so refining the origin does not look like a pan.
+  applyIdcGeom = (ijkToRAS) => {
+    const old = [sc.center[0], sc.center[1], sc.center[2]] as [number, number, number];
+    sc.updateGeometry(ijkToRAS);
+    for (let i = 0; i < 3; i++) {
+      const d = sc.center[i] - old[i];
+      camera.position[i] += d;
+      camera.focalPoint[i] += d;
+    }
+    sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
+    drawAll();
   };
   const updateReadout = (p: Plane) => {
     const el = document.getElementById("sr-" + p);
@@ -499,6 +720,35 @@ async function mountStudyFromSource(
     const mm = offset01ToMm(p, off[p], sc.rasLo, sc.rasHi);
     el.textContent = `${Math.round((mm - lo) / sp + 0.5)}/${Math.round((hi - lo) / sp)} · ${mm.toFixed(1)} mm`;
   };
+
+  // Size canvases and paint immediately so progressive slabs are visible (don't wait for full chrome).
+  {
+    const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
+    for (const n of names) {
+      cv[n].width = Math.max(1, Math.round(cv[n].clientWidth * dpr));
+      cv[n].height = Math.max(1, Math.round(cv[n].clientHeight * dpr));
+    }
+    drawAll();
+  }
+
+  // IDC: pump the event loop until assemble finishes so ctslab messages can patch+paint
+  // before the rest of the chrome mounts (that work is sync and would otherwise stall paints).
+  if (idcStreamVol && sceneStreamDone && !idcCtAssembled) {
+    status("streaming volume…");
+    while (!idcCtAssembled) {
+      await Promise.race([
+        new Promise<void>((r) => setTimeout(r, 16)),
+        sceneStreamDone.then(() => {
+          idcCtAssembled = true;
+        }),
+      ]);
+      if (ct.vol instanceof Float32Array && ct.dims[2] > 0) {
+        sc.patchVolumeScalars(ct.vol, 0, ct.dims[2]);
+        drawAll();
+      }
+    }
+    sampleRange();
+  }
 
   const resize = () => {
     const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
@@ -592,7 +842,7 @@ async function mountStudyFromSource(
     resetViews: () => sliceControls.forEach((c) => c.resetView()),
     close: () => status("This is the SlicerLive Basic Image Review demo — reload to restart."),
     jumpAll,
-    modality: res.ct.modality,
+    modality: ct.modality,
     extraTools: [
       {
         id: "idc-share",
@@ -605,6 +855,30 @@ async function mountStudyFromSource(
         icon: "download",
         title: "Download this study's DICOM to a local folder (streamed, parallel)",
         run: () => downloadStudyWithDialog(source, listAllStudySeries),
+      },
+      {
+        id: "seg-stl",
+        icon: "stl",
+        title: "Save segment as STL for 3D printing (LPS)",
+        run: () => {
+          void (async () => {
+            const labmap = sc.labelmap();
+            if (!sc.hasSeg || !labmap || !sc.segments.length) {
+              status("No segmentation loaded — open a study with SEG to export STL.");
+              return;
+            }
+            const picked = await pickSegment(sc.segments);
+            if (!picked) return;
+            try {
+              status(`Meshing ${picked.name}…`);
+              const buf = segmentToStl(labmap.lab, sc.dims, sc.ijkToRAS, picked.num);
+              downloadStl(buf, safeStlFileName(picked.name));
+              status(`Saved ${safeStlFileName(picked.name)}`);
+            } catch (err) {
+              status("STL export failed: " + ((err as Error)?.message ?? err), true);
+            }
+          })();
+        },
       },
     ],
   });
@@ -704,8 +978,11 @@ async function mountStudyFromSource(
   let vrPreset: string | null = null;
   let vrShift = 0;
   const shiftRange = Math.max(200, (vmax - vmin) / 2);
-  const bakeOf = (name: string | null) => name ? presetLUT(CT_VR_PRESETS.find((p) => p.name === name)!) : null;
-  const presetLabel = () => vrPreset ? (CT_VR_PRESETS.find((p) => p.name === vrPreset)?.label ?? vrPreset) : "Default (W/L)";
+  // Default bake: scene VolumeProperty when loaded from ?scene=, else grayscale W/L (null).
+  const defaultVrBake = sceneVr;
+  const bakeOf = (name: string | null) =>
+    name ? presetLUT(CT_VR_PRESETS.find((p) => p.name === name)!) : defaultVrBake;
+  const presetLabel = () => vrPreset ? (CT_VR_PRESETS.find((p) => p.name === vrPreset)?.label ?? vrPreset) : (defaultVrBake ? "Scene TF" : "Default (W/L)");
   const applyVrPreset = (name: string | null) => {
     vrPreset = name;
     sc.setVolumePreset(bakeOf(name));
@@ -725,7 +1002,7 @@ async function mountStudyFromSource(
     if (savedSeg > 0) sc.setSegOpacity(0);
     if (savedOp < 1) sc.setVolumeOpacity(1);
     const entries: { name: string | null; label: string }[] = [
-      { name: null, label: "Default (W/L)" },
+      { name: null, label: defaultVrBake ? "Scene TF" : "Default (W/L)" },
       ...CT_VR_PRESETS.map((p) => ({ name: p.name, label: p.label })),
     ];
     const items: VrPresetItem[] = [];
@@ -873,7 +1150,31 @@ async function mountStudyFromSource(
   buildAnnotations();
   applyAnn();
   resize();
-  mosaic.done(); // scene is up → fade the download mosaic out
+  if (sceneStreamDone) {
+    status(idcStreamVol ? "streaming volume…" : "streaming scene…");
+    await sceneStreamDone;
+    sampleRange();
+    if (pendingIdcSeg) {
+      seg = pendingIdcSeg;
+      sc.attachSegmentation(pendingIdcSeg);
+      sc.setVolumeOpacity(0.5);
+      segCards.setScene(ct, seg, sc.segments);
+      // Refresh corner "· SEG" once the labelmap lands.
+      for (const p of PLANES) {
+        const cell = document.querySelector(`[data-cell="${p}"]`) as HTMLElement | null;
+        const tr = cell?.querySelector(".ann.tr") as HTMLElement | null;
+        if (tr) {
+          tr.innerHTML =
+            `${ct.modality} · ${sc.dims[2]} slices${sc.hasSeg ? " · SEG" : ""}<br>${sc.dims[0]}×${sc.dims[1]}`;
+        }
+      }
+    }
+    // Apply refined W/L from final CT (MR/PET) if the worker updated it after fill.
+    if (idcStreamVol && Number.isFinite(ct.win) && Number.isFinite(ct.lev)) {
+      setWL(ct.win, ct.lev);
+    }
+    drawAll();
+  }
   status("");
 }
 

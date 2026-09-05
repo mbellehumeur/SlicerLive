@@ -202,6 +202,11 @@ const ICONS: Record<string, string> = {
   // IDC actions
   share: I(`<circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.8l7.4-4.3M8.3 13.2l7.4 4.3"/>`),
   download: I(`<path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>`),
+  // 3D-print mesh (STL): cube + download arrow
+  stl: I(
+    `<path d="M7 9l5-3 5 3v6l-5 3-5-3z"/><path d="M7 9l5 3 5-3M12 12v6"/>` +
+      `<path d="M18 3v4m0 0l-2-2m2 2l2-2"/>`,
+  ),
   toolsCollapse: I(`<path d="M6 14l6-6 6 6"/>`),
   toolsExpand: I(`<path d="M6 10l6 6 6-6"/>`),
 };

@@ -79,6 +79,8 @@ export interface SceneVolume {
   win: number;                  // display window (for MPR grayscale)
   lev: number;                  // display level
   markups: Markup[];            // fiducial control points from the scene's Markups nodes (RAS)
+  /** Scene VolumeProperty bake (LUT + clim + shade) for VR presets. */
+  vr: { lut: Uint8Array; clim: [number, number]; shade: [number, number, number, number] };
 }
 
 /** Read all Markups-node control points from a scene's node dict, in RAS. Control points
@@ -105,22 +107,98 @@ export interface LoadOpts {
   /** Extra RAS translation folded into ijkToRAS — e.g. the Multi-Volume selftest offsets
    *  the second volume +200mm along R via a linear transform node. */
   extraTranslationRAS?: Vec3;
+  /** Abort further pyramid upgrades (in-flight chunk fetches are not cancelled). */
+  signal?: AbortSignal;
 }
 
-export async function loadSceneVolumeField(
-  dev: GPUDevice,
+/** One multiscale zarr level (level 0 = full res; higher = coarser). */
+export interface SceneZarrLevel {
+  level: number;
+  z: ZarrDesc;
+  ijkToRAS: number[];
+}
+
+/** Scale ijk step vectors so a coarse grid spans the same RAS box (origin fixed). */
+export function scaledIjkToRAS(base: number[], factor: number): number[] {
+  const m = base.slice();
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) m[r * 4 + c] *= factor;
+  }
+  return m;
+}
+
+function levelFromRecord(L: Record<string, unknown>, fallbackIjk: number[]): SceneZarrLevel {
+  const level = Number(L.level ?? 0);
+  const z: ZarrDesc = {
+    dir: L.dir as string | undefined,
+    dataset: String(L.dataset ?? level),
+    shape: L.shape as [number, number, number],
+    chunks: L.chunks as [number, number, number],
+    chunkGrid: L.chunkGrid as [number, number, number],
+    dtype: String(L.dtype ?? "<f4"),
+    bytes: L.bytes as number | undefined,
+    chunkHashes: L.chunkHashes as Record<string, string> | undefined,
+  };
+  const ijk = Array.isArray(L.ijkToRAS)
+    ? (L.ijkToRAS as number[]).slice()
+    : scaledIjkToRAS(fallbackIjk, 2 ** level);
+  return { level, z, ijkToRAS: ijk };
+}
+
+/**
+ * Resolve pyramid levels: `attrs.zarrLevels`, else `blobBase/meta.json` levels,
+ * else the single `attrs.zarr` (slab-progressive fallback).
+ */
+export async function resolveSceneLevels(parsed: {
+  blobBase: string;
+  vol: Node;
+  z: ZarrDesc;
+  ijkToRAS: number[];
+}): Promise<SceneZarrLevel[]> {
+  const attrs = parsed.vol.attrs ?? {};
+  if (Array.isArray(attrs.zarrLevels) && (attrs.zarrLevels as unknown[]).length > 0) {
+    return (attrs.zarrLevels as Record<string, unknown>[])
+      .map((L) => levelFromRecord(L, parsed.ijkToRAS))
+      .sort((a, b) => a.level - b.level);
+  }
+  try {
+    const r = await fetch(parsed.blobBase + "meta.json");
+    if (r.ok) {
+      const meta = await r.json() as { levels?: Record<string, unknown>[] };
+      if (Array.isArray(meta.levels) && meta.levels.length > 0) {
+        return meta.levels
+          .map((L) => levelFromRecord(L, parsed.ijkToRAS))
+          .sort((a, b) => a.level - b.level);
+      }
+    }
+  } catch {
+    /* no sidecar meta */
+  }
+  return [{ level: 0, z: parsed.z, ijkToRAS: parsed.ijkToRAS.slice() }];
+}
+
+type ParsedScene = {
+  nodes: Record<string, Node>;
+  blobBase: string;
+  vol: Node;
+  z: ZarrDesc;
+  ijkToRAS: number[];
+  lut: Uint8Array;
+  clim: [number, number];
+  shade: [number, number, number, number];
+  win: number;
+  lev: number;
+  markups: Markup[];
+};
+
+async function parseSceneJson(
   sceneUrl: string,
-  onBytes?: (n: number) => void,
   opts: LoadOpts = {},
-): Promise<SceneVolume> {
+): Promise<ParsedScene> {
   const raw = await (await fetch(sceneUrl)).json() as SceneWrapper | Record<string, Node>;
-  // mrson scenes (neutral `type`-keyed nodes) are adapted to the legacy class-keyed shape.
   const adapted = isMrsonScene(raw) ? adaptMrsonScene(raw) as unknown as SceneWrapper : raw;
   const wrapper = (adapted as SceneWrapper).nodes ? adapted as SceneWrapper : { nodes: adapted as Record<string, Node> };
   const nodes = wrapper.nodes!;
-  // Resolve blobBase RELATIVE TO THE SCENE FILE (not the page): a portable export can
-  // ship `"blobBase":"blobs/"` next to scene.json and be served from any path. Absolute
-  // blobBase (e.g. the JS2 bucket URL) is returned unchanged by URL resolution.
   const pageBase = (globalThis as { location?: { href?: string } }).location?.href ?? "file:///";
   const sceneAbs = new URL(sceneUrl, pageBase).href;
   const blobBase = new URL(wrapper.blobBase ?? "./blobs/", sceneAbs).href;
@@ -130,15 +208,12 @@ export async function loadSceneVolumeField(
   const z = vol.attrs!.zarr as ZarrDesc;
   let ijkToRAS = vol.attrs!.ijkToRAS as number[];
   if (!ijkToRAS) throw new Error("volume node has no ijkToRAS");
-  if (opts.extraTranslationRAS) {   // pre-multiply a RAS translation (row-major 4x4)
+  if (opts.extraTranslationRAS) {
     const t = opts.extraTranslationRAS;
     ijkToRAS = ijkToRAS.slice();
     ijkToRAS[3] += t[0]; ijkToRAS[7] += t[1]; ijkToRAS[11] += t[2];
   }
 
-  const zv = await fetchZarrVolume(blobBase, z, onBytes);
-
-  // Prefer a VolumePropertyNode (VR transfer functions) reachable from this volume's display nodes.
   let vp: Node | undefined;
   for (const dispId of vol.refs?.display ?? []) {
     const disp = nodes[dispId];
@@ -146,6 +221,11 @@ export async function loadSceneVolumeField(
       if (nodes[vpId]?.class === "vtkMRMLVolumePropertyNode") vp = nodes[vpId];
     }
   }
+
+  const disp0 = nodes[(vol.refs?.display ?? [])[0]]?.attrs ?? {};
+  // Prefer scene display W/L for clim when no VolumeProperty; observed range is unknown until stream ends.
+  const winFallback = (disp0.window as number) ?? 1400;
+  const levFallback = (disp0.level as number) ?? 300;
 
   let lut: Uint8Array, clim: [number, number], shade: [number, number, number, number];
   if (vp?.attrs?.color && vp?.attrs?.scalarOpacity) {
@@ -155,23 +235,150 @@ export async function loadSceneVolumeField(
     lut = lutFromTransferFunctions(colorTF, opacityTF, clim);
     shade = vp.attrs.shade ? [0.25, 0.75, 0.5, 24] : [1, 0, 0, 1];
   } else {
-    // window/level grayscale
-    const disp = nodes[(vol.refs?.display ?? [])[0]]?.attrs ?? {};
-    const win = (disp.window as number) ?? (zv.range[1] - zv.range[0]);
-    const lev = (disp.level as number) ?? (zv.range[0] + zv.range[1]) / 2;
-    clim = [lev - win / 2, lev + win / 2];
+    clim = [levFallback - winFallback / 2, levFallback + winFallback / 2];
     lut = lutFromWindowLevel();
     shade = [0.25, 0.75, 0.5, 24];
   }
 
-  // Display window/level for MPR grayscale (fall back to the observed data range).
-  const disp0 = nodes[(vol.refs?.display ?? [])[0]]?.attrs ?? {};
-  const win = (disp0.window as number) ?? (zv.range[1] - zv.range[0]);
-  const lev = (disp0.level as number) ?? (zv.range[0] + zv.range[1]) / 2;
+  const win = (disp0.window as number) ?? winFallback;
+  const lev = (disp0.level as number) ?? levFallback;
 
-  const field = new ImageField(dev, zv.data, zv.dims, [1, 1, 1], lut, { clim, ijkToRAS, shade });
+  return {
+    nodes, blobBase, vol, z, ijkToRAS, lut, clim, shade, win, lev,
+    markups: parseMarkups(nodes),
+  };
+}
+
+function sceneVolumeFromParts(
+  field: ImageField,
+  voxels: Float32Array,
+  dims: [number, number, number],
+  parsed: ParsedScene,
+  range: [number, number],
+  ijkToRAS: number[] = parsed.ijkToRAS,
+): SceneVolume {
   const [lo, hi] = field.aabb();
   const center: Vec3 = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
   const radius = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
-  return { field, voxels: zv.data, dims: zv.dims, ijkToRAS, name: vol.name ?? "volume", range: zv.range, center, radius, win, lev, markups: parseMarkups(nodes) };
+  return {
+    field,
+    voxels,
+    dims,
+    ijkToRAS,
+    name: parsed.vol.name ?? "volume",
+    range,
+    center,
+    radius,
+    win: parsed.win,
+    lev: parsed.lev,
+    markups: parsed.markups,
+    vr: { lut: parsed.lut, clim: parsed.clim, shade: parsed.shade },
+  };
+}
+
+/** Fetch a scene json + its scalar volume and return a renderable ImageField (waits for full zarr). */
+export async function loadSceneVolumeField(
+  dev: GPUDevice,
+  sceneUrl: string,
+  onBytes?: (n: number) => void,
+  opts: LoadOpts = {},
+): Promise<SceneVolume> {
+  return loadSceneVolumeFieldProgressive(dev, sceneUrl, { onBytes }, opts);
+}
+
+export interface ProgressiveLoadHandlers {
+  onBytes?: (n: number) => void;
+  /** Called as soon as the ImageField exists (zeros + scene LUT/geometry). */
+  onReady?: (sv: SceneVolume) => void;
+  /** After each completed z-slab has been uploaded to the *displayed* `sv.field`. */
+  onSlab?: (zStart: number, zCount: number, sv: SceneVolume) => void;
+  /**
+   * Finer pyramid level fully slab-filled into a pending ImageField and ready to replace
+   * the displayed volume (coarse→fine LOD upgrade).
+   */
+  onUpgrade?: (sv: SceneVolume) => void;
+}
+
+/** Slab-stream one zarr level into a new ImageField. Optionally notify onReady/onSlab. */
+async function loadLevelSlabProgressive(
+  dev: GPUDevice,
+  parsed: ParsedScene,
+  lev: SceneZarrLevel,
+  handlers: ProgressiveLoadHandlers,
+  opts: { notifyReady: boolean; notifySlabs: boolean },
+): Promise<SceneVolume> {
+  const [nz, ny, nx] = lev.z.shape;
+  const dims: [number, number, number] = [nx, ny, nz];
+  const voxels = new Float32Array(nx * ny * nz);
+  // Below-window fill so unset slabs read as black in MPR (zeros window to mid-gray).
+  voxels.fill(parsed.lev - parsed.win / 2 - 1);
+  const field = new ImageField(dev, voxels, dims, [1, 1, 1], parsed.lut, {
+    clim: parsed.clim,
+    ijkToRAS: lev.ijkToRAS,
+    shade: parsed.shade,
+  });
+  const sv = sceneVolumeFromParts(field, voxels, dims, parsed, [0, 0], lev.ijkToRAS);
+  if (opts.notifyReady) handlers.onReady?.(sv);
+
+  const zv = await fetchZarrVolume(parsed.blobBase, lev.z, {
+    onBytes: handlers.onBytes,
+    into: voxels,
+    onChunk: (info) => {
+      field.updateScalarsRegion(
+        voxels,
+        info.xStart, info.yStart, info.zStart,
+        info.xCount, info.yCount, info.zCount,
+      );
+      // Reuse onSlab as "something painted" so IRA can coalesce rAF redraws.
+      if (opts.notifySlabs) handlers.onSlab?.(info.zStart, info.zCount, sv);
+    },
+  });
+  sv.range = zv.range;
+  return sv;
+}
+
+/**
+ * Stream a scene volume with optional coarse→fine pyramid LOD.
+ *
+ * - Single-scale (`attrs.zarr` only): allocate below-window fill, onReady, patch as z-slabs complete.
+ * - Multiscale (`attrs.zarrLevels` or `blobBase/meta.json`): mount coarsest with slabs, then
+ *   slab-fill each finer level into a *pending* ImageField and fire onUpgrade when that
+ *   level is complete (caller swaps the displayed field).
+ */
+export async function loadSceneVolumeFieldProgressive(
+  dev: GPUDevice,
+  sceneUrl: string,
+  handlers: ProgressiveLoadHandlers = {},
+  opts: LoadOpts = {},
+): Promise<SceneVolume> {
+  const parsed = await parseSceneJson(sceneUrl, opts);
+  const levels = await resolveSceneLevels(parsed);
+
+  // Coarse→fine: highest level index first.
+  const byCoarse = [...levels].sort((a, b) => b.level - a.level);
+  const coarse = byCoarse[0]!;
+  let current = await loadLevelSlabProgressive(dev, parsed, coarse, handlers, {
+    notifyReady: true,
+    notifySlabs: true,
+  });
+
+  for (let i = 1; i < byCoarse.length; i++) {
+    if (opts.signal?.aborted) break;
+    const lev = byCoarse[i]!;
+    // Pending fine field: slab-fill GPU texture off-screen, then upgrade.
+    const pending = await loadLevelSlabProgressive(dev, parsed, lev, handlers, {
+      notifyReady: false,
+      notifySlabs: false,
+    });
+    if (opts.signal?.aborted) {
+      pending.field.destroy();
+      break;
+    }
+    // Hand ownership of `pending.field` to the viewer via onUpgrade; do not destroy the
+    // previously displayed field here — swapVolumeField (or an unused twin) owns that.
+    current = pending;
+    handlers.onUpgrade?.(current);
+  }
+
+  return current;
 }

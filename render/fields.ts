@@ -18,6 +18,7 @@ import {
   volumeAABB,
   volumeAABBFromIjkToRAS,
 } from "./mat4.ts";
+import { writeScalarTexture3DSlices, writeScalarTexture3DRegion } from "./textures.ts";
 
 /** AABB of a box [lo,hi] transformed by a 4x4 (its 8 corners re-bounded). */
 function transformedAABB(m: Mat4, lo: Vec3, hi: Vec3): [Vec3, Vec3] {
@@ -141,6 +142,45 @@ export class ImageField implements Field {
    *  The bind group holds a stable view of lutTex, so the next render uses the new LUT. */
   setLUT(lut: Uint8Array) {
     this.dev.queue.writeTexture({ texture: this.lutTex }, lut, { bytesPerRow: 256 * 4 }, [256, 1]);
+  }
+
+  /**
+   * Patch a contiguous z-range of the scalar volume texture from a full-volume
+   * Float32Array (r32float ImageFields). No pipeline rebuild — caller redraws.
+   */
+  updateScalars(data: Float32Array, zStart: number, zCount: number) {
+    if (this.normScale !== 1) {
+      throw new Error("ImageField.updateScalars requires an r32float volume");
+    }
+    writeScalarTexture3DSlices(this.dev, this.volTex, data, this.dims, zStart, zCount);
+  }
+
+  /**
+   * Patch an axis-aligned box (one zarr chunk) from a full-volume Float32Array.
+   * Enables MPR mid-plane updates before a full z-slab is assembled.
+   */
+  updateScalarsRegion(
+    data: Float32Array,
+    xStart: number,
+    yStart: number,
+    zStart: number,
+    xCount: number,
+    yCount: number,
+    zCount: number,
+  ) {
+    if (this.normScale !== 1) {
+      throw new Error("ImageField.updateScalarsRegion requires an r32float volume");
+    }
+    writeScalarTexture3DRegion(
+      this.dev, this.volTex, data, this.dims,
+      xStart, yStart, zStart, xCount, yCount, zCount,
+    );
+  }
+
+  /** Free GPU textures (call when replacing the field on a coarse→fine LOD upgrade). */
+  destroy() {
+    this.volTex.destroy();
+    this.lutTex.destroy();
   }
 
   /** The scalar range the LUT spans — window/level for the volume rendering. Re-packed into

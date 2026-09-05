@@ -80,58 +80,385 @@ function makeThumb(ds) {
     return { w: TW, h: TH, rgba };
 }
 async function buildVolume(ctKeys) {
-    post({ t: 'ctinfo', count: ctKeys.length });
-    const slices = [];
+    const nz = ctKeys.length;
+    post({ t: 'ctinfo', count: nz });
+    // Practical progressive schedule:
+    //  1) header-probe evenly spaced keys → provisional middle + ends (IPP·normal)
+    //  2) mount + paint provisional middle; refine "best mid" as each new IPP arrives
+    //  3) concurrent fetch prefers running mid, then center-out among known headers
+    const decoded = []; // { sortKey, ipp, pixels, inst, key }
+    let nx, ny, iop, rowDir, colDir, normal, ps, win, lev;
+    let originIPP = null;
+    let originSk = 0;
+    let spacing = 1;
+    let vol = null;
+    let slicePix = 0;
+    let ready = false;
     let done = 0;
-    const CONC = 8;
-    let idx = 0;
-    async function worker() {
-        while (idx < ctKeys.length) {
-            const k = ctKeys[idx++];
-            const ds = naturalize(await fetchBuf(k));
-            slices.push(ds);
-            const th = makeThumb(ds);
-            if (th)
-                post({ t: 'thumb', n: Number(ds.InstanceNumber) || slices.length, w: th.w, h: th.h, rgba: th.rgba.buffer }, [th.rgba.buffer]);
-            done++;
-            if (done % 8 === 0)
-                prog(`${MODNAME} ${done}/${ctKeys.length}`, 0.05 + 0.45 * done / ctKeys.length);
-        }
-    }
-    await Promise.all(Array.from({ length: CONC }, worker));
-    const s0 = slices[0];
-    const iop = s0.ImageOrientationPatient.map(Number);
-    const rowDir = iop.slice(0, 3), colDir = iop.slice(3, 6);
-    const normal = cross(rowDir, colDir);
-    slices.sort((a, b) => dot(a.ImagePositionPatient.map(Number), normal) - dot(b.ImagePositionPatient.map(Number), normal));
-    const nz = slices.length, ny = s0.Rows, nx = s0.Columns;
-    const ps = s0.PixelSpacing.map(Number);
-    const p0 = slices[0].ImagePositionPatient.map(Number);
-    const p1 = slices[nz - 1].ImagePositionPatient.map(Number);
-    const sliceSpacing = nz > 1 ? dot(sub(p1, p0), normal) / (nz - 1) : (Number(s0.SliceThickness) || 1);
-    const c0 = lps2ras(rowDir.map((v) => v * ps[1])), c1 = lps2ras(colDir.map((v) => v * ps[0])), c2 = lps2ras(normal.map((v) => v * sliceSpacing)), o = lps2ras(p0);
-    const ijkToRAS = [c0[0], c1[0], c2[0], o[0], c0[1], c1[1], c2[1], o[1], c0[2], c1[2], c2[2], o[2], 0, 0, 0, 1];
     const isPET = MODNAME === 'PET';
-    const vol = isPET ? new Float32Array(nx * ny * nz) : new Int16Array(nx * ny * nz);
-    for (let k = 0; k < nz; k++) {
-        const ds = slices[k];
-        // PER-SLICE rescale: PET (and some CT/MR) carry a DIFFERENT RescaleSlope/RescaleIntercept on every
-        // slice — applying only the first slice's values mis-scales the rest of the volume. Read them per k.
+    const CONC = 8;
+
+    function extractPixels(ds) {
         const slope = Number(ds.RescaleSlope ?? 1), inter = Number(ds.RescaleIntercept ?? 0);
         let pd = ds.PixelData;
         if (Array.isArray(pd))
             pd = pd[0];
         const px = ds.PixelRepresentation === 1 ? new Int16Array(pd) : new Uint16Array(pd);
-        const off = k * nx * ny;
-        for (let p = 0; p < nx * ny; p++)
-            vol[off + p] = px[p] * slope + inter;
+        const out = new Float32Array(ds.Rows * ds.Columns);
+        for (let p = 0; p < out.length; p++)
+            out[p] = px[p] * slope + inter;
+        return out;
     }
-    let win, lev;
-    if (MODNAME === 'CT') {
-        win = Number((Array.isArray(s0.WindowWidth) ? s0.WindowWidth[0] : s0.WindowWidth) ?? 400);
-        lev = Number((Array.isArray(s0.WindowCenter) ? s0.WindowCenter[0] : s0.WindowCenter) ?? 40);
+
+    function provisionalIjkToRAS(sliceSpacing, origin) {
+        const c0 = lps2ras(rowDir.map((v) => v * ps[1]));
+        const c1 = lps2ras(colDir.map((v) => v * ps[0]));
+        const c2 = lps2ras(normal.map((v) => v * sliceSpacing));
+        const o = lps2ras(origin);
+        return [c0[0], c1[0], c2[0], o[0], c0[1], c1[1], c2[1], o[1], c0[2], c1[2], c2[2], o[2], 0, 0, 0, 1];
     }
-    else {
+
+    /** Prefer a cheap header range; fall back to a full GET if the parse is incomplete. */
+    async function fetchDicomMeta(key) {
+        const HEAD = 256 << 10;
+        try {
+            const buf = await fetchRetry(CT_S3 + key, { headers: { Range: `bytes=0-${HEAD - 1}` } }).then((r) => r.arrayBuffer());
+            const ds = naturalize(buf);
+            if (!ds.ImagePositionPatient || !ds.ImageOrientationPatient || !ds.Rows || !ds.Columns)
+                throw new Error('incomplete header');
+            return ds;
+        }
+        catch (_) {
+            return naturalize(await fetchBuf(key));
+        }
+    }
+
+    function applyWlFrom(ds) {
+        const mod = String(ds.Modality || MODNAME).toUpperCase();
+        if (mod === 'CT') {
+            win = Number((Array.isArray(ds.WindowWidth) ? ds.WindowWidth[0] : ds.WindowWidth) ?? 400);
+            lev = Number((Array.isArray(ds.WindowCenter) ? ds.WindowCenter[0] : ds.WindowCenter) ?? 40);
+        }
+        else {
+            win = 400;
+            lev = 40;
+        }
+    }
+
+    function publishReady() {
+        if (ready)
+            return;
+        const empty = lev - win / 2 - 1;
+        vol = new Float32Array(nx * ny * nz);
+        vol.fill(empty);
+        post({
+            t: 'ctready',
+            dims: [nx, ny, nz],
+            ijkToRAS: provisionalIjkToRAS(spacing, originIPP),
+            win,
+            lev,
+            dtype: 'float32',
+        });
+        ready = true;
+    }
+
+    function zFor(item) {
+        const k = Math.round((item.sortKey - originSk) / Math.max(1e-6, spacing));
+        return Math.max(0, Math.min(nz - 1, k));
+    }
+
+    function postSlice(z) {
+        const slab = vol.slice(z * slicePix, (z + 1) * slicePix);
+        post({ t: 'ctslab', zStart: z, zCount: 1, dims: [nx, ny, nz], vol: slab.buffer }, [slab.buffer]);
+    }
+
+    function rewriteAll() {
+        vol.fill(lev - win / 2 - 1);
+        for (const item of decoded) {
+            const z = zFor(item);
+            vol.set(item.pixels, z * slicePix);
+        }
+        const full = vol.slice();
+        post({ t: 'ctslab', zStart: 0, zCount: nz, dims: [nx, ny, nz], vol: full.buffer }, [full.buffer]);
+    }
+
+    function maybeRefineOrigin(item) {
+        if (item.sortKey >= originSk - 1e-3)
+            return;
+        originIPP = item.ipp;
+        originSk = item.sortKey;
+        post({ t: 'ctgeom', ijkToRAS: provisionalIjkToRAS(spacing, originIPP), win, lev });
+        rewriteAll();
+    }
+
+    /** Pick SliceThickness vs SpacingBetweenSlices by closeness to an IPP-derived gap. */
+    function spacingFromTags(ds, gapHint) {
+        const st = Number(ds.SliceThickness);
+        const sbs = Number(ds.SpacingBetweenSlices);
+        const hasSt = Number.isFinite(st) && st > 0;
+        const hasSbs = Number.isFinite(sbs) && sbs > 0;
+        if (Number.isFinite(gapHint) && gapHint > 0 && hasSt && hasSbs) {
+            return Math.abs(st - gapHint) <= Math.abs(sbs - gapHint) ? st : sbs;
+        }
+        if (hasSt)
+            return st;
+        if (hasSbs)
+            return sbs;
+        return Number.isFinite(gapHint) && gapHint > 0 ? gapHint : 1;
+    }
+
+    function medianGap(sortedKeys) {
+        if (sortedKeys.length < 2)
+            return NaN;
+        const gaps = [];
+        for (let i = 1; i < sortedKeys.length; i++) {
+            const g = sortedKeys[i] - sortedKeys[i - 1];
+            if (g > 1e-6)
+                gaps.push(g);
+        }
+        if (!gaps.length)
+            return NaN;
+        gaps.sort((a, b) => a - b);
+        return gaps[gaps.length >> 1];
+    }
+
+    /**
+     * Sparse probes are not adjacent slices — median ΔIPP is often K× true spacing.
+     * Divide out the integer stride when it matches a DICOM tag (or fall back to tag).
+     */
+    function perSliceSpacing(probeGap, tagSp) {
+        if (Number.isFinite(tagSp) && tagSp > 0 && Number.isFinite(probeGap) && probeGap > 0) {
+            const ratio = probeGap / tagSp;
+            const k = Math.max(1, Math.round(ratio));
+            if (Math.abs(ratio - k) <= 0.25 * k)
+                return probeGap / k;
+            // Prefer tag when the probe gap is not a clean multiple (irregular / bad sample).
+            return tagSp;
+        }
+        if (Number.isFinite(probeGap) && probeGap > 0)
+            return probeGap;
+        if (Number.isFinite(tagSp) && tagSp > 0)
+            return tagSp;
+        return 1;
+    }
+
+    function ingest(ds, key) {
+        const ipp = ds.ImagePositionPatient.map(Number);
+        if (!ready) {
+            // Fallback if probe failed: mount on first full decode.
+            // dims = [Columns, Rows, N] — matches DICOM row-major + GPU bytesPerRow.
+            nx = ds.Columns;
+            ny = ds.Rows;
+            slicePix = nx * ny;
+            iop = ds.ImageOrientationPatient.map(Number);
+            rowDir = iop.slice(0, 3);
+            colDir = iop.slice(3, 6);
+            normal = cross(rowDir, colDir);
+            ps = ds.PixelSpacing.map(Number);
+            spacing = spacingFromTags(ds, NaN);
+            applyWlFrom(ds);
+            originIPP = ipp;
+            originSk = dot(ipp, normal);
+            publishReady();
+        }
+        if (ds.Columns !== nx || ds.Rows !== ny)
+            throw new Error('idc_tools: slice size ' + ds.Columns + 'x' + ds.Rows + ' != ' + nx + 'x' + ny);
+        const sortKey = dot(ipp, normal);
+        const inst = Number(ds.InstanceNumber);
+        const pixels = extractPixels(ds);
+        const item = { sortKey, ipp, pixels, inst, key };
+        decoded.push(item);
+        const z = zFor(item);
+        vol.set(pixels, z * slicePix);
+        postSlice(z);
+        maybeRefineOrigin(item);
+        const th = makeThumb(ds);
+        if (th)
+            post({ t: 'thumb', n: Number.isFinite(inst) ? inst : decoded.length, w: th.w, h: th.h, rgba: th.rgba.buffer }, [th.rgba.buffer]);
+        done++;
+        if (done % 4 === 0 || done === nz)
+            prog(MODNAME + ' ' + done + '/' + nz, 0.05 + 0.5 * done / nz);
+        return item;
+    }
+
+    // ---- Phase 1: header probe -----------------------------------------------------------
+    prog('probing geometry…', 0.02);
+    const nProbe = Math.min(16, nz);
+    const probeIdx = [];
+    const seenIdx = new Set();
+    for (let i = 0; i < nProbe; i++) {
+        const j = nProbe === 1 ? 0 : Math.round(i * (nz - 1) / (nProbe - 1));
+        if (!seenIdx.has(j)) {
+            seenIdx.add(j);
+            probeIdx.push(j);
+        }
+    }
+    const probes = [];
+    await Promise.all(probeIdx.map(async (ji) => {
+        const key = ctKeys[ji];
+        const ds = await fetchDicomMeta(key);
+        const ipp = ds.ImagePositionPatient.map(Number);
+        const iop0 = ds.ImageOrientationPatient.map(Number);
+        probes.push({ key, ds, ipp, iop: iop0, inst: Number(ds.InstanceNumber) });
+    }));
+    if (!probes.length)
+        throw new Error('idc_tools: geometry probe returned no slices');
+
+    // Shared orientation from the first probe; sortKey needs the normal.
+    // dims = [Columns, Rows, N] (Cornerstone / demos/idc-worker.js convention).
+    {
+        const ds0 = probes[0].ds;
+        iop = probes[0].iop;
+        rowDir = iop.slice(0, 3);
+        colDir = iop.slice(3, 6);
+        normal = cross(rowDir, colDir);
+        nx = ds0.Columns;
+        ny = ds0.Rows;
+        slicePix = nx * ny;
+        ps = ds0.PixelSpacing.map(Number);
+        applyWlFrom(ds0);
+    }
+    for (const p of probes)
+        p.sortKey = dot(p.ipp, normal);
+    probes.sort((a, b) => a.sortKey - b.sortKey);
+    const lo = probes[0];
+    const hi = probes[probes.length - 1];
+    const mid = probes[probes.length >> 1];
+    const probeGap = medianGap(probes.map((p) => p.sortKey));
+    // Tag pick without the raw multi-slice probe gap (that inflated PET Z ~10×).
+    const tagSp = spacingFromTags(mid.ds, NaN);
+    spacing = perSliceSpacing(probeGap, tagSp);
+    // Prefer the spatially lowest probed IPP as z=0 origin (refined as true min arrives).
+    originIPP = lo.ipp;
+    originSk = lo.sortKey;
+    publishReady();
+    prog('loading middle slice…', 0.04);
+
+    // ---- Phase 2: full fetches; refine "middle" as new IPP headers arrive ---------------
+    // knownSk grows with every header (probes + each full decode). bestMid = closest to
+    // (min+max)/2 among known keys — bump that key to the front of the remaining queue.
+    const knownSk = new Map(); // key -> sortKey
+    for (const p of probes)
+        knownSk.set(p.key, p.sortKey);
+
+    function bestMidKey() {
+        let loSk = Infinity, hiSk = -Infinity;
+        for (const sk of knownSk.values()) {
+            if (sk < loSk)
+                loSk = sk;
+            if (sk > hiSk)
+                hiSk = sk;
+        }
+        if (!Number.isFinite(loSk) || !Number.isFinite(hiSk))
+            return null;
+        const target = (loSk + hiSk) / 2;
+        let best = null, bestD = Infinity;
+        for (const [k, sk] of knownSk) {
+            const d = Math.abs(sk - target);
+            if (d < bestD) {
+                bestD = d;
+                best = k;
+            }
+        }
+        return best;
+    }
+
+    /** Prefer pending best-mid; else an unknown key (expands IPP range); else closest known. */
+    function claimNext(pending) {
+        if (!pending.size)
+            return null;
+        const prefer = bestMidKey();
+        if (prefer && pending.has(prefer)) {
+            pending.delete(prefer);
+            return prefer;
+        }
+        // Expand known IPP span so the mid target improves before we drain the rest.
+        for (const k of pending) {
+            if (!knownSk.has(k)) {
+                pending.delete(k);
+                return k;
+            }
+        }
+        let loSk = Infinity, hiSk = -Infinity;
+        for (const sk of knownSk.values()) {
+            if (sk < loSk)
+                loSk = sk;
+            if (sk > hiSk)
+                hiSk = sk;
+        }
+        const target = Number.isFinite(loSk) ? (loSk + hiSk) / 2 : 0;
+        let best = null, bestD = Infinity;
+        for (const k of pending) {
+            const d = Math.abs(knownSk.get(k) - target);
+            if (d < bestD) {
+                bestD = d;
+                best = k;
+            }
+        }
+        if (best) {
+            pending.delete(best);
+            return best;
+        }
+        return null;
+    }
+
+    const pending = new Set(ctKeys);
+
+    // Paint provisional mid first (fast useful first paint from sparse probe).
+    {
+        pending.delete(mid.key);
+        const midDs = naturalize(await fetchBuf(mid.key));
+        const midIpp = midDs.ImagePositionPatient.map(Number);
+        knownSk.set(mid.key, dot(midIpp, normal));
+        ingest(midDs, mid.key);
+    }
+    // Far probe end: refine spacing, also expands known IPP range for mid estimate.
+    if (hi.key !== mid.key && pending.has(hi.key)) {
+        pending.delete(hi.key);
+        const hiDs = naturalize(await fetchBuf(hi.key));
+        const hiIpp = hiDs.ImagePositionPatient.map(Number);
+        knownSk.set(hi.key, dot(hiIpp, normal));
+        const hiItem = ingest(hiDs, hi.key);
+        const midItem = decoded.find((d) => d.key === mid.key);
+        if (midItem) {
+            const dSk = Math.abs(hiItem.sortKey - midItem.sortKey);
+            const dZ = Math.max(1, Math.round(dSk / Math.max(1e-6, spacing)));
+            const refined = dSk / dZ;
+            if (refined > 1e-4 && Math.abs(refined - spacing) / spacing > 0.05) {
+                spacing = refined;
+                post({ t: 'ctgeom', ijkToRAS: provisionalIjkToRAS(spacing, originIPP), win, lev });
+                rewriteAll();
+            }
+        }
+    }
+
+    async function worker() {
+        while (pending.size) {
+            const key = claimNext(pending);
+            if (!key)
+                break;
+            const ds = naturalize(await fetchBuf(key));
+            const ipp = ds.ImagePositionPatient.map(Number);
+            knownSk.set(key, dot(ipp, normal));
+            ingest(ds, key);
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONC, Math.max(1, nz)) }, worker));
+
+    // Canonical z-order + geometry from full IPP sort.
+    decoded.sort((a, b) => a.sortKey - b.sortKey);
+    for (let z = 0; z < decoded.length; z++)
+        vol.set(decoded[z].pixels, z * slicePix);
+    const p0 = decoded[0].ipp;
+    const p1 = decoded[nz - 1].ipp;
+    const sliceSpacing = nz > 1 ? dot(sub(p1, p0), normal) / (nz - 1) : spacing;
+    const ijkToRAS = provisionalIjkToRAS(sliceSpacing, p0);
+    {
+        const full = vol.slice();
+        post({ t: 'ctslab', zStart: 0, zCount: nz, dims: [nx, ny, nz], vol: full.buffer }, [full.buffer]);
+    }
+    post({ t: 'ctgeom', ijkToRAS, win, lev });
+    if (MODNAME !== 'CT') {
         const N = vol.length, step = Math.max(1, (N / 200000) | 0), samp = [];
         for (let i = 0; i < N; i += step) {
             const v = vol[i];
@@ -140,14 +467,18 @@ async function buildVolume(ctKeys) {
         }
         samp.sort((a, b) => a - b);
         const pct = (f) => (samp.length ? samp[Math.min(samp.length - 1, (f * samp.length) | 0)] : 0);
-        const lo = isPET ? 0 : pct(0.01), hi = isPET ? (pct(0.98) || 1) : pct(0.99);
-        lev = (lo + hi) / 2;
-        win = Math.max(1, hi - lo);
+        const loPct = isPET ? 0 : pct(0.01), hiPct = isPET ? (pct(0.98) || 1) : pct(0.99);
+        lev = (loPct + hiPct) / 2;
+        win = Math.max(1, hiPct - loPct);
     }
-    return { vol, dims: [nx, ny, nz], ijkToRAS, win, lev, iop, ps, dtype: isPET ? 'float32' : 'int16' };
+    return { vol, dims: [nx, ny, nz], ijkToRAS, win, lev, iop, ps, dtype: 'float32' };
 }
 function buildLabelmap(ds, bits, ct) {
-    const [nx, ny, nz] = ct.dims, frameBytes = (nx * ny) >> 3;
+    const [nx, ny, nz] = ct.dims;
+    // SEG frames may differ from the source volume (e.g. 512² SEG on 128² PET).
+    const segCols = Number(ds.Columns) || nx;
+    const segRows = Number(ds.Rows) || ny;
+    const frameBytes = (segCols * segRows) >> 3;
     const lab = new Uint8Array(nx * ny * nz);
     const M = ct.ijkToRAS, inv = invAffine(M);
     const toIJK = (lps) => {
@@ -200,9 +531,9 @@ function buildLabelmap(ds, bits, ct) {
             post({ t: 'seg', name: names[segNum] || ('Segment ' + segNum) });
         }
         const o = toIJK(ippLps), fb = f * frameBytes;
-        for (let row = 0; row < ny; row++) {
-            const bi = o[0] + row * diRow[0], bj = o[1] + row * diRow[1], bk = o[2] + row * diRow[2], rb = row * nx;
-            for (let col = 0; col < nx; col++) {
+        for (let row = 0; row < segRows; row++) {
+            const bi = o[0] + row * diRow[0], bj = o[1] + row * diRow[1], bk = o[2] + row * diRow[2], rb = row * segCols;
+            for (let col = 0; col < segCols; col++) {
                 const p = rb + col;
                 if (!((bits[fb + (p >> 3)] >> (p & 7)) & 1))
                     continue;

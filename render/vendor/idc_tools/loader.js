@@ -35,6 +35,38 @@ function runWorker(ctKeys, segKeys, ctBucket, segBucket, modality, handlers, opt
                 case 'progress':
                     handlers.onProgress?.({ frac: m.frac, msg: m.msg });
                     break;
+                case 'ctready':
+                    // Fire immediately (not on `chain`): resolveReady mounts the viewer, and chaining
+                    // would delay every ctslab until that mount yields — no progressive paint.
+                    try {
+                        handlers.onCTReady?.({
+                            dims: m.dims, ijkToRAS: m.ijkToRAS, win: m.win, lev: m.lev, dtype: m.dtype || 'float32', modality,
+                        });
+                    }
+                    catch (err) {
+                        console.error('[idc_tools] onCTReady', err);
+                    }
+                    break;
+                case 'ctgeom':
+                    try {
+                        handlers.onCTGeom?.({ ijkToRAS: m.ijkToRAS, win: m.win, lev: m.lev });
+                    }
+                    catch (err) {
+                        console.error('[idc_tools] onCTGeom', err);
+                    }
+                    break;
+                case 'ctslab': {
+                    const data = new Float32Array(m.vol);
+                    try {
+                        handlers.onCTSlab?.({
+                            zStart: m.zStart, zCount: m.zCount, data, dims: m.dims,
+                        });
+                    }
+                    catch (err) {
+                        console.error('[idc_tools] onCTSlab', err);
+                    }
+                    break;
+                }
                 case 'ct': {
                     const Ctor = m.dtype === 'float32' ? Float32Array : Int16Array;
                     ct = { vol: new Ctor(m.vol), dims: m.dims, ijkToRAS: m.ijkToRAS, win: m.win, lev: m.lev, dtype: m.dtype, modality };

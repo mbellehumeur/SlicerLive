@@ -62,6 +62,17 @@ export interface LoadProgress {
 export interface LoadHandlers {
     /** fires as soon as the source volume is reconstructed (before the SEG) */
     onCT?: (ct: CTVolume) => void | Promise<void>;
+    /** geometry + W/L after sort, before voxel fill — mount a zero volume and stream slabs */
+    onCTReady?: (meta: Omit<CTVolume, 'vol'> & { vol?: Float32Array }) => void | Promise<void>;
+    /** refined ijkToRAS as better reference slices arrive (or at end after full IPP sort) */
+    onCTGeom?: (meta: { ijkToRAS: number[]; win?: number; lev?: number }) => void | Promise<void>;
+    /** contiguous z-slab of the assembling float32 volume (z-order after IPP sort) */
+    onCTSlab?: (info: {
+        zStart: number;
+        zCount: number;
+        data: Float32Array;
+        dims: [number, number, number];
+    }) => void | Promise<void>;
     onLabelmap?: (seg: SegLabelmap) => void | Promise<void>;
     onProgress?: (p: LoadProgress) => void;
     /** streaming slice thumbnail (RGBA) for a progress mosaic, keyed by InstanceNumber */

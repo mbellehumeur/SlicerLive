@@ -178,6 +178,57 @@ function spacingFromIjkToRAS(ijkToRAS) {
   return [col(0), col(1), col(2)];
 }
 
+// render/textures.ts
+function writeScalarTexture3DSlices(dev, texture, data, dims, zStart, zCount) {
+  const [dx, dy, dz] = dims;
+  if (zCount <= 0 || zStart < 0 || zStart >= dz) {
+    return;
+  }
+  const depth = Math.min(zCount, dz - zStart);
+  if (depth <= 0) {
+    return;
+  }
+  const bytesPerRow = dx * 4;
+  const rowsPerImage = dy;
+  const bytesPerSlice = bytesPerRow * rowsPerImage;
+  const maxBuffer = Math.max(1, Number(dev.limits.maxBufferSize) || 256 * 1024 * 1024);
+  const maxChunkBytes = Math.max(bytesPerSlice, Math.floor(maxBuffer * 0.9));
+  const slicesPerChunk = Math.max(1, Math.floor(maxChunkBytes / bytesPerSlice));
+  let z2 = zStart;
+  const zEnd = zStart + depth;
+  while (z2 < zEnd) {
+    const chunkDepth = Math.min(slicesPerChunk, zEnd - z2);
+    const offsetFloats = z2 * dx * dy;
+    const chunk = data.subarray(offsetFloats, offsetFloats + chunkDepth * dx * dy);
+    dev.queue.writeTexture(
+      { texture, origin: [0, 0, z2] },
+      chunk,
+      { bytesPerRow, rowsPerImage },
+      [dx, dy, chunkDepth]
+    );
+    z2 += chunkDepth;
+  }
+}
+function writeScalarTexture3DRegion(dev, texture, data, dims, xStart, yStart, zStart, xCount, yCount, zCount) {
+  const [dx, dy, dz] = dims;
+  if (xCount <= 0 || yCount <= 0 || zCount <= 0) return;
+  if (xStart < 0 || yStart < 0 || zStart < 0) return;
+  if (xStart >= dx || yStart >= dy || zStart >= dz) return;
+  const w2 = Math.min(xCount, dx - xStart);
+  const h = Math.min(yCount, dy - yStart);
+  const d = Math.min(zCount, dz - zStart);
+  if (w2 <= 0 || h <= 0 || d <= 0) return;
+  const bytesPerRow = dx * 4;
+  const rowsPerImage = dy;
+  const offsetFloats = (zStart * dy + yStart) * dx + xStart;
+  dev.queue.writeTexture(
+    { texture, origin: [xStart, yStart, zStart] },
+    data,
+    { offset: offsetFloats * 4, bytesPerRow, rowsPerImage },
+    [w2, h, d]
+  );
+}
+
 // render/fields.ts
 function transformedAABB(m, lo, hi) {
   const mn2 = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
@@ -255,6 +306,42 @@ var ImageField = class {
    *  The bind group holds a stable view of lutTex, so the next render uses the new LUT. */
   setLUT(lut) {
     this.dev.queue.writeTexture({ texture: this.lutTex }, lut, { bytesPerRow: 256 * 4 }, [256, 1]);
+  }
+  /**
+   * Patch a contiguous z-range of the scalar volume texture from a full-volume
+   * Float32Array (r32float ImageFields). No pipeline rebuild — caller redraws.
+   */
+  updateScalars(data, zStart, zCount) {
+    if (this.normScale !== 1) {
+      throw new Error("ImageField.updateScalars requires an r32float volume");
+    }
+    writeScalarTexture3DSlices(this.dev, this.volTex, data, this.dims, zStart, zCount);
+  }
+  /**
+   * Patch an axis-aligned box (one zarr chunk) from a full-volume Float32Array.
+   * Enables MPR mid-plane updates before a full z-slab is assembled.
+   */
+  updateScalarsRegion(data, xStart, yStart, zStart, xCount, yCount, zCount) {
+    if (this.normScale !== 1) {
+      throw new Error("ImageField.updateScalarsRegion requires an r32float volume");
+    }
+    writeScalarTexture3DRegion(
+      this.dev,
+      this.volTex,
+      data,
+      this.dims,
+      xStart,
+      yStart,
+      zStart,
+      xCount,
+      yCount,
+      zCount
+    );
+  }
+  /** Free GPU textures (call when replacing the field on a coarse→fine LOD upgrade). */
+  destroy() {
+    this.volTex.destroy();
+    this.lutTex.destroy();
   }
   /** The scalar range the LUT spans — window/level for the volume rendering. Re-packed into
    *  the material uniform on the next syncUniforms()/render, so no pipeline rebuild. */
@@ -748,21 +835,87 @@ async function inflateDeflate(buf) {
   return await new Response(new Response(buf).body.pipeThrough(ds)).arrayBuffer();
 }
 var blobFetch = (url) => fetch(url);
-async function fetchZarrVolume(blobBase, z2, onBytes, concurrency = 12) {
-  const zv = await fetchZarrVolumeNative(blobBase, z2, onBytes, concurrency);
+function normalizeFetchOpts(onBytesOrOpts, concurrency = 12) {
+  if (onBytesOrOpts && typeof onBytesOrOpts === "object") {
+    return {
+      concurrency: onBytesOrOpts.concurrency ?? 12,
+      onBytes: onBytesOrOpts.onBytes,
+      onSlab: onBytesOrOpts.onSlab,
+      onChunk: onBytesOrOpts.onChunk,
+      into: onBytesOrOpts.into
+    };
+  }
+  return {
+    concurrency,
+    onBytes: onBytesOrOpts
+  };
+}
+async function fetchZarrVolume(blobBase, z2, onBytesOrOpts, concurrency = 12) {
+  const opts = normalizeFetchOpts(onBytesOrOpts, concurrency);
+  if (opts.onSlab || opts.onChunk || opts.into) {
+    return await fetchZarrVolumeF32(blobBase, z2, opts);
+  }
+  const zv = await fetchZarrVolumeNative(blobBase, z2, opts);
   const data = zv.data instanceof Float32Array ? zv.data : Float32Array.from(zv.data);
   return { data, dims: zv.dims, range: zv.range };
 }
-async function fetchZarrVolumeNative(blobBase, z2, onBytes, concurrency = 12) {
+async function fetchZarrVolumeNative(blobBase, z2, onBytesOrOpts, concurrency = 12) {
+  const opts = normalizeFetchOpts(onBytesOrOpts, concurrency);
   const Ctor = ZDT[z2.dtype] ?? Int16Array;
+  return await assembleZarr(blobBase, z2, Ctor, opts);
+}
+async function fetchZarrVolumeF32(blobBase, z2, opts) {
+  const zv = await assembleZarr(blobBase, z2, Float32Array, opts);
+  return { data: zv.data, dims: zv.dims, range: zv.range };
+}
+function orderChunkJobsMprFirst(ncz, ncy, ncx) {
+  const midK = ncz - 1 >> 1;
+  const midJ = ncy - 1 >> 1;
+  const midI = ncx - 1 >> 1;
+  const dist = (kk, jj, ii) => Math.abs(kk - midK) + Math.abs(jj - midJ) + Math.abs(ii - midI);
+  const byCenter = (a, b) => dist(a[0], a[1], a[2]) - dist(b[0], b[1], b[2]) || a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  const axial = [];
+  const cross2 = [];
+  const rest = [];
+  for (let kk = 0; kk < ncz; kk++) {
+    for (let jj = 0; jj < ncy; jj++) {
+      for (let ii = 0; ii < ncx; ii++) {
+        const job = [kk, jj, ii];
+        if (kk === midK) axial.push(job);
+        else if (jj === midJ || ii === midI) cross2.push(job);
+        else rest.push(job);
+      }
+    }
+  }
+  axial.sort(byCenter);
+  cross2.sort(byCenter);
+  rest.sort(byCenter);
+  return [...axial, ...cross2, ...rest];
+}
+async function assembleZarr(blobBase, z2, Ctor, opts) {
   const [nz, ny, nx] = z2.shape, [cz, cy, cx] = z2.chunks, [ncz, ncy, ncx] = z2.chunkGrid;
   const hashes = z2.chunkHashes;
   const posBase = blobBase + z2.dir + "/" + z2.dataset + "/";
   const chunkUrl = (kk, jj, ii) => hashes ? blobBase + hashes[kk + "." + jj + "." + ii] : posBase + kk + "." + jj + "." + ii;
-  const out = new Ctor(nz * ny * nx);
+  const expected = nz * ny * nx;
+  let out;
+  if (Ctor === Float32Array && opts.into) {
+    if (opts.into.length !== expected) {
+      throw new Error(`zarr into length ${opts.into.length} != ${expected}`);
+    }
+    out = opts.into;
+  } else {
+    out = new Ctor(expected);
+  }
   let lo = Infinity, hi = -Infinity;
-  const jobs = [];
-  for (let kk = 0; kk < ncz; kk++) for (let jj = 0; jj < ncy; jj++) for (let ii = 0; ii < ncx; ii++) jobs.push([kk, jj, ii]);
+  const onBytes = opts.onBytes;
+  const onSlab = opts.onSlab;
+  const onChunk = opts.onChunk;
+  const dims = [nx, ny, nz];
+  const remaining = new Int32Array(ncz);
+  const perSlab = ncy * ncx;
+  for (let kk = 0; kk < ncz; kk++) remaining[kk] = perSlab;
+  const jobs = orderChunkJobsMprFirst(ncz, ncy, ncx);
   let idx = 0;
   const worker = async () => {
     while (idx < jobs.length) {
@@ -791,7 +944,8 @@ async function fetchZarrVolumeNative(blobBase, z2, onBytes, concurrency = 12) {
         gz = await resp.arrayBuffer();
         onBytes?.(gz.byteLength);
       }
-      const chunk = new Ctor(await inflateDeflate(gz));
+      const SrcCtor = ZDT[z2.dtype] ?? Int16Array;
+      const chunk = new SrcCtor(await inflateDeflate(gz));
       const z0 = kk * cz, y0 = jj * cy, x0 = ii * cx;
       const zw = Math.min(cz, nz - z0), yw = Math.min(cy, ny - y0), xw = Math.min(cx, nx - x0);
       for (let zz = 0; zz < zw; zz++) {
@@ -806,10 +960,31 @@ async function fetchZarrVolumeNative(blobBase, z2, onBytes, concurrency = 12) {
           }
         }
       }
+      onChunk?.({
+        xStart: x0,
+        yStart: y0,
+        zStart: z0,
+        xCount: xw,
+        yCount: yw,
+        zCount: zw,
+        data: out,
+        dims
+      });
+      if (onSlab) {
+        remaining[kk]--;
+        if (remaining[kk] === 0) {
+          onSlab({
+            zStart: z0,
+            zCount: zw,
+            data: out,
+            dims
+          });
+        }
+      }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, worker));
-  return { data: out, dtype: z2.dtype, dims: [nx, ny, nz], range: [lo, hi] };
+  await Promise.all(Array.from({ length: Math.min(opts.concurrency, jobs.length) }, worker));
+  return { data: out, dtype: z2.dtype, dims, range: [lo, hi] };
 }
 
 // render/mrson.ts
@@ -939,7 +1114,46 @@ function parseMarkups(nodes) {
   }
   return out;
 }
-async function loadSceneVolumeField(dev, sceneUrl, onBytes, opts = {}) {
+function scaledIjkToRAS(base, factor) {
+  const m = base.slice();
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) m[r * 4 + c] *= factor;
+  }
+  return m;
+}
+function levelFromRecord(L2, fallbackIjk) {
+  const level = Number(L2.level ?? 0);
+  const z2 = {
+    dir: L2.dir,
+    dataset: String(L2.dataset ?? level),
+    shape: L2.shape,
+    chunks: L2.chunks,
+    chunkGrid: L2.chunkGrid,
+    dtype: String(L2.dtype ?? "<f4"),
+    bytes: L2.bytes,
+    chunkHashes: L2.chunkHashes
+  };
+  const ijk = Array.isArray(L2.ijkToRAS) ? L2.ijkToRAS.slice() : scaledIjkToRAS(fallbackIjk, 2 ** level);
+  return { level, z: z2, ijkToRAS: ijk };
+}
+async function resolveSceneLevels(parsed) {
+  const attrs = parsed.vol.attrs ?? {};
+  if (Array.isArray(attrs.zarrLevels) && attrs.zarrLevels.length > 0) {
+    return attrs.zarrLevels.map((L2) => levelFromRecord(L2, parsed.ijkToRAS)).sort((a, b) => a.level - b.level);
+  }
+  try {
+    const r = await fetch(parsed.blobBase + "meta.json");
+    if (r.ok) {
+      const meta = await r.json();
+      if (Array.isArray(meta.levels) && meta.levels.length > 0) {
+        return meta.levels.map((L2) => levelFromRecord(L2, parsed.ijkToRAS)).sort((a, b) => a.level - b.level);
+      }
+    }
+  } catch {
+  }
+  return [{ level: 0, z: parsed.z, ijkToRAS: parsed.ijkToRAS.slice() }];
+}
+async function parseSceneJson(sceneUrl, opts = {}) {
   const raw = await (await fetch(sceneUrl)).json();
   const adapted = isMrsonScene(raw) ? adaptMrsonScene(raw) : raw;
   const wrapper = adapted.nodes ? adapted : { nodes: adapted };
@@ -959,7 +1173,6 @@ async function loadSceneVolumeField(dev, sceneUrl, onBytes, opts = {}) {
     ijkToRAS[7] += t[1];
     ijkToRAS[11] += t[2];
   }
-  const zv = await fetchZarrVolume(blobBase, z2, onBytes);
   let vp;
   for (const dispId of vol.refs?.display ?? []) {
     const disp = nodes[dispId];
@@ -967,42 +1180,111 @@ async function loadSceneVolumeField(dev, sceneUrl, onBytes, opts = {}) {
       if (nodes[vpId]?.class === "vtkMRMLVolumePropertyNode") vp = nodes[vpId];
     }
   }
+  const disp0 = nodes[(vol.refs?.display ?? [])[0]]?.attrs ?? {};
+  const winFallback = disp0.window ?? 1400;
+  const levFallback = disp0.level ?? 300;
   let lut, clim, shade;
   if (vp?.attrs?.color && vp?.attrs?.scalarOpacity) {
     const colorTF = vp.attrs.color, opacityTF = vp.attrs.scalarOpacity;
-    const lo2 = colorTF[0][0], hi2 = colorTF[colorTF.length - 1][0];
-    clim = [lo2, hi2];
+    const lo = colorTF[0][0], hi = colorTF[colorTF.length - 1][0];
+    clim = [lo, hi];
     lut = lutFromTransferFunctions(colorTF, opacityTF, clim);
     shade = vp.attrs.shade ? [0.25, 0.75, 0.5, 24] : [1, 0, 0, 1];
   } else {
-    const disp = nodes[(vol.refs?.display ?? [])[0]]?.attrs ?? {};
-    const win2 = disp.window ?? zv.range[1] - zv.range[0];
-    const lev2 = disp.level ?? (zv.range[0] + zv.range[1]) / 2;
-    clim = [lev2 - win2 / 2, lev2 + win2 / 2];
+    clim = [levFallback - winFallback / 2, levFallback + winFallback / 2];
     lut = lutFromWindowLevel();
     shade = [0.25, 0.75, 0.5, 24];
   }
-  const disp0 = nodes[(vol.refs?.display ?? [])[0]]?.attrs ?? {};
-  const win = disp0.window ?? zv.range[1] - zv.range[0];
-  const lev = disp0.level ?? (zv.range[0] + zv.range[1]) / 2;
-  const field = new ImageField(dev, zv.data, zv.dims, [1, 1, 1], lut, { clim, ijkToRAS, shade });
+  const win = disp0.window ?? winFallback;
+  const lev = disp0.level ?? levFallback;
+  return {
+    nodes,
+    blobBase,
+    vol,
+    z: z2,
+    ijkToRAS,
+    lut,
+    clim,
+    shade,
+    win,
+    lev,
+    markups: parseMarkups(nodes)
+  };
+}
+function sceneVolumeFromParts(field, voxels, dims, parsed, range, ijkToRAS = parsed.ijkToRAS) {
   const [lo, hi] = field.aabb();
   const center = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
   const radius = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
   return {
     field,
-    voxels: zv.data,
-    dims: zv.dims,
+    voxels,
+    dims,
     ijkToRAS,
-    name: vol.name ?? "volume",
-    range: zv.range,
+    name: parsed.vol.name ?? "volume",
+    range,
     center,
     radius,
-    win,
-    lev,
-    markups: parseMarkups(nodes),
-    vr: { lut, clim, shade }
+    win: parsed.win,
+    lev: parsed.lev,
+    markups: parsed.markups,
+    vr: { lut: parsed.lut, clim: parsed.clim, shade: parsed.shade }
   };
+}
+async function loadLevelSlabProgressive(dev, parsed, lev, handlers, opts) {
+  const [nz, ny, nx] = lev.z.shape;
+  const dims = [nx, ny, nz];
+  const voxels = new Float32Array(nx * ny * nz);
+  voxels.fill(parsed.lev - parsed.win / 2 - 1);
+  const field = new ImageField(dev, voxels, dims, [1, 1, 1], parsed.lut, {
+    clim: parsed.clim,
+    ijkToRAS: lev.ijkToRAS,
+    shade: parsed.shade
+  });
+  const sv = sceneVolumeFromParts(field, voxels, dims, parsed, [0, 0], lev.ijkToRAS);
+  if (opts.notifyReady) handlers.onReady?.(sv);
+  const zv = await fetchZarrVolume(parsed.blobBase, lev.z, {
+    onBytes: handlers.onBytes,
+    into: voxels,
+    onChunk: (info) => {
+      field.updateScalarsRegion(
+        voxels,
+        info.xStart,
+        info.yStart,
+        info.zStart,
+        info.xCount,
+        info.yCount,
+        info.zCount
+      );
+      if (opts.notifySlabs) handlers.onSlab?.(info.zStart, info.zCount, sv);
+    }
+  });
+  sv.range = zv.range;
+  return sv;
+}
+async function loadSceneVolumeFieldProgressive(dev, sceneUrl, handlers = {}, opts = {}) {
+  const parsed = await parseSceneJson(sceneUrl, opts);
+  const levels = await resolveSceneLevels(parsed);
+  const byCoarse = [...levels].sort((a, b) => b.level - a.level);
+  const coarse = byCoarse[0];
+  let current = await loadLevelSlabProgressive(dev, parsed, coarse, handlers, {
+    notifyReady: true,
+    notifySlabs: true
+  });
+  for (let i = 1; i < byCoarse.length; i++) {
+    if (opts.signal?.aborted) break;
+    const lev = byCoarse[i];
+    const pending = await loadLevelSlabProgressive(dev, parsed, lev, handlers, {
+      notifyReady: false,
+      notifySlabs: false
+    });
+    if (opts.signal?.aborted) {
+      pending.field.destroy();
+      break;
+    }
+    current = pending;
+    handlers.onUpgrade?.(current);
+  }
+  return current;
 }
 
 // render/slice-renderer.ts
@@ -4598,19 +4880,28 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     for (let i = 0; i < 256; i++) l[i * 4 + 3] = Math.round(l[i * 4 + 3] * o);
     return l;
   };
-  const volumeField = new ImageField(dev, data, dims, [1, 1, 1], baseVolLut, {
+  let volumeField = opts.volumeField ?? new ImageField(dev, data, dims, [1, 1, 1], baseVolLut, {
     clim,
     ijkToRAS: ct2.ijkToRAS,
     shade: baseShade
   });
+  if (opts.volumeField) {
+    volumeField.setLUT(baseVolLut);
+    volumeField.setClim(baseClim[0], baseClim[1]);
+    volumeField.setShade(baseShade);
+  }
   const segments = [];
   const palette = new Float32Array(256 * 4);
-  if (seg) {
-    const total = dims[0] * dims[1] * dims[2];
-    for (const [num, r, g, b] of seg.colors) {
+  let activeSeg = seg;
+  let volDims = [dims[0], dims[1], dims[2]];
+  const fillSegmentsFrom = (labmap) => {
+    segments.length = 0;
+    palette.fill(0);
+    const total = volDims[0] * volDims[1] * volDims[2];
+    for (const [num, r, g, b] of labmap.colors) {
       if (num === 0 || r === 0 && g === 0 && b === 0) continue;
       let n = 0;
-      for (let i = 0; i < seg.lab.length; i++) if (seg.lab[i] === num) n++;
+      for (let i = 0; i < labmap.lab.length; i++) if (labmap.lab[i] === num) n++;
       if (!n || n > total * 0.6) continue;
       if (num < 256) {
         palette[num * 4] = r;
@@ -4618,9 +4909,10 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
         palette[num * 4 + 2] = b;
         palette[num * 4 + 3] = 1;
       }
-      segments.push({ num, name: seg.names[num] ?? `Segment ${num}`, color: [r, g, b], voxels: n });
+      segments.push({ num, name: labmap.names[num] ?? `Segment ${num}`, color: [r, g, b], voxels: n });
     }
-  }
+  };
+  if (activeSeg) fillSegmentsFrom(activeSeg);
   const segOpacity = /* @__PURE__ */ new Map();
   const opacityOf = (num) => segOpacity.get(num) ?? 1;
   const visPalette = () => {
@@ -4628,12 +4920,13 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     for (const s of segments) if (s.num < 256) p[s.num * 4 + 3] = opacityOf(s.num);
     return p;
   };
-  let colorTex = seg ? bakeColorizeRGBA(dev, seg.lab, dims, visPalette(), 1.5) : void 0;
+  let colorTex = activeSeg ? bakeColorizeRGBA(dev, activeSeg.lab, dims, visPalette(), 1.5) : void 0;
   let mode = "volume";
   let segLogic;
   let editable;
-  if (seg && segments.length > 0) {
-    const cap = resampleIsotropic(seg.lab, dims, ct2.ijkToRAS, opts.sdfMaxDim ?? SDF_MAX_DIM, opts.sdfMaxVoxels);
+  const bakeSegSdf = (labmap) => {
+    if (segments.length === 0) return;
+    const cap = resampleIsotropic(labmap.lab, volDims, ct2.ijkToRAS, opts.sdfMaxDim ?? SDF_MAX_DIM, opts.sdfMaxVoxels);
     if (cap.coarsened) console.warn(`SEGRoulette: SDF grid coarsened to fit the device memory budget (${cap.dims.join("\xD7")}, ${cap.vox.toFixed(2)}mm) \u2014 a remote render server would allow full resolution.`);
     editable = new EditableSegmentation(dev, cap.dims, { ijkToRAS: cap.ijkToRAS });
     const boundaryMode = labelmapHasInternalBoundary(cap.lab, cap.dims) ? "all" : "outer";
@@ -4645,8 +4938,9 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     editable.loadLabelmap(cap.lab);
     segLogic.refineNow();
     mode = "sdf";
-  }
-  const hasSeg = !!segLogic;
+  };
+  if (activeSeg && segments.length > 0) bakeSegSdf(activeSeg);
+  let hasSeg = !!segLogic;
   const scene = new SceneRenderer(gpu, format);
   const [rasLo, rasHi] = volumeField.aabb();
   const roi = createRoiWidget(rasLo, rasHi, { coverage: 0.35 });
@@ -4670,8 +4964,8 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
   };
   rebuild();
   const rebakeColorized = () => {
-    if (!seg) return;
-    const nt2 = bakeColorizeRGBA(dev, seg.lab, dims, visPalette(), 1.5);
+    if (!activeSeg) return;
+    const nt2 = bakeColorizeRGBA(dev, activeSeg.lab, volDims, visPalette(), 1.5);
     const old = colorTex;
     colorTex = nt2;
     slice.setTextures(volumeField.volumeTexture(), colorTex);
@@ -4681,10 +4975,10 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
   slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
   slice.setTextures(volumeField.volumeTexture(), colorTex);
   slice.setWindowLevel(ct2.win, ct2.lev);
-  slice.setOverlayOpacity(seg ? 0.5 : 0);
+  slice.setOverlayOpacity(activeSeg ? 0.5 : 0);
   const center = [(rasLo[0] + rasHi[0]) / 2, (rasLo[1] + rasHi[1]) / 2, (rasLo[2] + rasHi[2]) / 2];
   const radius = Math.hypot(rasHi[0] - rasLo[0], rasHi[1] - rasLo[1], rasHi[2] - rasLo[2]) / 2;
-  return {
+  const out = {
     scene,
     slice,
     center,
@@ -4735,7 +5029,7 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     setSegOpacity(o) {
       segLayerOpacity = Math.max(0, Math.min(1, o));
       const was = showSeg;
-      showSeg = hasSeg && segLayerOpacity > 1e-3;
+      showSeg = out.hasSeg && segLayerOpacity > 1e-3;
       segLogic?.setGlobalOpacity(segLayerOpacity);
       if (was !== showSeg) rebuild();
       else scene.syncUniforms();
@@ -4778,6 +5072,62 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
       extraFields = fields;
       rebuild();
     },
+    patchVolumeScalars(data2, zStart, zCount) {
+      volumeField.updateScalars(data2, zStart, zCount);
+    },
+    updateGeometry(m) {
+      volumeField.setIjkToRAS(m);
+      const [lo, hi] = volumeField.aabb();
+      rasLo[0] = lo[0];
+      rasLo[1] = lo[1];
+      rasLo[2] = lo[2];
+      rasHi[0] = hi[0];
+      rasHi[1] = hi[1];
+      rasHi[2] = hi[2];
+      out.ijkToRAS = m;
+      out.center = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+      out.radius = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
+      slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
+      scene.syncUniforms();
+    },
+    swapVolumeField(field, nextDims, ijkToRAS) {
+      const old = volumeField;
+      volumeField = field;
+      volDims = [nextDims[0], nextDims[1], nextDims[2]];
+      out.dims = volDims;
+      out.ijkToRAS = ijkToRAS;
+      volumeField.setLUT(scaledVolLut(volumeOpacity));
+      volumeField.setClim(baseClim[0] + volShift, baseClim[1] + volShift);
+      volumeField.setShade(baseShade);
+      const [lo, hi] = volumeField.aabb();
+      rasLo[0] = lo[0];
+      rasLo[1] = lo[1];
+      rasLo[2] = lo[2];
+      rasHi[0] = hi[0];
+      rasHi[1] = hi[1];
+      rasHi[2] = hi[2];
+      out.center = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+      out.radius = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
+      slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
+      slice.setTextures(volumeField.volumeTexture(), colorTex);
+      rebuild();
+      old.destroy();
+    },
+    attachSegmentation(labmap) {
+      if (out.hasSeg || segLogic) return;
+      activeSeg = labmap;
+      fillSegmentsFrom(labmap);
+      if (segments.length === 0) return;
+      bakeSegSdf(labmap);
+      if (!segLogic) return;
+      out.hasSeg = true;
+      out.mode = mode;
+      showSeg = segLayerOpacity > 1e-3;
+      rebakeColorized();
+      slice.setOverlayOpacity(0.5);
+      rebuild();
+    },
+    labelmap: () => activeSeg,
     reclip() {
       if (roiEnabled) scene.setClipBox(roi.lo(), roi.hi());
       else scene.clearClip();
@@ -4788,6 +5138,7 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
       editable?.destroy();
     }
   };
+  return out;
 }
 
 // render/demos/crosshair.ts
@@ -5610,73 +5961,6 @@ function attachWidgetControls(canvas, camera, opts) {
       window.removeEventListener("pointermove", onMove, true);
       window.removeEventListener("pointerup", onUp, true);
       window.removeEventListener("pointercancel", onCancel, true);
-    }
-  };
-}
-
-// render/demos/mosaic.ts
-function createMosaic(host) {
-  const wrap = document.createElement("div");
-  wrap.style.cssText = "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:radial-gradient(60% 60% at 50% 45%,rgba(20,24,38,.35),rgba(6,8,14,.75));opacity:1;transition:opacity 350ms ease-out;";
-  const canvas = document.createElement("canvas");
-  canvas.style.cssText = "max-width:min(70vmin,620px);max-height:70vh;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.5);image-rendering:auto;";
-  const cap = document.createElement("div");
-  cap.style.cssText = "font:600 12px ui-monospace,Menlo,monospace;color:#9fe9ff;text-shadow:0 0 4px #000;";
-  wrap.appendChild(canvas);
-  wrap.appendChild(cap);
-  const hostPos = getComputedStyle(host).position;
-  if (hostPos === "static") host.style.position = "relative";
-  host.appendChild(wrap);
-  const ctx = canvas.getContext("2d");
-  const tmp = document.createElement("canvas");
-  const tctx = tmp.getContext("2d");
-  let cols = 1, rows = 1, cw = 0, ch = 0, count = 0, filled = 0;
-  const layout = (n, aspect = 1) => {
-    count = Math.max(1, n);
-    cols = Math.ceil(Math.sqrt(count));
-    rows = Math.ceil(count / cols);
-    const cellW = 96;
-    cw = cellW;
-    ch = Math.round(cellW / aspect);
-    canvas.width = cols * cw;
-    canvas.height = rows * ch;
-    ctx.fillStyle = "#0b0e14";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  };
-  return {
-    setCount(n) {
-      layout(n);
-    },
-    thumb(n, w2, h, rgba) {
-      if (!count || cols * rows < count) layout(Math.max(count, n), w2 / h);
-      if (ch !== Math.round(cw / (w2 / h))) {
-        ch = Math.round(cw / (w2 / h));
-        canvas.height = rows * ch;
-        ctx.fillStyle = "#0b0e14";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-      tmp.width = w2;
-      tmp.height = h;
-      tctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w2, h), 0, 0);
-      const idx = Math.max(0, (n | 0) - 1) % (cols * rows);
-      const cx = idx % cols * cw, cy = Math.floor(idx / cols) * ch;
-      ctx.drawImage(tmp, cx, cy, cw, ch);
-      filled++;
-      cap.textContent = `streaming ${filled}${count ? " / " + count : ""} slices\u2026`;
-    },
-    status(msg) {
-      cap.textContent = msg;
-    },
-    done() {
-      wrap.style.opacity = "0";
-      setTimeout(() => wrap.remove(), 400);
-    },
-    reset() {
-      filled = 0;
-      count = 0;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      wrap.style.opacity = "1";
-      if (!wrap.isConnected) host.appendChild(wrap);
     }
   };
 }
@@ -7217,6 +7501,41 @@ function runWorker(ctKeys, segKeys, ctBucket, segBucket, modality, handlers, opt
         case "progress":
           handlers.onProgress?.({ frac: m.frac, msg: m.msg });
           break;
+        case "ctready":
+          try {
+            handlers.onCTReady?.({
+              dims: m.dims,
+              ijkToRAS: m.ijkToRAS,
+              win: m.win,
+              lev: m.lev,
+              dtype: m.dtype || "float32",
+              modality
+            });
+          } catch (err) {
+            console.error("[idc_tools] onCTReady", err);
+          }
+          break;
+        case "ctgeom":
+          try {
+            handlers.onCTGeom?.({ ijkToRAS: m.ijkToRAS, win: m.win, lev: m.lev });
+          } catch (err) {
+            console.error("[idc_tools] onCTGeom", err);
+          }
+          break;
+        case "ctslab": {
+          const data = new Float32Array(m.vol);
+          try {
+            handlers.onCTSlab?.({
+              zStart: m.zStart,
+              zCount: m.zCount,
+              data,
+              dims: m.dims
+            });
+          } catch (err) {
+            console.error("[idc_tools] onCTSlab", err);
+          }
+          break;
+        }
         case "ct": {
           const Ctor = m.dtype === "float32" ? Float32Array : Int16Array;
           ct2 = { vol: new Ctor(m.vol), dims: m.dims, ijkToRAS: m.ijkToRAS, win: m.win, lev: m.lev, dtype: m.dtype, modality };
@@ -7364,6 +7683,10 @@ var ICONS = {
   // IDC actions
   share: I(`<circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.8l7.4-4.3M8.3 13.2l7.4 4.3"/>`),
   download: I(`<path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>`),
+  // 3D-print mesh (STL): cube + download arrow
+  stl: I(
+    `<path d="M7 9l5-3 5 3v6l-5 3-5-3z"/><path d="M7 9l5 3 5-3M12 12v6"/><path d="M18 3v4m0 0l-2-2m2 2l2-2"/>`
+  ),
   toolsCollapse: I(`<path d="M6 14l6-6 6 6"/>`),
   toolsExpand: I(`<path d="M6 10l6 6 6-6"/>`)
 };
@@ -8260,6 +8583,751 @@ globalThis.__slicerLiveIdc = {
   downloadStudy,
   downloadStudyWithDialog
 };
+
+// render/demos/segment-stl.ts
+var OVERLAY_CSS2 = "position:fixed;inset:0;z-index:2000;background:rgba(5,6,10,.85);display:flex;align-items:center;justify-content:center;";
+var CARD_CSS2 = "background:#11141d;border:1px solid #33507e;border-radius:10px;padding:20px 24px;width:420px;max-width:92vw;max-height:80vh;overflow:auto;font:13px -apple-system,system-ui,sans-serif;color:#d6e2f2;";
+function safeStlFileName(name) {
+  const s = name.replace(/[^\w.\-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80);
+  return (s || "segment") + ".stl";
+}
+function downloadStl(buffer, filename) {
+  const blob = new Blob([buffer], { type: "model/stl" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+function pickSegment(segments) {
+  return new Promise((resolve) => {
+    if (document.getElementById("seg-stl-pick")) {
+      resolve(void 0);
+      return;
+    }
+    const overlay = document.createElement("div");
+    overlay.id = "seg-stl-pick";
+    overlay.style.cssText = OVERLAY_CSS2;
+    const rows = segments.map((s) => {
+      const [r, g, b] = s.color.map((c) => Math.round(c * 255));
+      const swatch = `display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:8px;background:rgb(${r},${g},${b});vertical-align:middle;`;
+      return `<button type="button" data-num="${s.num}" style="display:block;width:100%;text-align:left;
+          font:600 13px -apple-system,system-ui,sans-serif;color:#d6e2f2;background:#0b0e16;
+          border:1px solid #1b2740;border-radius:6px;padding:10px 12px;margin:0 0 6px;cursor:pointer;">
+          <span style="${swatch}"></span>${escapeHtml(s.name)}
+          <span style="color:#5a6b85;font-weight:500;margin-left:6px;">#${s.num}</span>
+        </button>`;
+    }).join("");
+    overlay.innerHTML = `
+      <div style="${CARD_CSS2}">
+        <h3 style="margin:0 0 4px;color:#fff;">Save segment as STL</h3>
+        <p style="margin:0 0 14px;color:#9fb3d0;">Binary STL in LPS (3D-print convention). Pick a segment:</p>
+        <div id="seg-stl-list">${rows}</div>
+        <div style="text-align:right;margin-top:10px;">
+          <button type="button" id="seg-stl-cancel" style="font:600 12px -apple-system,system-ui,sans-serif;
+            color:#9fb3d0;background:none;border:none;cursor:pointer;padding:6px 4px;">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const done = (seg) => {
+      overlay.remove();
+      resolve(seg);
+    };
+    overlay.querySelector("#seg-stl-cancel").addEventListener("click", () => done());
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) done();
+    });
+    overlay.querySelectorAll("#seg-stl-list button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const num = Number(btn.dataset.num);
+        done(segments.find((s) => s.num === num));
+      });
+      btn.addEventListener("mouseenter", () => {
+        btn.style.borderColor = "#2b6cb0";
+        btn.style.background = "#151a28";
+      });
+      btn.addEventListener("mouseleave", () => {
+        btn.style.borderColor = "#1b2740";
+        btn.style.background = "#0b0e16";
+      });
+    });
+  });
+}
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function segmentToStl(lab, dims, ijkToRAS, segmentNum) {
+  const [nx, ny, nz] = dims;
+  if (lab.length !== nx * ny * nz) {
+    throw new Error(`labelmap size ${lab.length} != dims ${nx}\xD7${ny}\xD7${nz}`);
+  }
+  let i0 = nx, j0 = ny, k0 = nz, i1 = -1, j1 = -1, k1 = -1;
+  for (let k2 = 0; k2 < nz; k2++) {
+    for (let j2 = 0; j2 < ny; j2++) {
+      const base = (k2 * ny + j2) * nx;
+      for (let i = 0; i < nx; i++) {
+        if (lab[base + i] !== segmentNum) continue;
+        if (i < i0) i0 = i;
+        if (j2 < j0) j0 = j2;
+        if (k2 < k0) k0 = k2;
+        if (i > i1) i1 = i;
+        if (j2 > j1) j1 = j2;
+        if (k2 > k1) k1 = k2;
+      }
+    }
+  }
+  if (i1 < 0) throw new Error(`segment ${segmentNum} is empty`);
+  const x0 = i0 - 1, y0 = j0 - 1, z0 = k0 - 1;
+  const x1 = i1 + 1, y1 = j1 + 1, z1 = k1 + 1;
+  const sx = x1 - x0 + 1, sy = y1 - y0 + 1, sz = z1 - z0 + 1;
+  const mask = new Uint8Array(sx * sy * sz);
+  for (let k2 = 0; k2 < sz; k2++) {
+    const gk = k2 + z0;
+    for (let j2 = 0; j2 < sy; j2++) {
+      const gj = j2 + y0;
+      for (let i = 0; i < sx; i++) {
+        const gi = i + x0;
+        if (gi < 0 || gj < 0 || gk < 0 || gi >= nx || gj >= ny || gk >= nz) continue;
+        if (lab[(gk * ny + gj) * nx + gi] === segmentNum) mask[(k2 * sy + j2) * sx + i] = 1;
+      }
+    }
+  }
+  const tris = marchingCubes(mask, sx, sy, sz, x0, y0, z0);
+  if (!tris.length) throw new Error(`segment ${segmentNum}: no surface triangles`);
+  const M2 = ijkToRAS;
+  const lps = new Array(tris.length);
+  for (let t = 0; t < tris.length; t += 9) {
+    for (let v2 = 0; v2 < 3; v2++) {
+      const i = tris[t + v2 * 3], j2 = tris[t + v2 * 3 + 1], k2 = tris[t + v2 * 3 + 2];
+      const rx = M2[0] * i + M2[1] * j2 + M2[2] * k2 + M2[3];
+      const ry = M2[4] * i + M2[5] * j2 + M2[6] * k2 + M2[7];
+      const rz = M2[8] * i + M2[9] * j2 + M2[10] * k2 + M2[11];
+      lps[t + v2 * 3] = -rx;
+      lps[t + v2 * 3 + 1] = -ry;
+      lps[t + v2 * 3 + 2] = rz;
+    }
+  }
+  return writeBinaryStl(lps, "SlicerLive IRA. SPACE=LPS");
+}
+function writeBinaryStl(flatTris, headerText) {
+  const nTri = flatTris.length / 9 | 0;
+  const buf = new ArrayBuffer(84 + nTri * 50);
+  const u8 = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  const hdr = new TextEncoder().encode(headerText.slice(0, 79));
+  u8.set(hdr, 0);
+  dv.setUint32(80, nTri, true);
+  let off = 84;
+  for (let t = 0; t < nTri; t++) {
+    const b = t * 9;
+    const ax = flatTris[b], ay = flatTris[b + 1], az = flatTris[b + 2];
+    const bx = flatTris[b + 3], by = flatTris[b + 4], bz = flatTris[b + 5];
+    const cx = flatTris[b + 6], cy = flatTris[b + 7], cz = flatTris[b + 8];
+    let nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay);
+    let ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+    let nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len;
+    ny /= len;
+    nz /= len;
+    dv.setFloat32(off, nx, true);
+    dv.setFloat32(off + 4, ny, true);
+    dv.setFloat32(off + 8, nz, true);
+    dv.setFloat32(off + 12, ax, true);
+    dv.setFloat32(off + 16, ay, true);
+    dv.setFloat32(off + 20, az, true);
+    dv.setFloat32(off + 24, bx, true);
+    dv.setFloat32(off + 28, by, true);
+    dv.setFloat32(off + 32, bz, true);
+    dv.setFloat32(off + 36, cx, true);
+    dv.setFloat32(off + 40, cy, true);
+    dv.setFloat32(off + 44, cz, true);
+    dv.setUint16(off + 48, 0, true);
+    off += 50;
+  }
+  return buf;
+}
+var EDGE_TABLE = new Uint16Array([
+  0,
+  265,
+  515,
+  778,
+  1030,
+  1295,
+  1541,
+  1804,
+  2060,
+  2309,
+  2575,
+  2822,
+  3082,
+  3331,
+  3593,
+  3840,
+  400,
+  153,
+  915,
+  666,
+  1430,
+  1183,
+  1941,
+  1692,
+  2460,
+  2197,
+  2975,
+  2710,
+  3482,
+  3219,
+  3993,
+  3728,
+  560,
+  825,
+  51,
+  314,
+  1590,
+  1855,
+  1077,
+  1340,
+  2620,
+  2869,
+  2111,
+  2358,
+  3642,
+  3891,
+  3129,
+  3376,
+  928,
+  681,
+  419,
+  170,
+  1958,
+  1711,
+  1445,
+  1196,
+  2988,
+  2725,
+  2479,
+  2214,
+  4010,
+  3747,
+  3497,
+  3232,
+  1120,
+  1385,
+  1635,
+  1898,
+  102,
+  367,
+  613,
+  876,
+  3180,
+  3429,
+  3695,
+  3942,
+  2154,
+  2403,
+  2665,
+  2912,
+  1520,
+  1273,
+  2035,
+  1786,
+  502,
+  255,
+  1013,
+  764,
+  3580,
+  3317,
+  4095,
+  3830,
+  2554,
+  2291,
+  3065,
+  2800,
+  1616,
+  1881,
+  1107,
+  1370,
+  598,
+  863,
+  85,
+  348,
+  3676,
+  3925,
+  3167,
+  3414,
+  2650,
+  2899,
+  2137,
+  2384,
+  1984,
+  1737,
+  1475,
+  1226,
+  966,
+  719,
+  453,
+  204,
+  4044,
+  3781,
+  3535,
+  3270,
+  3018,
+  2755,
+  2505,
+  2240,
+  2240,
+  2505,
+  2755,
+  3018,
+  3270,
+  3535,
+  3781,
+  4044,
+  204,
+  453,
+  719,
+  966,
+  1226,
+  1475,
+  1737,
+  1984,
+  2384,
+  2137,
+  2899,
+  2650,
+  3414,
+  3167,
+  3925,
+  3676,
+  348,
+  85,
+  863,
+  598,
+  1370,
+  1107,
+  1881,
+  1616,
+  2800,
+  3065,
+  2291,
+  2554,
+  3830,
+  4095,
+  3317,
+  3580,
+  764,
+  1013,
+  255,
+  502,
+  1786,
+  2035,
+  1273,
+  1520,
+  2912,
+  2665,
+  2403,
+  2154,
+  3942,
+  3695,
+  3429,
+  3180,
+  876,
+  613,
+  367,
+  102,
+  1898,
+  1635,
+  1385,
+  1120,
+  3232,
+  3497,
+  3747,
+  4010,
+  2214,
+  2479,
+  2725,
+  2988,
+  1196,
+  1445,
+  1711,
+  1958,
+  170,
+  419,
+  681,
+  928,
+  3376,
+  3129,
+  3891,
+  3642,
+  2358,
+  2111,
+  2869,
+  2620,
+  1340,
+  1077,
+  1855,
+  1590,
+  314,
+  51,
+  825,
+  560,
+  3728,
+  3993,
+  3219,
+  3482,
+  2710,
+  2975,
+  2197,
+  2460,
+  1692,
+  1941,
+  1183,
+  1430,
+  666,
+  915,
+  153,
+  400,
+  3840,
+  3593,
+  3331,
+  3082,
+  2822,
+  2575,
+  2309,
+  2060,
+  1804,
+  1541,
+  1295,
+  1030,
+  778,
+  515,
+  265,
+  0
+]);
+var TRI_TABLE = (() => {
+  const raw = [
+    [],
+    [0, 8, 3],
+    [0, 1, 9],
+    [1, 8, 3, 9, 8, 1],
+    [1, 2, 10],
+    [0, 8, 3, 1, 2, 10],
+    [9, 2, 10, 0, 2, 9],
+    [2, 8, 3, 2, 10, 8, 10, 9, 8],
+    [3, 11, 2],
+    [0, 11, 2, 8, 11, 0],
+    [1, 9, 0, 2, 3, 11],
+    [1, 11, 2, 1, 9, 11, 9, 8, 11],
+    [3, 10, 1, 11, 10, 3],
+    [0, 10, 1, 0, 8, 10, 8, 11, 10],
+    [3, 9, 0, 3, 11, 9, 11, 10, 9],
+    [9, 8, 10, 10, 8, 11],
+    [4, 7, 8],
+    [4, 3, 0, 7, 3, 4],
+    [0, 1, 9, 8, 4, 7],
+    [4, 1, 9, 4, 7, 1, 7, 3, 1],
+    [1, 2, 10, 8, 4, 7],
+    [3, 4, 7, 3, 0, 4, 1, 2, 10],
+    [9, 2, 10, 9, 0, 2, 8, 4, 7],
+    [2, 10, 9, 2, 9, 7, 2, 7, 3, 7, 9, 4],
+    [8, 4, 7, 3, 11, 2],
+    [11, 4, 7, 11, 2, 4, 2, 0, 4],
+    [9, 0, 1, 8, 4, 7, 2, 3, 11],
+    [4, 7, 11, 9, 4, 11, 9, 11, 2, 9, 2, 1],
+    [3, 10, 1, 3, 11, 10, 7, 8, 4],
+    [1, 11, 10, 1, 4, 11, 1, 0, 4, 7, 11, 4],
+    [4, 7, 8, 9, 0, 11, 9, 11, 10, 11, 0, 3],
+    [4, 7, 11, 4, 11, 9, 9, 11, 10],
+    [9, 5, 4],
+    [9, 5, 4, 0, 8, 3],
+    [0, 5, 4, 1, 5, 0],
+    [8, 5, 4, 8, 3, 5, 3, 1, 5],
+    [1, 2, 10, 9, 5, 4],
+    [3, 0, 8, 1, 2, 10, 4, 9, 5],
+    [5, 2, 10, 5, 4, 2, 4, 0, 2],
+    [2, 10, 5, 3, 2, 5, 3, 5, 4, 3, 4, 8],
+    [9, 5, 4, 2, 3, 11],
+    [0, 11, 2, 0, 8, 11, 4, 9, 5],
+    [0, 5, 4, 0, 1, 5, 2, 3, 11],
+    [2, 1, 5, 2, 5, 8, 2, 8, 11, 4, 8, 5],
+    [10, 3, 11, 10, 1, 3, 9, 5, 4],
+    [4, 9, 5, 0, 8, 1, 8, 10, 1, 8, 11, 10],
+    [5, 4, 0, 5, 0, 11, 5, 11, 10, 11, 0, 3],
+    [5, 4, 8, 5, 8, 10, 10, 8, 11],
+    [9, 7, 8, 5, 7, 9],
+    [9, 3, 0, 9, 5, 3, 5, 7, 3],
+    [0, 7, 8, 0, 1, 7, 1, 5, 7],
+    [1, 5, 3, 3, 5, 7],
+    [9, 7, 8, 9, 5, 7, 10, 1, 2],
+    [10, 1, 2, 9, 5, 0, 5, 3, 0, 5, 7, 3],
+    [8, 0, 2, 8, 2, 5, 8, 5, 7, 10, 5, 2],
+    [2, 10, 5, 2, 5, 3, 3, 5, 7],
+    [7, 9, 5, 7, 8, 9, 3, 11, 2],
+    [9, 5, 7, 9, 7, 2, 9, 2, 0, 2, 7, 11],
+    [2, 3, 11, 0, 1, 8, 1, 7, 8, 1, 5, 7],
+    [11, 2, 1, 11, 1, 7, 7, 1, 5],
+    [9, 5, 8, 8, 5, 7, 10, 1, 3, 10, 3, 11],
+    [5, 7, 0, 5, 0, 9, 7, 11, 0, 1, 0, 10, 11, 10, 0],
+    [11, 10, 0, 11, 0, 3, 10, 5, 0, 8, 0, 7, 5, 7, 0],
+    [11, 10, 5, 7, 11, 5],
+    [10, 6, 5],
+    [0, 8, 3, 5, 10, 6],
+    [9, 0, 1, 5, 10, 6],
+    [1, 8, 3, 1, 9, 8, 5, 10, 6],
+    [1, 6, 5, 2, 6, 1],
+    [1, 6, 5, 1, 2, 6, 3, 0, 8],
+    [9, 6, 5, 9, 0, 6, 0, 2, 6],
+    [5, 9, 8, 5, 8, 2, 5, 2, 6, 3, 2, 8],
+    [2, 3, 11, 10, 6, 5],
+    [11, 0, 8, 11, 2, 0, 10, 6, 5],
+    [0, 1, 9, 2, 3, 11, 5, 10, 6],
+    [5, 10, 6, 1, 9, 2, 9, 11, 2, 9, 8, 11],
+    [6, 3, 11, 6, 5, 3, 5, 1, 3],
+    [0, 8, 11, 0, 11, 5, 0, 5, 1, 5, 11, 6],
+    [3, 11, 6, 0, 3, 6, 0, 6, 5, 0, 5, 9],
+    [6, 5, 9, 6, 9, 11, 11, 9, 8],
+    [5, 10, 6, 4, 7, 8],
+    [4, 3, 0, 4, 7, 3, 6, 5, 10],
+    [1, 9, 0, 5, 10, 6, 8, 4, 7],
+    [10, 6, 5, 1, 9, 7, 1, 7, 3, 7, 9, 4],
+    [6, 1, 2, 6, 5, 1, 4, 7, 8],
+    [1, 2, 5, 5, 2, 6, 3, 0, 4, 3, 4, 7],
+    [8, 4, 7, 9, 0, 5, 0, 6, 5, 0, 2, 6],
+    [7, 3, 9, 7, 9, 4, 3, 2, 9, 5, 9, 6, 2, 6, 9],
+    [3, 11, 2, 7, 8, 4, 10, 6, 5],
+    [5, 10, 6, 4, 7, 2, 4, 2, 0, 2, 7, 11],
+    [0, 1, 9, 4, 7, 8, 2, 3, 11, 5, 10, 6],
+    [9, 2, 1, 9, 11, 2, 9, 4, 11, 7, 11, 4, 5, 10, 6],
+    [8, 4, 7, 3, 11, 5, 3, 5, 1, 5, 11, 6],
+    [5, 1, 11, 5, 11, 6, 1, 0, 11, 7, 11, 4, 0, 4, 11],
+    [0, 5, 9, 0, 6, 5, 0, 3, 6, 11, 6, 3, 8, 4, 7],
+    [6, 5, 9, 6, 9, 11, 4, 7, 9, 7, 11, 9],
+    [10, 4, 9, 6, 4, 10],
+    [4, 10, 6, 4, 9, 10, 0, 8, 3],
+    [10, 0, 1, 10, 6, 0, 6, 4, 0],
+    [8, 3, 1, 8, 1, 6, 8, 6, 4, 6, 1, 10],
+    [1, 4, 9, 1, 2, 4, 2, 6, 4],
+    [3, 0, 8, 1, 2, 9, 2, 4, 9, 2, 6, 4],
+    [0, 2, 4, 4, 2, 6],
+    [8, 3, 2, 8, 2, 4, 4, 2, 6],
+    [10, 4, 9, 10, 6, 4, 11, 2, 3],
+    [0, 8, 2, 2, 8, 11, 4, 9, 10, 4, 10, 6],
+    [3, 11, 2, 0, 1, 6, 0, 6, 4, 6, 1, 10],
+    [6, 4, 1, 6, 1, 10, 4, 8, 1, 2, 1, 11, 8, 11, 1],
+    [9, 6, 4, 9, 3, 6, 9, 1, 3, 11, 6, 3],
+    [8, 11, 1, 8, 1, 0, 11, 6, 1, 9, 1, 4, 6, 4, 1],
+    [3, 11, 6, 3, 6, 0, 0, 6, 4],
+    [6, 4, 8, 11, 6, 8],
+    [7, 10, 6, 7, 8, 10, 8, 9, 10],
+    [0, 7, 3, 0, 10, 7, 0, 9, 10, 6, 7, 10],
+    [10, 6, 7, 1, 10, 7, 1, 7, 8, 1, 8, 0],
+    [10, 6, 7, 10, 7, 1, 1, 7, 3],
+    [1, 2, 6, 1, 6, 8, 1, 8, 9, 8, 6, 7],
+    [2, 6, 9, 2, 9, 1, 6, 7, 9, 0, 9, 3, 7, 3, 9],
+    [7, 8, 0, 7, 0, 6, 6, 0, 2],
+    [7, 3, 2, 6, 7, 2],
+    [2, 3, 11, 10, 6, 8, 10, 8, 9, 8, 6, 7],
+    [2, 0, 7, 2, 7, 11, 0, 9, 7, 6, 7, 10, 9, 10, 7],
+    [1, 8, 0, 1, 7, 8, 1, 10, 7, 6, 7, 10, 2, 3, 11],
+    [11, 2, 1, 11, 1, 7, 10, 6, 1, 6, 7, 1],
+    [8, 9, 6, 8, 6, 7, 9, 1, 6, 11, 6, 3, 1, 3, 6],
+    [0, 9, 1, 11, 6, 7],
+    [7, 8, 0, 7, 0, 6, 3, 11, 0, 11, 6, 0],
+    [7, 11, 6],
+    [7, 6, 11],
+    [3, 0, 8, 11, 7, 6],
+    [0, 1, 9, 11, 7, 6],
+    [8, 1, 9, 8, 3, 1, 11, 7, 6],
+    [10, 1, 2, 6, 11, 7],
+    [1, 2, 10, 3, 0, 8, 6, 11, 7],
+    [2, 9, 0, 2, 10, 9, 6, 11, 7],
+    [6, 11, 7, 2, 10, 3, 10, 8, 3, 10, 9, 8],
+    [7, 2, 3, 6, 2, 7],
+    [7, 0, 8, 7, 6, 0, 6, 2, 0],
+    [2, 7, 6, 2, 3, 7, 0, 1, 9],
+    [1, 6, 2, 1, 8, 6, 1, 9, 8, 8, 7, 6],
+    [10, 7, 6, 10, 1, 7, 1, 3, 7],
+    [10, 7, 6, 1, 7, 10, 1, 8, 7, 1, 0, 8],
+    [0, 3, 7, 0, 7, 10, 0, 10, 9, 6, 10, 7],
+    [7, 6, 10, 7, 10, 8, 8, 10, 9],
+    [6, 8, 4, 11, 8, 6],
+    [3, 6, 11, 3, 0, 6, 0, 4, 6],
+    [8, 6, 11, 8, 4, 6, 9, 0, 1],
+    [9, 4, 6, 9, 6, 3, 9, 3, 1, 11, 3, 6],
+    [6, 8, 4, 6, 11, 8, 2, 10, 1],
+    [1, 2, 10, 3, 0, 11, 0, 6, 11, 0, 4, 6],
+    [4, 11, 8, 4, 6, 11, 0, 2, 9, 2, 10, 9],
+    [10, 9, 3, 10, 3, 2, 9, 4, 3, 11, 3, 6, 4, 6, 3],
+    [8, 2, 3, 8, 4, 2, 4, 6, 2],
+    [0, 4, 2, 4, 6, 2],
+    [1, 9, 0, 2, 3, 4, 2, 4, 6, 4, 3, 8],
+    [1, 9, 4, 1, 4, 2, 2, 4, 6],
+    [8, 1, 3, 8, 6, 1, 8, 4, 6, 6, 10, 1],
+    [10, 1, 0, 10, 0, 6, 6, 0, 4],
+    [4, 6, 3, 4, 3, 8, 6, 10, 3, 0, 3, 9, 10, 9, 3],
+    [10, 9, 4, 6, 10, 4],
+    [4, 9, 5, 7, 6, 11],
+    [0, 8, 3, 4, 9, 5, 11, 7, 6],
+    [5, 0, 1, 5, 4, 0, 7, 6, 11],
+    [11, 7, 6, 8, 3, 4, 3, 5, 4, 3, 1, 5],
+    [9, 5, 4, 10, 1, 2, 7, 6, 11],
+    [6, 11, 7, 1, 2, 10, 0, 8, 3, 4, 9, 5],
+    [7, 6, 11, 5, 4, 10, 4, 2, 10, 4, 0, 2],
+    [3, 4, 8, 3, 5, 4, 3, 2, 5, 10, 5, 2, 11, 7, 6],
+    [7, 2, 3, 7, 6, 2, 5, 4, 9],
+    [9, 5, 4, 0, 8, 6, 0, 6, 2, 6, 8, 7],
+    [3, 6, 2, 3, 7, 6, 1, 5, 0, 5, 4, 0],
+    [6, 2, 8, 6, 8, 7, 2, 1, 8, 4, 8, 5, 1, 5, 8],
+    [9, 5, 4, 10, 1, 6, 1, 7, 6, 1, 3, 7],
+    [1, 6, 10, 1, 7, 6, 1, 0, 7, 8, 7, 0, 9, 5, 4],
+    [4, 0, 10, 4, 10, 5, 0, 3, 10, 6, 10, 7, 3, 7, 10],
+    [7, 6, 10, 7, 10, 8, 5, 4, 10, 4, 8, 10],
+    [6, 9, 5, 6, 11, 9, 11, 8, 9],
+    [3, 6, 11, 0, 6, 3, 0, 5, 6, 0, 9, 5],
+    [0, 11, 8, 0, 5, 11, 0, 1, 5, 5, 6, 11],
+    [6, 11, 3, 6, 3, 5, 5, 3, 1],
+    [1, 2, 10, 9, 5, 11, 9, 11, 8, 11, 5, 6],
+    [0, 11, 3, 0, 6, 11, 0, 9, 6, 5, 6, 9, 1, 2, 10],
+    [11, 8, 5, 11, 5, 6, 8, 0, 5, 10, 5, 2, 0, 2, 5],
+    [6, 11, 3, 6, 3, 5, 2, 10, 3, 10, 5, 3],
+    [5, 8, 9, 5, 2, 8, 5, 6, 2, 3, 8, 2],
+    [9, 5, 6, 9, 6, 0, 0, 6, 2],
+    [1, 5, 8, 1, 8, 0, 5, 6, 8, 3, 8, 2, 6, 2, 8],
+    [1, 5, 6, 2, 1, 6],
+    [1, 3, 6, 1, 6, 10, 3, 8, 6, 5, 6, 9, 8, 9, 6],
+    [10, 1, 0, 10, 0, 6, 9, 5, 0, 5, 6, 0],
+    [0, 3, 8, 5, 6, 10],
+    [10, 5, 6],
+    [11, 5, 10, 7, 5, 11],
+    [11, 5, 10, 11, 7, 5, 8, 3, 0],
+    [5, 11, 7, 5, 10, 11, 1, 9, 0],
+    [10, 7, 5, 10, 11, 7, 9, 8, 1, 8, 3, 1],
+    [11, 1, 2, 11, 7, 1, 7, 5, 1],
+    [0, 8, 3, 1, 2, 7, 1, 7, 5, 7, 2, 11],
+    [9, 7, 5, 9, 2, 7, 9, 0, 2, 2, 11, 7],
+    [7, 5, 2, 7, 2, 11, 5, 9, 2, 3, 2, 8, 9, 8, 2],
+    [2, 5, 10, 2, 3, 5, 3, 7, 5],
+    [8, 2, 0, 8, 5, 2, 8, 7, 5, 10, 2, 5],
+    [9, 0, 1, 5, 10, 3, 5, 3, 7, 3, 10, 2],
+    [9, 8, 2, 9, 2, 1, 8, 7, 2, 10, 2, 5, 7, 5, 2],
+    [1, 3, 5, 3, 7, 5],
+    [0, 8, 7, 0, 7, 1, 1, 7, 5],
+    [9, 0, 3, 9, 3, 5, 5, 3, 7],
+    [9, 8, 7, 5, 9, 7],
+    [5, 8, 4, 5, 10, 8, 10, 11, 8],
+    [5, 0, 4, 5, 11, 0, 5, 10, 11, 11, 3, 0],
+    [0, 1, 9, 8, 4, 10, 8, 10, 11, 10, 4, 5],
+    [10, 11, 4, 10, 4, 5, 11, 3, 4, 9, 4, 1, 3, 1, 4],
+    [2, 5, 1, 2, 8, 5, 2, 11, 8, 4, 5, 8],
+    [0, 4, 11, 0, 11, 3, 4, 5, 11, 2, 11, 1, 5, 1, 11],
+    [0, 2, 5, 0, 5, 9, 2, 11, 5, 4, 5, 8, 11, 8, 5],
+    [9, 4, 5, 2, 11, 3],
+    [2, 5, 10, 3, 5, 2, 3, 4, 5, 3, 8, 4],
+    [5, 10, 2, 5, 2, 4, 4, 2, 0],
+    [3, 10, 2, 3, 5, 10, 3, 8, 5, 4, 5, 8, 0, 1, 9],
+    [5, 10, 2, 5, 2, 4, 1, 9, 2, 9, 4, 2],
+    [8, 4, 5, 8, 5, 3, 3, 5, 1],
+    [0, 4, 5, 1, 0, 5],
+    [8, 4, 5, 8, 5, 3, 9, 0, 5, 0, 3, 5],
+    [9, 4, 5],
+    [4, 11, 7, 4, 9, 11, 9, 10, 11],
+    [0, 8, 3, 4, 9, 7, 9, 11, 7, 9, 10, 11],
+    [1, 10, 11, 1, 11, 4, 1, 4, 0, 7, 4, 11],
+    [3, 1, 4, 3, 4, 8, 1, 10, 4, 7, 4, 11, 10, 11, 4],
+    [4, 11, 7, 9, 11, 4, 9, 2, 11, 9, 1, 2],
+    [9, 7, 4, 9, 11, 7, 9, 1, 11, 2, 11, 1, 0, 8, 3],
+    [11, 7, 4, 11, 4, 2, 2, 4, 0],
+    [11, 7, 4, 11, 4, 2, 8, 3, 4, 3, 2, 4],
+    [2, 9, 10, 2, 7, 9, 2, 3, 7, 7, 4, 9],
+    [9, 10, 7, 9, 7, 4, 10, 2, 7, 8, 7, 0, 2, 0, 7],
+    [3, 7, 10, 3, 10, 2, 7, 4, 10, 1, 10, 0, 4, 0, 10],
+    [1, 10, 2, 8, 7, 4],
+    [4, 9, 1, 4, 1, 7, 7, 1, 3],
+    [4, 9, 1, 4, 1, 7, 0, 8, 1, 8, 7, 1],
+    [4, 0, 3, 7, 4, 3],
+    [4, 8, 7],
+    [9, 10, 8, 10, 11, 8],
+    [3, 0, 9, 3, 9, 11, 11, 9, 10],
+    [0, 1, 10, 0, 10, 8, 8, 10, 11],
+    [3, 1, 10, 11, 3, 10],
+    [1, 2, 11, 1, 11, 9, 9, 11, 8],
+    [3, 0, 9, 3, 9, 11, 1, 2, 9, 2, 11, 9],
+    [0, 2, 11, 8, 0, 11],
+    [3, 2, 11],
+    [2, 3, 8, 2, 8, 10, 10, 8, 9],
+    [9, 10, 2, 0, 9, 2],
+    [2, 3, 8, 2, 8, 10, 0, 1, 8, 1, 10, 8],
+    [1, 10, 2],
+    [1, 3, 8, 9, 1, 8],
+    [0, 9, 1],
+    [0, 3, 8],
+    []
+  ];
+  return raw.map((row) => Int8Array.from(row));
+})();
+var CORNER = [
+  [0, 0, 0],
+  [1, 0, 0],
+  [1, 1, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+  [1, 0, 1],
+  [1, 1, 1],
+  [0, 1, 1]
+];
+var EDGES = [
+  [0, 1],
+  [1, 2],
+  [2, 3],
+  [3, 0],
+  [4, 5],
+  [5, 6],
+  [6, 7],
+  [7, 4],
+  [0, 4],
+  [1, 5],
+  [2, 6],
+  [3, 7]
+];
+function marchingCubes(mask, sx, sy, sz, ox, oy, oz) {
+  const out = [];
+  const vert = (i, j2, k2) => mask[(k2 * sy + j2) * sx + i] ? 1 : 0;
+  const edgePos = new Float32Array(12 * 3);
+  for (let k2 = 0; k2 < sz - 1; k2++) {
+    for (let j2 = 0; j2 < sy - 1; j2++) {
+      for (let i = 0; i < sx - 1; i++) {
+        let cube = 0;
+        for (let c = 0; c < 8; c++) {
+          const [di, dj, dk] = CORNER[c];
+          if (vert(i + di, j2 + dj, k2 + dk)) cube |= 1 << c;
+        }
+        const edges = EDGE_TABLE[cube];
+        if (!edges) continue;
+        for (let e = 0; e < 12; e++) {
+          if (!(edges & 1 << e)) continue;
+          const [a, b] = EDGES[e];
+          const [ai, aj, ak] = CORNER[a];
+          const [bi, bj, bk] = CORNER[b];
+          edgePos[e * 3] = i + (ai + bi) * 0.5;
+          edgePos[e * 3 + 1] = j2 + (aj + bj) * 0.5;
+          edgePos[e * 3 + 2] = k2 + (ak + bk) * 0.5;
+        }
+        const tri = TRI_TABLE[cube];
+        for (let t = 0; t + 2 < tri.length; t += 3) {
+          for (let v2 = 0; v2 < 3; v2++) {
+            const e = tri[t + v2];
+            out.push(edgePos[e * 3] + ox, edgePos[e * 3 + 1] + oy, edgePos[e * 3 + 2] + oz);
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
 
 // render/ct-vr-presets.ts
 var CT_VR_PRESETS = [
@@ -11400,14 +12468,51 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx) 
   let ct2;
   let seg;
   let sceneVr = null;
-  let mosaic = null;
+  let sceneStream = null;
+  let sceneStreamDone = null;
+  let sceneRedrawRaf = 0;
+  let pendingLodUpgrade = null;
+  let pendingIdcSeg;
+  let idcStreamVol = null;
+  let idcCtAssembled = false;
+  let scHold = null;
+  let applyIdcGeom = null;
+  let sceneLodField;
   if ("sceneUrl" in input) {
     status("loading scene\u2026");
     let mb = 0;
-    const sv = await loadSceneVolumeField(gpu.device, input.sceneUrl, (n) => {
-      mb += n;
-      status(`streaming scene\u2026 ${(mb / 1e6).toFixed(1)} MB`);
+    let resolveReady;
+    const ready = new Promise((r) => {
+      resolveReady = r;
     });
+    sceneStreamDone = loadSceneVolumeFieldProgressive(gpu.device, input.sceneUrl, {
+      onBytes: (n) => {
+        mb += n;
+        status(`streaming scene\u2026 ${(mb / 1e6).toFixed(1)} MB`);
+      },
+      onReady: (sv2) => {
+        sceneLodField = sv2.field;
+        resolveReady(sv2);
+      },
+      onSlab: (zStart, zCount, sv2) => {
+        if (sceneStream) {
+          sceneStream.patch(sv2.voxels, zStart, zCount);
+          if (!sceneRedrawRaf) {
+            sceneRedrawRaf = requestAnimationFrame(() => {
+              sceneRedrawRaf = 0;
+              sceneStream?.redraw();
+            });
+          }
+        }
+      },
+      onUpgrade: (sv2) => {
+        status(`refining\u2026 ${sv2.dims.join("\xD7")}`);
+        sceneLodField = sv2.field;
+        if (sceneStream?.upgrade) sceneStream.upgrade(sv2);
+        else pendingLodUpgrade = sv2;
+      }
+    });
+    const sv = await ready;
     ct2 = ctVolumeFromSceneVolume(sv);
     sceneVr = vrPresetFromSceneVolume(sv);
     source = {
@@ -11421,32 +12526,99 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx) 
     };
   } else {
     source = input;
-    mosaic = createMosaic(document.getElementById("viewer"));
-    mosaic.status("contacting the NCI Imaging Data Commons\u2026");
-    const setLoadMosaic = (m) => {
-      status(m);
-      mosaic.status(m);
-    };
-    const res = await loadSeries(source, {
-      onProgress: (p) => {
-        setLoadMosaic(`${p.msg}${p.frac ? ` \u2014 ${Math.round(p.frac * 100)}%` : ""}`);
-      },
-      onSliceCount: (n) => mosaic.setCount(n),
-      onThumb: (n, w2, h, rgba) => mosaic.thumb(n, w2, h, rgba)
+    status("contacting the NCI Imaging Data Commons\u2026");
+    let resolveReady;
+    const ready = new Promise((r) => {
+      resolveReady = r;
     });
-    ct2 = res.ct;
-    seg = res.seg;
+    const modality = { CT: "CT", MR: "MR", PT: "PET" }[source.m] || source.m;
+    sceneStreamDone = loadSeries(source, {
+      onProgress: (p) => {
+        status(`${p.msg}${p.frac ? ` \u2014 ${Math.round(p.frac * 100)}%` : ""}`);
+      },
+      onCTReady: (meta) => {
+        const [nx, ny, nz] = meta.dims;
+        const empty = meta.lev - meta.win / 2 - 1;
+        idcStreamVol = new Float32Array(nx * ny * nz);
+        idcStreamVol.fill(empty);
+        resolveReady({
+          vol: idcStreamVol,
+          dims: meta.dims,
+          ijkToRAS: meta.ijkToRAS,
+          win: meta.win,
+          lev: meta.lev,
+          dtype: "float32",
+          modality: meta.modality || modality
+        });
+      },
+      onCTGeom: (meta) => {
+        if (ct2) {
+          ct2.ijkToRAS = meta.ijkToRAS;
+          if (Number.isFinite(meta.win)) ct2.win = meta.win;
+          if (Number.isFinite(meta.lev)) ct2.lev = meta.lev;
+        }
+        applyIdcGeom?.(meta.ijkToRAS);
+      },
+      onCTSlab: (info) => {
+        const host = idcStreamVol;
+        if (!host) return;
+        const [nx, ny] = info.dims;
+        host.set(info.data, info.zStart * nx * ny);
+        if (sceneStream) {
+          sceneStream.patch(host, info.zStart, info.zCount);
+          if (!sceneRedrawRaf) {
+            sceneRedrawRaf = requestAnimationFrame(() => {
+              sceneRedrawRaf = 0;
+              sceneStream?.redraw();
+            });
+          }
+        }
+      },
+      onCT: (full) => {
+        if (idcStreamVol && full.vol instanceof Float32Array && full.vol !== idcStreamVol) {
+          idcStreamVol.set(full.vol);
+        }
+        if (ct2 && Number.isFinite(full.win) && Number.isFinite(full.lev)) {
+          ct2.win = full.win;
+          ct2.lev = full.lev;
+        }
+        idcCtAssembled = true;
+        if (sceneStream && idcStreamVol) {
+          sceneStream.patch(idcStreamVol, 0, full.dims[2]);
+          sceneStream.redraw();
+        }
+      },
+      onLabelmap: (lab) => {
+        pendingIdcSeg = lab;
+      }
+    }, {
+      // Cache-bust the classic worker (browsers often keep idc-worker.js sticky across IRA reloads).
+      workerUrl: new URL("./idc-worker.js?v=idc-fetch-10", import.meta.url)
+    }).then((res) => {
+      if (res.seg) pendingIdcSeg = res.seg;
+      return res;
+    });
+    ct2 = await ready;
+    seg = void 0;
   }
-  const sc = buildSegrouletteScene(gpu, srgb, ct2, seg);
+  const sc = buildSegrouletteScene(gpu, srgb, ct2, seg, {
+    volumeField: sceneLodField
+  });
+  scHold = sc;
   if (sceneVr) sc.setVolumePreset(sceneVr);
-  const vd = ct2.vol;
   let vmin = Infinity, vmax = -Infinity;
-  const vstride = Math.max(1, Math.floor(vd.length / 2e6));
-  for (let i = 0; i < vd.length; i += vstride) {
-    const v2 = vd[i];
-    if (v2 < vmin) vmin = v2;
-    if (v2 > vmax) vmax = v2;
-  }
+  const sampleRange = () => {
+    vmin = Infinity;
+    vmax = -Infinity;
+    const buf = ct2.vol;
+    const vstride = Math.max(1, Math.floor(buf.length / 2e6));
+    for (let i = 0; i < buf.length; i += vstride) {
+      const v2 = buf[i];
+      if (v2 < vmin) vmin = v2;
+      if (v2 > vmax) vmax = v2;
+    }
+  };
+  sampleRange();
   const dataRange = () => [vmin, vmax];
   sc.setVolumeOpacity(seg ? 0.5 : 1);
   let sliceOutline = false;
@@ -11494,7 +12666,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx) 
     coronal: slicerDefaultOffset01("coronal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
     sagittal: slicerDefaultOffset01("sagittal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi)
   };
-  const sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
+  let sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
   const camera = framedCamera(sc.center, sc.radius);
   const wl = { win: sc.win, lev: sc.lev };
   let ira = null;
@@ -11571,6 +12743,51 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx) 
     draw3d();
     xhair?.redraw();
   };
+  if (sceneStreamDone) {
+    const applyLodUpgrade = (sv) => {
+      const oldCenter = [sc.center[0], sc.center[1], sc.center[2]];
+      sc.swapVolumeField(sv.field, sv.dims, sv.ijkToRAS);
+      ct2.vol = sv.voxels;
+      ct2.dims = sv.dims;
+      ct2.ijkToRAS = sv.ijkToRAS;
+      for (let i = 0; i < 3; i++) {
+        const d = sc.center[i] - oldCenter[i];
+        camera.position[i] += d;
+        camera.focalPoint[i] += d;
+      }
+      sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
+      off.axial = slicerDefaultOffset01("axial", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
+      off.coronal = slicerDefaultOffset01("coronal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
+      off.sagittal = slicerDefaultOffset01("sagittal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
+      sampleRange();
+      drawAll();
+    };
+    sceneStream = {
+      patch: (data, zStart, zCount) => sc.patchVolumeScalars(data, zStart, zCount),
+      redraw: () => drawAll(),
+      upgrade: applyLodUpgrade
+    };
+    const [nx, ny, nz] = ct2.dims;
+    if (ct2.vol instanceof Float32Array && nz > 0) {
+      sc.patchVolumeScalars(ct2.vol, 0, nz);
+    }
+    if (pendingLodUpgrade) {
+      const u = pendingLodUpgrade;
+      pendingLodUpgrade = null;
+      applyLodUpgrade(u);
+    }
+  }
+  applyIdcGeom = (ijkToRAS) => {
+    const old = [sc.center[0], sc.center[1], sc.center[2]];
+    sc.updateGeometry(ijkToRAS);
+    for (let i = 0; i < 3; i++) {
+      const d = sc.center[i] - old[i];
+      camera.position[i] += d;
+      camera.focalPoint[i] += d;
+    }
+    sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
+    drawAll();
+  };
   const updateReadout = (p) => {
     const el = document.getElementById("sr-" + p);
     if (!el) return;
@@ -11579,6 +12796,30 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx) 
     const mm = offset01ToMm(p, off[p], sc.rasLo, sc.rasHi);
     el.textContent = `${Math.round((mm - lo) / sp + 0.5)}/${Math.round((hi - lo) / sp)} \xB7 ${mm.toFixed(1)} mm`;
   };
+  {
+    const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
+    for (const n of names) {
+      cv[n].width = Math.max(1, Math.round(cv[n].clientWidth * dpr));
+      cv[n].height = Math.max(1, Math.round(cv[n].clientHeight * dpr));
+    }
+    drawAll();
+  }
+  if (idcStreamVol && sceneStreamDone && !idcCtAssembled) {
+    status("streaming volume\u2026");
+    while (!idcCtAssembled) {
+      await Promise.race([
+        new Promise((r) => setTimeout(r, 16)),
+        sceneStreamDone.then(() => {
+          idcCtAssembled = true;
+        })
+      ]);
+      if (ct2.vol instanceof Float32Array && ct2.dims[2] > 0) {
+        sc.patchVolumeScalars(ct2.vol, 0, ct2.dims[2]);
+        drawAll();
+      }
+    }
+    sampleRange();
+  }
   const resize = () => {
     const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
     for (const n of names) {
@@ -11674,6 +12915,30 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx) 
         icon: "download",
         title: "Download this study's DICOM to a local folder (streamed, parallel)",
         run: () => downloadStudyWithDialog(source, listAllStudySeries)
+      },
+      {
+        id: "seg-stl",
+        icon: "stl",
+        title: "Save segment as STL for 3D printing (LPS)",
+        run: () => {
+          void (async () => {
+            const labmap = sc.labelmap();
+            if (!sc.hasSeg || !labmap || !sc.segments.length) {
+              status("No segmentation loaded \u2014 open a study with SEG to export STL.");
+              return;
+            }
+            const picked = await pickSegment(sc.segments);
+            if (!picked) return;
+            try {
+              status(`Meshing ${picked.name}\u2026`);
+              const buf = segmentToStl(labmap.lab, sc.dims, sc.ijkToRAS, picked.num);
+              downloadStl(buf, safeStlFileName(picked.name));
+              status(`Saved ${safeStlFileName(picked.name)}`);
+            } catch (err) {
+              status("STL export failed: " + (err?.message ?? err), true);
+            }
+          })();
+        }
       }
     ]
   });
@@ -11929,7 +13194,28 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx) 
   buildAnnotations();
   applyAnn();
   resize();
-  mosaic?.done();
+  if (sceneStreamDone) {
+    status(idcStreamVol ? "streaming volume\u2026" : "streaming scene\u2026");
+    await sceneStreamDone;
+    sampleRange();
+    if (pendingIdcSeg) {
+      seg = pendingIdcSeg;
+      sc.attachSegmentation(pendingIdcSeg);
+      sc.setVolumeOpacity(0.5);
+      segCards.setScene(ct2, seg, sc.segments);
+      for (const p of PLANES) {
+        const cell = document.querySelector(`[data-cell="${p}"]`);
+        const tr = cell?.querySelector(".ann.tr");
+        if (tr) {
+          tr.innerHTML = `${ct2.modality} \xB7 ${sc.dims[2]} slices${sc.hasSeg ? " \xB7 SEG" : ""}<br>${sc.dims[0]}\xD7${sc.dims[1]}`;
+        }
+      }
+    }
+    if (idcStreamVol && Number.isFinite(ct2.win) && Number.isFinite(ct2.lev)) {
+      setWL(ct2.win, ct2.lev);
+    }
+    drawAll();
+  }
   status("");
 }
 main().catch((e) => status("error: " + (e?.message ?? e), true));
