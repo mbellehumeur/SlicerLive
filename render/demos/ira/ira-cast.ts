@@ -9,7 +9,9 @@ import CastClient, {
   isRequestEvent,
   isRunningInCloud,
   requestEventFor,
+  resolveCastConferenceView,
   resolveCastHubAdminUrl,
+  type CastConferenceView,
 } from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
 
 const LOG = "[ira-cast]";
@@ -99,14 +101,29 @@ type ImagingStudyCloseHandler = () => void | Promise<void>;
 let client: ReturnType<typeof CastClient.newInstance> | null = null;
 let topic = "";
 let subscriberName = "";
+let userName = "";
 let connection: IraCastConnection = "idle";
 let connectionDetail = "Not connected";
+let conference: CastConferenceView | null = null;
+/** When true, apply inbound ImagingStudy-open from conference host. */
+let conferenceFollowHost = false;
 let lastImagingStudyOpenContext: unknown[] = [];
+/** Cached LiveScene document (blobBase + nodes) for STATUS + Scene View. */
+let lastLiveScene: IraLiveSceneDoc | null = null;
 /** idle → not attempted; pending → in flight; done → finished or intentionally skipped */
 let statusRequestState: "idle" | "pending" | "done" = "idle";
 let onStatus: StatusListener | null = null;
 let onImagingStudyOpen: ImagingStudyOpenHandler | null = null;
 let onImagingStudyClose: ImagingStudyCloseHandler | null = null;
+let onLiveSceneChange: (() => void) | null = null;
+
+export type IraLiveSceneDoc = {
+  url?: string;
+  mrson?: string;
+  blobBase?: string;
+  nodes?: Record<string, unknown>;
+  [key: string]: unknown;
+};
 
 export function setIraCastStatusListener(fn: StatusListener): void {
   onStatus = fn;
@@ -185,18 +202,89 @@ export function assignIraLocation(studyParams: Record<string, string> = {}): voi
 export function getIraCastSessionInfo(): {
   topic: string;
   subscriberName: string;
+  userName: string;
   connection: IraCastConnection;
   connectionDetail: string;
   hubEndpoint: string;
+  conference: CastConferenceView | null;
 } {
   return {
     topic,
     subscriberName:
       subscriberName || client?.getSessionConfig?.()?.subscriberName || "",
+    userName: userName || client?.getSessionConfig?.()?.userName || "",
     connection,
     connectionDetail,
     hubEndpoint: client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint,
+    conference,
   };
+}
+
+export function setIraConferenceView(view: CastConferenceView | null): void {
+  conference = view;
+  if (!view) {
+    conferenceFollowHost = false;
+  }
+  onStatus?.(connection, connectionDetail);
+}
+
+export function setIraConferenceFollowHost(followHost: boolean): void {
+  conferenceFollowHost = Boolean(followHost);
+}
+
+type ConferenceHubHandler = (message: Record<string, unknown>) => boolean;
+let conferenceHubHandler: ConferenceHubHandler | null = null;
+
+export function setIraConferenceHubHandler(
+  fn: ConferenceHubHandler | null
+): void {
+  conferenceHubHandler = fn;
+}
+
+async function syncIraConferenceView(): Promise<void> {
+  if (connection !== "connected") {
+    setIraConferenceView(null);
+    return;
+  }
+  try {
+    const hubEndpoint =
+      client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
+    const view = await resolveCastConferenceView(
+      hubEndpoint,
+      topic,
+      subscriberName,
+      userName
+    );
+    setIraConferenceView(view);
+  } catch {
+    /* keep prior */
+  }
+}
+
+function handleConferenceHubEvent(message: Record<string, unknown>): boolean {
+  if (conferenceHubHandler?.(message)) {
+    return true;
+  }
+  const event = message?.event as
+    | { "hub.event"?: string; context?: Record<string, unknown> }
+    | undefined;
+  const hubEvent = getHubEventLower(event);
+  if (hubEvent === "conference-start") {
+    void syncIraConferenceView();
+    return true;
+  }
+  if (hubEvent === "conference-end") {
+    const context =
+      event?.context && typeof event.context === "object" ? event.context : {};
+    const leaveTopic = String(context.leaveTopic ?? "").trim();
+    if (!leaveTopic || leaveTopic === topic) {
+      setIraConferenceView(null);
+    } else {
+      void syncIraConferenceView();
+    }
+    return true;
+  }
+  return false;
 }
 
 export function getIraHubAdminUrl(): string {
@@ -209,10 +297,185 @@ export function setIraImagingStudyContext(context: unknown[]): void {
   lastImagingStudyOpenContext = Array.isArray(context) ? context : [];
 }
 
+export function getIraImagingStudyOpenContext(): unknown[] {
+  return cloneContextArray(lastImagingStudyOpenContext);
+}
+
+export function getIraCastClient(): ReturnType<typeof CastClient.newInstance> | null {
+  return client;
+}
+
+export type InferenceProbeResult = {
+  online: boolean;
+  items: unknown[];
+  job?: string;
+  error?: string;
+  raw?: unknown;
+};
+
+type StatusUpdateHandler = (message: string, level: string) => void;
+let onStatusUpdate: StatusUpdateHandler | null = null;
+
+export function setIraStatusUpdateHandler(fn: StatusUpdateHandler | null): void {
+  onStatusUpdate = fn;
+}
+
+/** Probe a Cast resource-server product via STATUS request. */
+export async function probeInferenceProduct(
+  productName: string,
+): Promise<InferenceProbeResult> {
+  if (!client || connection !== "connected") {
+    return { online: false, items: [], error: "Not connected" };
+  }
+  const subscriber =
+    subscriberName || client.getSessionConfig()?.subscriberName?.trim() || "";
+  if (!subscriber) return { online: false, items: [], error: "No subscriber name" };
+
+  const product = String(productName || "").trim();
+  try {
+    const result = await client.request({
+      "subscriber.name": subscriber,
+      "subscriber.product.name": "SLICERLIVE-IRA",
+      "subscriber.actor": ID_ACTOR,
+      "target.product.name": product,
+      event: {
+        "hub.event": requestEventFor("STATUS"),
+        ...(topic ? { "hub.topic": topic } : {}),
+        context: { dataType: "STATUS" },
+      },
+    });
+    if (!result.ok) {
+      return {
+        online: false,
+        items: [],
+        error: `HTTP ${result.status}`,
+        raw: result.data,
+      };
+    }
+    const envelope =
+      result.data && typeof result.data === "object"
+        ? (result.data as { responses?: Array<{ data?: unknown; productName?: unknown }> })
+        : {};
+    const responses = Array.isArray(envelope.responses) ? envelope.responses : [];
+    for (const item of responses) {
+      const data = item?.data;
+      if (!data || typeof data !== "object") continue;
+      const payload = data as {
+        source?: unknown;
+        product?: unknown;
+        items?: unknown;
+      };
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      let online = false;
+      let job: string | undefined;
+      for (const entry of items) {
+        if (!entry || typeof entry !== "object") continue;
+        const key = String((entry as { key?: unknown }).key ?? "")
+          .trim()
+          .toLowerCase();
+        const value = String((entry as { value?: unknown }).value ?? "").trim();
+        if (key === "availability" && value.toLowerCase() === "online") online = true;
+        if (key === "job" && value) job = value;
+      }
+      // Some servers only return items without explicit availability key.
+      if (!online && items.length > 0 && payload.source === "status") online = true;
+      return { online, items, job, raw: result.data };
+    }
+    return { online: false, items: [], raw: result.data };
+  } catch (err) {
+    return {
+      online: false,
+      items: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/** Publish a URL-file job to an inference product (dicom-send / nifti-send). */
+export async function publishInferenceJob(opts: {
+  product: string;
+  hubEvent: string;
+  files: Array<{ url: string; fileName: string }>;
+}): Promise<{ ok: boolean; detail: string }> {
+  if (!client || connection !== "connected") {
+    return { ok: false, detail: "Not connected" };
+  }
+  const subscriber =
+    subscriberName || client.getSessionConfig()?.subscriberName?.trim() || "";
+  if (!subscriber) return { ok: false, detail: "No subscriber name" };
+  if (!topic) return { ok: false, detail: "No Cast topic" };
+  if (!opts.files.length) return { ok: false, detail: "No volume files" };
+
+  try {
+    const res = await client.publish({
+      "subscriber.name": subscriber,
+      "subscriber.product.name": "SLICERLIVE-IRA",
+      "subscriber.actor": ID_ACTOR,
+      "target.product.name": opts.product,
+      event: {
+        "hub.topic": topic,
+        "hub.event": opts.hubEvent,
+        context: {
+          files: opts.files.map((f) => ({
+            url: f.url,
+            fileName: f.fileName,
+          })),
+        },
+      },
+    });
+    const ok = Boolean(res && (res as Response).ok !== false);
+    return {
+      ok,
+      detail: ok ? "published" : `publish status ${(res as Response)?.status ?? "?"}`,
+    };
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export function getIraLiveScene(): IraLiveSceneDoc | null {
+  return lastLiveScene;
+}
+
+export function setIraLiveScene(scene: IraLiveSceneDoc | null): void {
+  lastLiveScene = scene;
+  onLiveSceneChange?.();
+}
+
+export function setIraLiveSceneChangeListener(fn: (() => void) | null): void {
+  onLiveSceneChange = fn;
+}
+
+function buildStatusResponseData(): {
+  "context.type": string;
+  context: unknown[];
+} {
+  const context = cloneContextArray(lastImagingStudyOpenContext);
+  if (lastLiveScene) {
+    const withoutScene = context.filter((item) => {
+      if (!item || typeof item !== "object") return true;
+      return (item as { key?: string }).key !== "scene";
+    });
+    withoutScene.push({ key: "scene", resource: lastLiveScene });
+    return { "context.type": "ImagingStudy", context: withoutScene };
+  }
+  if (context.length) {
+    return { "context.type": "ImagingStudy", context };
+  }
+  return EMPTY_CAST_CONTEXT;
+}
+
 function setConnection(next: IraCastConnection, detail: string): void {
+  const wasConnected = connection === "connected";
   connection = next;
   connectionDetail = detail;
+  if (wasConnected && next !== "connected") {
+    conference = null;
+  }
   onStatus?.(next, detail);
+  if (next === "connected") {
+    void syncIraConferenceView();
+  }
 }
 
 function stripCastParamsFromUrl(): void {
@@ -292,12 +555,7 @@ function handleStatusRequest(message: Record<string, unknown>): boolean {
   }
   if (context.dataType !== "STATUS") return false;
 
-  const responseData = lastImagingStudyOpenContext.length
-    ? {
-        "context.type": "ImagingStudy",
-        context: cloneContextArray(lastImagingStudyOpenContext),
-      }
-    : EMPTY_CAST_CONTEXT;
+  const responseData = buildStatusResponseData();
 
   client?.sendCastRequestResponse(
     correlationId,
@@ -308,11 +566,26 @@ function handleStatusRequest(message: Record<string, unknown>): boolean {
   return true;
 }
 
+function handleStatusUpdate(message: Record<string, unknown>): boolean {
+  const event = message?.event as
+    | { "hub.event"?: string; context?: Record<string, unknown> }
+    | undefined;
+  const name = getHubEventLower(event);
+  if (name !== "status-update") return false;
+  const ctx =
+    event?.context && typeof event.context === "object" ? event.context : {};
+  const text = String(ctx.message ?? "").trim();
+  if (text) onStatusUpdate?.(text, String(ctx.level ?? "info"));
+  return true;
+}
+
 function handleImagingStudyMessage(message: Record<string, unknown>): boolean {
   const event = message?.event as { "hub.event"?: string } | undefined;
   const name = getHubEventLower(event);
   if (name === "imagingstudy-close") {
     lastImagingStudyOpenContext = [];
+    lastLiveScene = null;
+    onLiveSceneChange?.();
     console.info(`${LOG} ImagingStudy-close`);
     void Promise.resolve(onImagingStudyClose?.()).catch((err) =>
       console.error(`${LOG} ImagingStudy-close handler failed`, err)
@@ -320,6 +593,11 @@ function handleImagingStudyMessage(message: Record<string, unknown>): boolean {
     return true;
   }
   if (name !== "imagingstudy-open") return false;
+
+  if (conference && !conferenceFollowHost) {
+    console.info(`${LOG} ImagingStudy-open ignored (not following host)`);
+    return true;
+  }
 
   const context = messageEventContext(message);
   lastImagingStudyOpenContext = cloneContextArray(context);
@@ -475,18 +753,24 @@ function scheduleStatusRequestFromWorklist(delayMs: number): void {
 
 /** Apply radio visual classes for the current connection. */
 export function applyIraCastRadioVisual(statusEl: HTMLElement): void {
-  const visual = castRadioStatusVisual(connection);
+  const visual = castRadioStatusVisual(connection, {
+    conferenceActive: Boolean(conference),
+  });
   statusEl.classList.remove(
     "ira-cast-idle",
     "ira-cast-connecting",
     "ira-cast-connected",
     "ira-cast-disconnected",
     "ira-cast-error",
-    "ira-cast-pulse"
+    "ira-cast-pulse",
+    "ira-cast-conference-pulse"
   );
   statusEl.classList.add(`ira-cast-${visual.tone}`);
   statusEl.classList.toggle("ira-cast-pulse", visual.pulse);
-  statusEl.title = connectionDetail;
+  statusEl.classList.toggle("ira-cast-conference-pulse", visual.conferencePulse);
+  statusEl.title = conference?.title
+    ? `${connectionDetail} · ${conference.title}`
+    : connectionDetail;
   const slash = statusEl.querySelector(".cast-radio-slash") as HTMLElement | null;
   if (slash) slash.hidden = !visual.showSlash;
 }
@@ -524,6 +808,8 @@ export async function connectIraCast(): Promise<void> {
         "status-request",
         "subscription-removed",
         "status-update",
+        "conference-start",
+        "conference-end",
       ],
       lease: 7200,
       defaultTargetActor: "*",
@@ -535,6 +821,8 @@ export async function connectIraCast(): Promise<void> {
 
   client.onMessage((message: Record<string, unknown>) => {
     if (handleStatusRequest(message)) return;
+    if (handleConferenceHubEvent(message)) return;
+    if (handleStatusUpdate(message)) return;
     handleImagingStudyMessage(message);
   });
 
@@ -579,6 +867,7 @@ export async function connectIraCast(): Promise<void> {
     const session = client.getSessionConfig();
     if (session.subscriberName) subscriberName = session.subscriberName;
     if (session.topic) topic = session.topic;
+    userName = String(session.userName || "").trim() || topic;
 
     const hubToken = String(client.getHubConfig?.()?.token || urlToken || "").trim();
     if (hubToken) urlToken = hubToken;

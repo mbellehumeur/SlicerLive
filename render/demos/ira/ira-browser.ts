@@ -38,7 +38,9 @@ import {
   connectIraCast,
   iraUrlHasStudyParams,
   setIraImagingStudyCloseHandler,
+  setIraImagingStudyContext,
   setIraImagingStudyOpenHandler,
+  setIraLiveScene,
 } from "./ira-cast.ts";
 import { installIraHeader } from "./ira-header.ts";
 import {
@@ -47,6 +49,8 @@ import {
 } from "./ira-idc.ts";
 import {
   ctVolumeFromSceneVolume,
+  fetchLiveSceneDoc,
+  imagingStudyContextFromSceneUrl,
   sceneUrlFromOpenContext,
   studyParamsFromSceneUrl,
   vrPresetFromSceneVolume,
@@ -282,6 +286,8 @@ async function main() {
     assignIraLocation(studyParamsFromIdcSource(idcSource));
   });
   setIraImagingStudyCloseHandler(() => {
+    setIraLiveScene(null);
+    setIraImagingStudyContext([]);
     if (!iraUrlHasStudyParams()) {
       status("No study loaded");
       return;
@@ -379,6 +385,14 @@ async function mountStudyFromSource(
   let sceneLodField: ImageField | undefined;
   if ("sceneUrl" in input) {
     status("loading scene…");
+    try {
+      const doc = await fetchLiveSceneDoc(input.sceneUrl);
+      setIraLiveScene(doc);
+    } catch (err) {
+      console.warn("[ira] LiveScene document fetch failed", err);
+      setIraLiveScene(null);
+    }
+    setIraImagingStudyContext(imagingStudyContextFromSceneUrl(input.sceneUrl));
     let mb = 0;
     let resolveReady!: (sv: SceneVolume) => void;
     const ready = new Promise<SceneVolume>((r) => {
@@ -418,12 +432,13 @@ async function mountStudyFromSource(
       c: "",
       cb: "",
       m: ct.modality || "CT",
-      col: "SlicerLive",
+      col: "LiveScene",
       st: "",
-      sd: `${sv.name} · SlicerLive scene`,
-      lic: "SlicerLive",
+      sd: `${sv.name} · LiveScene`,
+      lic: "LiveScene",
     };
   } else {
+    setIraLiveScene(null);
     source = input;
     status("contacting the NCI Imaging Data Commons…");
     let resolveReady!: (v: CTVolume) => void;
