@@ -17,7 +17,15 @@ interface Node {
   attrs?: Record<string, unknown>;
   blobs?: Record<string, unknown>;
 }
-interface SceneWrapper { blobBase?: string; nodes?: Record<string, Node> }
+interface SceneWrapper { blobBase?: string; nodes?: Record<string, Node>; url?: string }
+
+/** URL or inline LiveScene document (`blobBase` + `nodes`). */
+export type SceneJsonSource = string | {
+  blobBase?: string;
+  nodes?: Record<string, unknown>;
+  url?: string;
+  [key: string]: unknown;
+};
 
 export type TF = number[][]; // color: [s,r,g,b][]; opacity: [s,a][]
 
@@ -192,15 +200,29 @@ type ParsedScene = {
 };
 
 async function parseSceneJson(
-  sceneUrl: string,
+  sceneSource: SceneJsonSource,
   opts: LoadOpts = {},
 ): Promise<ParsedScene> {
-  const raw = await (await fetch(sceneUrl)).json() as SceneWrapper | Record<string, Node>;
+  const pageBase = (globalThis as { location?: { href?: string } }).location?.href ?? "file:///";
+  let raw: SceneWrapper | Record<string, Node>;
+  let sceneAbs: string;
+  if (typeof sceneSource === "string") {
+    raw = await (await fetch(sceneSource)).json() as SceneWrapper | Record<string, Node>;
+    sceneAbs = new URL(sceneSource, pageBase).href;
+  } else {
+    raw = sceneSource as SceneWrapper;
+    const hint = typeof sceneSource.url === "string" ? sceneSource.url.trim() : "";
+    const blobHint = String(sceneSource.blobBase || "").trim();
+    // Absolute blobBase does not need a document URL; relative needs a base.
+    if (/^https?:\/\//i.test(blobHint) || blobHint.startsWith("blob:")) {
+      sceneAbs = hint || blobHint || pageBase;
+    } else {
+      sceneAbs = hint || pageBase;
+    }
+  }
   const adapted = isMrsonScene(raw) ? adaptMrsonScene(raw) as unknown as SceneWrapper : raw;
   const wrapper = (adapted as SceneWrapper).nodes ? adapted as SceneWrapper : { nodes: adapted as Record<string, Node> };
   const nodes = wrapper.nodes!;
-  const pageBase = (globalThis as { location?: { href?: string } }).location?.href ?? "file:///";
-  const sceneAbs = new URL(sceneUrl, pageBase).href;
   const blobBase = new URL(wrapper.blobBase ?? "./blobs/", sceneAbs).href;
 
   const vol = Object.values(nodes).find((n) => n.class === "vtkMRMLScalarVolumeNode" && n.attrs?.zarr);
@@ -279,11 +301,11 @@ function sceneVolumeFromParts(
 /** Fetch a scene json + its scalar volume and return a renderable ImageField (waits for full zarr). */
 export async function loadSceneVolumeField(
   dev: GPUDevice,
-  sceneUrl: string,
+  sceneSource: SceneJsonSource,
   onBytes?: (n: number) => void,
   opts: LoadOpts = {},
 ): Promise<SceneVolume> {
-  return loadSceneVolumeFieldProgressive(dev, sceneUrl, { onBytes }, opts);
+  return loadSceneVolumeFieldProgressive(dev, sceneSource, { onBytes }, opts);
 }
 
 export interface ProgressiveLoadHandlers {
@@ -347,11 +369,11 @@ async function loadLevelSlabProgressive(
  */
 export async function loadSceneVolumeFieldProgressive(
   dev: GPUDevice,
-  sceneUrl: string,
+  sceneSource: SceneJsonSource,
   handlers: ProgressiveLoadHandlers = {},
   opts: LoadOpts = {},
 ): Promise<SceneVolume> {
-  const parsed = await parseSceneJson(sceneUrl, opts);
+  const parsed = await parseSceneJson(sceneSource, opts);
   const levels = await resolveSceneLevels(parsed);
 
   // Coarse→fine: highest level index first.

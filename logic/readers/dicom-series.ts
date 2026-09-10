@@ -5,7 +5,6 @@
 //   parseInstances / loadDicomSeries — use dcmjs (browser: lazy-loaded from a CDN) to fill DicomInstance.
 // Matches Slicer's DICOMScalarVolumePlugin geometry: IJK->RAS from IOP/IPP/PixelSpacing, subseries by orientation.
 import type { Volume } from "./nifti.ts";
-import { zarrDtype } from "./registry.ts";
 
 export interface DicomInstance {
   seriesInstanceUID: string;
@@ -66,14 +65,17 @@ export function reconstructSeries(instances: DicomInstance[]): Volume {
   const c2 = lps2ras(normal.map((v) => v * sliceSpacing));
   const o = lps2ras(p0);
   const ijkToRAS = [c0[0], c1[0], c2[0], o[0], c0[1], c1[1], c2[1], o[1], c0[2], c1[2], c2[2], o[2], 0, 0, 0, 1];
-  const signed = slices.some((s) => (s.rescaleIntercept ?? 0) !== 0 || (s.pixelRepresentation === 1) || (s.modality === "CT"));
-  const data = signed ? new Int16Array(nx * ny * nz) : new Uint16Array(nx * ny * nz);
+  // Float32 like the IDC worker — rescale to HU must not wrap Int16.
+  const data = new Float32Array(nx * ny * nz);
   for (let k = 0; k < nz; k++) {
     const s = slices[k], slope = s.rescaleSlope ?? 1, inter = s.rescaleIntercept ?? 0, off = k * nx * ny, px = s.pixels;
-    if (slope === 1 && inter === 0) (data as { set(a: ArrayLike<number>, o: number): void }).set(px, off);
-    else for (let p = 0; p < nx * ny; p++) data[off + p] = px[p] * slope + inter;
+    if (slope === 1 && inter === 0) {
+      for (let p = 0; p < nx * ny; p++) data[off + p] = px[p];
+    } else {
+      for (let p = 0; p < nx * ny; p++) data[off + p] = px[p] * slope + inter;
+    }
   }
-  const dtype = zarrDtype(data);
+  const dtype = "<f4";
   const name = s0.seriesDescription || s0.modality || "DICOM";
   const meta: Record<string, unknown> = { seriesInstanceUID: s0.seriesInstanceUID, studyInstanceUID: s0.studyInstanceUID, modality: s0.modality, patientName: s0.patientName };
   if (typeof s0.windowCenter === "number" && typeof s0.windowWidth === "number") { meta.windowCenter = s0.windowCenter; meta.windowWidth = s0.windowWidth; }
@@ -106,6 +108,46 @@ export function loadDcmjs(): Promise<Dcmjs> {
 
 const num = (v: unknown, d = 0): number => { const n = Number(Array.isArray(v) ? v[0] : v); return Number.isFinite(n) ? n : d; };
 
+/** Reinterpret PixelData bytes as signed/unsigned samples (do not iterate Uint8Array element-wise). */
+function pixelsFromPixelData(
+  pd: ArrayBuffer | ArrayBufferView,
+  signed: boolean,
+  bitsAllocated: number,
+  rows: number,
+  columns: number,
+): Int16Array | Uint16Array | null {
+  let buf: ArrayBuffer;
+  let byteOffset = 0;
+  let byteLength: number;
+  if (ArrayBuffer.isView(pd)) {
+    buf = pd.buffer as ArrayBuffer;
+    byteOffset = pd.byteOffset;
+    byteLength = pd.byteLength;
+  } else {
+    buf = pd;
+    byteLength = pd.byteLength;
+  }
+  const samples = rows * columns;
+  if (samples <= 0) return null;
+  const bits = bitsAllocated === 8 ? 8 : 16;
+  const need = samples * (bits / 8);
+  if (byteLength < need) return null; // compressed / truncated — skip
+  if (bits === 8) {
+    const u8 = new Uint8Array(buf, byteOffset, samples);
+    if (signed) {
+      const out = new Int16Array(samples);
+      for (let i = 0; i < samples; i++) out[i] = u8[i] << 24 >> 24;
+      return out;
+    }
+    const out = new Uint16Array(samples);
+    out.set(u8);
+    return out;
+  }
+  return signed
+    ? new Int16Array(buf, byteOffset, samples)
+    : new Uint16Array(buf, byteOffset, samples);
+}
+
 /** Parse DICOM instance buffers into DicomInstance[] (drops non-image objects — SEG/SR/PR handled elsewhere). */
 export async function parseInstances(buffers: ArrayBuffer[]): Promise<DicomInstance[]> {
   const dcmjs = await loadDcmjs();
@@ -114,12 +156,19 @@ export async function parseInstances(buffers: ArrayBuffer[]): Promise<DicomInsta
     let ds: Record<string, unknown>;
     try { ds = dcmjs.data.DicomMetaDictionary.naturalizeDataset(dcmjs.data.DicomMessage.readFile(buf).dict); } catch { continue; }
     if (!ds.PixelData || !ds.ImageOrientationPatient || !ds.ImagePositionPatient || !ds.PixelSpacing) continue;
-    let pd = ds.PixelData as ArrayBuffer | ArrayBuffer[]; if (Array.isArray(pd)) pd = pd[0];
+    let pd = ds.PixelData as ArrayBuffer | ArrayBufferView | ArrayBuffer[];
+    if (Array.isArray(pd)) pd = pd[0];
+    if (!pd) continue;
     const signed = ds.PixelRepresentation === 1;
+    const rows = num(ds.Rows);
+    const columns = num(ds.Columns);
+    const bitsAllocated = num(ds.BitsAllocated, 16);
+    const pixels = pixelsFromPixelData(pd, signed, bitsAllocated, rows, columns);
+    if (!pixels) continue;
     out.push({
       seriesInstanceUID: String(ds.SeriesInstanceUID ?? "series"),
       sopInstanceUID: ds.SOPInstanceUID as string | undefined,
-      rows: num(ds.Rows), columns: num(ds.Columns),
+      rows, columns,
       pixelSpacing: (ds.PixelSpacing as number[]).map(Number) as [number, number],
       imageOrientationPatient: (ds.ImageOrientationPatient as number[]).map(Number),
       imagePositionPatient: (ds.ImagePositionPatient as number[]).map(Number) as [number, number, number],
@@ -131,7 +180,7 @@ export async function parseInstances(buffers: ArrayBuffer[]): Promise<DicomInsta
       windowCenter: ds.WindowCenter != null ? num(ds.WindowCenter) : undefined,
       windowWidth: ds.WindowWidth != null ? num(ds.WindowWidth) : undefined,
       modality: ds.Modality as string | undefined,
-      pixels: signed ? new Int16Array(pd as ArrayBuffer) : new Uint16Array(pd as ArrayBuffer),
+      pixels,
       patientName: typeof ds.PatientName === "object" ? (ds.PatientName as { Alphabetic?: string }).Alphabetic : ds.PatientName as string | undefined,
       studyInstanceUID: ds.StudyInstanceUID as string | undefined,
       seriesDescription: ds.SeriesDescription as string | undefined,

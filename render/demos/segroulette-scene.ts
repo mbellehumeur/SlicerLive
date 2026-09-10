@@ -115,6 +115,11 @@ export interface SegrouletteScene {
   swapVolumeField(field: ImageField, dims: [number, number, number], ijkToRAS: number[]): void;
   /** Mount SEG after a volume-only build (progressive IDC: anatomy first, labelmap when ready). */
   attachSegmentation(seg: SegLabelmap): void;
+  /**
+   * Replace any existing SEG with a new labelmap (Cast inference results).
+   * Tears down prior SDF/overlay GPU state first.
+   */
+  replaceSegmentation(seg: SegLabelmap): void;
   /** Current SEG labelmap (voxel = SegmentNumber), if attached — for export / tools. */
   labelmap(): SegLabelmap | undefined;
   /** Free the 3D segmentation GPU resources (call before dropping a scene on Spin). */
@@ -268,6 +273,47 @@ export function buildSegrouletteScene(
     old?.destroy();                                 // one owner destroys the retired texture
   };
 
+  const clearSegGpu = () => {
+    try { segLogic?.destroy(); } catch { /* ignore */ }
+    try { editable?.destroy(); } catch { /* ignore */ }
+    segLogic = undefined;
+    editable = undefined;
+    segments.length = 0;
+    palette.fill(0);
+    segOpacity.clear();
+    activeSeg = undefined;
+    out.hasSeg = false;
+    showSeg = false;
+    mode = "volume";
+    const old = colorTex;
+    colorTex = undefined;
+    if (old) {
+      try { slice.setTextures(volumeField.volumeTexture(), undefined); } catch { /* ignore */ }
+      try { old.destroy(); } catch { /* ignore */ }
+    }
+    slice.setOverlayOpacity(0);
+  };
+
+  const mountSegLabelmap = (labmap: SegLabelmap) => {
+    activeSeg = labmap;
+    fillSegmentsFrom(labmap);
+    if (segments.length === 0) {
+      activeSeg = undefined;
+      out.hasSeg = false;
+      showSeg = false;
+      rebuild();
+      return;
+    }
+    bakeSegSdf(labmap);
+    if (!segLogic) return;
+    out.hasSeg = true;
+    out.mode = mode;
+    showSeg = segLayerOpacity > 0.001;
+    rebakeColorized();
+    slice.setOverlayOpacity(0.5);
+    rebuild();
+  };
+
   const slice = new SliceRenderer(gpu, format);
   slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
   slice.setTextures(volumeField.volumeTexture(), colorTex);
@@ -276,7 +322,10 @@ export function buildSegrouletteScene(
 
   const center: Vec3 = [(rasLo[0] + rasHi[0]) / 2, (rasLo[1] + rasHi[1]) / 2, (rasLo[2] + rasHi[2]) / 2];
   const radius = Math.hypot(rasHi[0] - rasLo[0], rasHi[1] - rasLo[1], rasHi[2] - rasLo[2]) / 2;
-  const out: SegrouletteScene = {
+  // Assigned below; helpers above close over this binding and run only after init.
+  // eslint-disable-next-line prefer-const
+  let out: SegrouletteScene;
+  out = {
     scene, slice, center, radius, rasLo, rasHi, ijkToRAS: ct.ijkToRAS, dims, win: ct.win, lev: ct.lev,
     segments, mode, hasSeg, roi,
     setLayers(sv, ss) { this.setVolumeOpacity(sv ? 1 : 0); this.setSegOpacity(ss ? 1 : 0); },
@@ -370,21 +419,15 @@ export function buildSegrouletteScene(
     },
     attachSegmentation(labmap) {
       if (out.hasSeg || segLogic) return;                 // already has SEG
-      activeSeg = labmap;
-      fillSegmentsFrom(labmap);
-      if (segments.length === 0) return;
-      bakeSegSdf(labmap);
-      if (!segLogic) return;
-      out.hasSeg = true;
-      out.mode = mode;
-      showSeg = segLayerOpacity > 0.001;
-      rebakeColorized();
-      slice.setOverlayOpacity(0.5);
-      rebuild();
+      mountSegLabelmap(labmap);
+    },
+    replaceSegmentation(labmap) {
+      clearSegGpu();
+      mountSegLabelmap(labmap);
     },
     labelmap: () => activeSeg,
     reclip() { if (roiEnabled) scene.setClipBox(roi.lo(), roi.hi()); else scene.clearClip(); scene.syncUniforms(); },
-    destroy() { segLogic?.destroy(); editable?.destroy(); },
+    destroy() { clearSegGpu(); },
   };
   return out;
 }

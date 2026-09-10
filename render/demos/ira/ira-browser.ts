@@ -2,7 +2,7 @@
 //
 // Loads a study when the URL supplies series/StudyInstanceUID (OHIF/IID/direct-S3) or
 // ?scene=<SlicerLive scene JSON URL>. With no params the viewer stays empty — Cast/worklist
-// opens studies later.
+// opens studies later in-place (no page reload; shareable URL via history.replaceState).
 //
 // Bundle for the gallery (idc-worker.js must sit next to the output):
 //   deno run -A npm:esbuild@0.21.5 render/demos/ira/ira-browser.ts --bundle --format=esm \
@@ -27,43 +27,64 @@ import { buildFontAtlas } from "../../sdf-text.ts";
 import { mountSegmentCards } from "../../segment-cards.ts";
 import { loadSeries } from "../../vendor/idc_tools/index.js";
 import type { CTVolume, SegLabelmap } from "../../vendor/idc_tools/types.js";
-import { type IraApi, mountIra, type Plane } from "./ira.ts";
+import { type IraApi, ensureIraToolbarShell, mountIra, type Plane, resetIraToolbarShell } from "./ira.ts";
 import { downloadStudyWithDialog, type SeriesRef, shareStudy } from "../idc-share.ts";
 import { downloadStl, pickSegment, safeStlFileName, segmentToStl } from "../segment-stl.ts";
 import { CT_VR_PRESETS, presetLUT } from "../../ct-vr-presets.ts";
 import { openVrPresetMenu, type VrPresetItem } from "../vr-preset-menu.ts";
 import type { Vec3 } from "../../mat4.ts";
 import {
-  assignIraLocation,
   connectIraCast,
-  iraUrlHasStudyParams,
+  setIraDicomSendHandler,
   setIraImagingStudyCloseHandler,
   setIraImagingStudyContext,
   setIraImagingStudyOpenHandler,
   setIraLiveScene,
+  setIraNiftiSendHandler,
+  syncIraStudyUrl,
+  publishIraImagingStudyTransition,
 } from "./ira-cast.ts";
+import { mergeSegLabelmaps, segLabelmapFromNiftiSendEvent } from "./ira-nifti-seg.ts";
+import { segLabelmapFromDicomSendEvent } from "./ira-dicom-seg.ts";
 import { installIraHeader } from "./ira-header.ts";
 import {
   sourceFromIdcOpenContext,
   studyParamsFromIdcSource,
 } from "./ira-idc.ts";
 import {
-  ctVolumeFromSceneVolume,
+  iraVolumeFromLocalVolume,
+  iraVolumeFromSceneVolume,
+  EMBEDDED_SCENE_PARAM,
   fetchLiveSceneDoc,
+  imagingStudyContextFromLocalStudy,
+  imagingStudyContextFromSceneDoc,
   imagingStudyContextFromSceneUrl,
+  sceneDocFromOpenContext,
   sceneUrlFromOpenContext,
+  studyParamsFromSceneDoc,
   studyParamsFromSceneUrl,
+  takeEmbeddedSceneFromStorage,
   vrPresetFromSceneVolume,
 } from "./ira-scene.ts";
+import { loadEntry, type SeriesEntry } from "../../../logic/readers/dicom-local.ts";
 // The demo case: an arbitrary KiTS kidney-tumour study (IDC c4kc_kits · KiTS-00051) — the
 // noncontrast CT (95 slices) WITH its DICOM SEG (kidney + tumour). Which case loads is
 // resolved from the URL (see resolveSource) — a drop-in for OHIF on the IDC portal:
 //   OHIF / IDC-portal form:  ?StudyInstanceUIDs=<uid>[&SeriesInstanceUIDs=<uid[,uid]>]
 //   IHE IID form:            ?requestType=STUDY&studyUID=<uid>[&seriesUID=<uid>]
 //   Fast direct-S3 form:     ?series=<crdc_uuid>&bucket=<b>[&seg=<uuid>&segBucket=<b>]
-//   SlicerLive scene form:   ?scene=<https://…/Scene.json>
+//   SlicerLive scene form:   ?scene=<https://…/Scene.json> or ?scene=embedded (sessionStorage)
 //   (no params → empty; Cast/worklist opens a study later)
 const P = new URLSearchParams(location.search);
+
+/** Active study applies Cast dicom/nifti-send overlays; cleared on dispose. */
+let applyCastNiftiSeg:
+  | ((event: Record<string, unknown>) => Promise<void>)
+  | null = null;
+let applyCastDicomSeg:
+  | ((event: Record<string, unknown>) => Promise<void>)
+  | null = null;
+let castNiftiMountId = 0;
 
 interface Source {
   c: string; // CT/MR/PET series S3 prefix (crdc uuid)
@@ -262,39 +283,17 @@ const CT_WL_PRESETS = [
 
 async function main() {
   // Cast header (radio + settings) and deep-link subscribe before study load / empty return.
-  installIraHeader();
+  // Local-series mount is filled in after loadStudy exists (GPU ready).
+  let mountLocalSeries: (
+    entry: SeriesEntry,
+    opts: { anonymized: boolean },
+  ) => Promise<void> = async () => {
+    throw new Error("IRA viewer is still starting — try again in a moment");
+  };
+  installIraHeader({
+    onMountLocalSeries: (entry, opts) => mountLocalSeries(entry, opts),
+  });
   void connectIraCast();
-
-  // Close/reopen via full reload (preserves Cast topic/token in the URL). Avoids tearing
-  // down WebGPU mounts; works from empty or already-loaded IRA.
-  setIraImagingStudyOpenHandler(async (ctx) => {
-    const sceneUrl = sceneUrlFromOpenContext(ctx);
-    if (sceneUrl) {
-      status("Opening scene…");
-      assignIraLocation(studyParamsFromSceneUrl(sceneUrl));
-      return;
-    }
-    const idcSource = sourceFromIdcOpenContext(ctx);
-    if (!idcSource) {
-      status(
-        "Cast ImagingStudy-open: unsupported context (need scene JSON or idc CRDC prefix URLs)",
-        true,
-      );
-      return;
-    }
-    status("Opening study…");
-    assignIraLocation(studyParamsFromIdcSource(idcSource));
-  });
-  setIraImagingStudyCloseHandler(() => {
-    setIraLiveScene(null);
-    setIraImagingStudyContext([]);
-    if (!iraUrlHasStudyParams()) {
-      status("No study loaded");
-      return;
-    }
-    status("Closing study…");
-    assignIraLocation({});
-  });
 
   if (!(navigator as unknown as { gpu?: unknown }).gpu) {
     status("WebGPU not available — try Chrome/Edge 113+ or Safari 18+.", true);
@@ -313,48 +312,265 @@ async function main() {
     cx[n].configure({ device: gpu.device, format: preferred, viewFormats: [srgb], alphaMode: "opaque" });
   }
 
-  // Which case? Resolve the URL — OHIF/IID StudyInstanceUID (via the IDC index), direct S3
-  // prefix, SlicerLive scene JSON, or empty (no auto-load).
-  const setLoad = (m: string) => {
-    status(m);
+  type StudyMount = { dispose: () => void };
+  let studyMount: StudyMount | null = null;
+  let studyAbort: AbortController | null = null;
+  let emptyCleanup: (() => void) | null = null;
+  let studyLoadToken = 0;
+
+  setIraNiftiSendHandler(async (event) => {
+    if (!applyCastNiftiSeg) {
+      status("nifti-send received but no study is open", true);
+      return;
+    }
+    await applyCastNiftiSeg(event);
+  });
+  setIraDicomSendHandler(async (event) => {
+    if (!applyCastDicomSeg) {
+      status("dicom-send received but no study is open", true);
+      return;
+    }
+    await applyCastDicomSeg(event);
+  });
+
+  const clearViewportDisplay = () => {
+    for (const el of document.querySelectorAll(
+      ".ann, .ira-overlay, #ira-strip, #ira-cine-box, #sl-badge, #sl-popup, #sl-help",
+    )) {
+      el.remove();
+    }
+    resetIraToolbarShell();
+    for (const p of PLANES) {
+      document.querySelector(`[data-cell="${p}"]`)?.classList.remove("ira-cell-selected");
+      const readout = document.getElementById("sr-" + p);
+      if (readout) readout.textContent = "";
+    }
+    const info = document.getElementById("info");
+    if (info) info.textContent = "";
+    for (const n of names) {
+      try {
+        const tex = cx[n].getCurrentTexture();
+        const enc = gpu.device.createCommandEncoder();
+        const pass = enc.beginRenderPass({
+          colorAttachments: [
+            {
+              view: tex.createView(),
+              clearValue: { r: 0, g: 0, b: 0, a: 1 },
+              loadOp: "clear",
+              storeOp: "store",
+            },
+          ],
+        });
+        pass.end();
+        gpu.device.queue.submit([enc.finish()]);
+      } catch {
+        /* ignore */
+      }
+    }
   };
-  const sceneUrl = (P.get("scene") || "").trim();
-  if (sceneUrl) {
-    await mountStudyFromSource({ sceneUrl }, gpu, preferred, srgb, names, cv, cx);
-    return;
-  }
-  const source = await resolveSource(setLoad);
-  if (!source) {
+
+  const disposeStudy = () => {
+    studyLoadToken += 1;
+    studyAbort?.abort();
+    studyAbort = null;
+    studyMount?.dispose();
+    studyMount = null;
+    clearViewportDisplay();
+  };
+
+  const showEmptyChrome = () => {
+    const bar = document.getElementById("ira-bar");
+    if (bar) ensureIraToolbarShell(bar);
+    if (emptyCleanup) {
+      clearViewportDisplay();
+      status("No study loaded");
+      return;
+    }
     const resizeEmpty = () => {
       const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
       for (const n of names) {
         cv[n].width = Math.max(1, Math.round(cv[n].clientWidth * dpr));
         cv[n].height = Math.max(1, Math.round(cv[n].clientHeight * dpr));
       }
+      clearViewportDisplay();
     };
     globalThis.addEventListener("resize", resizeEmpty);
-    for (const n of names) new ResizeObserver(() => resizeEmpty()).observe(cv[n]);
+    const ros: ResizeObserver[] = [];
+    for (const n of names) {
+      const ro = new ResizeObserver(() => resizeEmpty());
+      ro.observe(cv[n]);
+      ros.push(ro);
+    }
     attachViewGrid(document.getElementById("grid")!, [...names], resizeEmpty);
     attachDoubleClick(cv.threeD, () => {});
     resizeEmpty();
-    const info = document.getElementById("info");
-    if (info) info.textContent = "";
+    emptyCleanup = () => {
+      globalThis.removeEventListener("resize", resizeEmpty);
+      for (const ro of ros) ro.disconnect();
+      emptyCleanup = null;
+    };
     status("No study loaded");
+  };
+
+  const loadStudy = async (
+    input:
+      | Source
+      | { sceneUrl: string }
+      | { sceneDoc: import("./ira-cast.ts").IraLiveSceneDoc }
+      | {
+          localVolume: CTVolume;
+          label: string;
+          anonymized: boolean;
+        },
+  ) => {
+    emptyCleanup?.();
+    emptyCleanup = null;
+    disposeStudy();
+    const token = studyLoadToken;
+    studyAbort = new AbortController();
+    const signal = studyAbort.signal;
+    try {
+      const mount = await mountStudyFromSource(
+        input,
+        gpu,
+        preferred,
+        srgb,
+        names,
+        cv,
+        cx,
+        signal,
+      );
+      if (token !== studyLoadToken || signal.aborted) {
+        mount.dispose();
+        clearViewportDisplay();
+        return;
+      }
+      studyMount = mount;
+    } catch (err) {
+      if (
+        token !== studyLoadToken ||
+        signal.aborted ||
+        (err instanceof DOMException && err.name === "AbortError")
+      ) {
+        clearViewportDisplay();
+        return;
+      }
+      console.error("[ira] study load failed", err);
+      status("error: " + ((err as Error)?.message ?? err), true);
+      showEmptyChrome();
+    }
+  };
+
+  // Cast open/close: mount in-place; sync shareable URL via replaceState (no reload / WS drop).
+  setIraImagingStudyOpenHandler(async (ctx) => {
+    const sceneDoc = sceneDocFromOpenContext(ctx);
+    if (sceneDoc) {
+      status("Opening scene…");
+      syncIraStudyUrl(studyParamsFromSceneDoc(sceneDoc));
+      await loadStudy({ sceneDoc });
+      return;
+    }
+    const sceneUrl = sceneUrlFromOpenContext(ctx);
+    if (sceneUrl) {
+      status("Opening scene…");
+      syncIraStudyUrl(studyParamsFromSceneUrl(sceneUrl));
+      await loadStudy({ sceneUrl });
+      return;
+    }
+    const idcSource = sourceFromIdcOpenContext(ctx);
+    if (!idcSource) {
+      status(
+        "Cast ImagingStudy-open: unsupported context (need scene JSON or idc CRDC prefix URLs)",
+        true,
+      );
+      return;
+    }
+    status("Opening study…");
+    syncIraStudyUrl(studyParamsFromIdcSource(idcSource));
+    await loadStudy(idcSource);
+  });
+  setIraImagingStudyCloseHandler(() => {
+    setIraLiveScene(null);
+    setIraImagingStudyContext([]);
+    disposeStudy();
+    syncIraStudyUrl({});
+    showEmptyChrome();
+    status("No study loaded");
+  });
+
+  mountLocalSeries = async (entry, { anonymized }) => {
+    status("Reconstructing local series…");
+    const vol = loadEntry(entry);
+    const localVolume = iraVolumeFromLocalVolume(vol);
+    const modality = String(entry.modality || localVolume.modality || "CT").trim();
+    const desc = String(entry.description || vol.name || "").trim();
+    const patient = anonymized
+      ? "Anonymous"
+      : String(entry.patientName || "").trim() || "Local";
+    const label = [patient, modality, desc || `${entry.count} images`]
+      .filter(Boolean)
+      .join(" · ");
+    await loadStudy({ localVolume, label, anonymized });
+    const info = document.getElementById("info");
+    if (info) info.textContent = label;
+
+    const openContext = imagingStudyContextFromLocalStudy({
+      label,
+      modality,
+      studyInstanceUID: entry.studyInstanceUID,
+      seriesInstanceUID: entry.seriesInstanceUID,
+      anonymized,
+    });
+    await publishIraImagingStudyTransition(openContext);
+  };
+
+  // Which case? Resolve the URL — OHIF/IID StudyInstanceUID (via the IDC index), direct S3
+  // prefix, SlicerLive scene JSON, or empty (Cast/worklist opens a study later).
+  const setLoad = (m: string) => {
+    status(m);
+  };
+  const sceneUrl = (P.get("scene") || "").trim();
+  if (sceneUrl === EMBEDDED_SCENE_PARAM) {
+    const embedded = takeEmbeddedSceneFromStorage();
+    if (!embedded) {
+      status("Embedded LiveScene missing — reopen from the worklist.", true);
+      showEmptyChrome();
+      return;
+    }
+    await loadStudy({ sceneDoc: embedded });
+    return;
+  }
+  if (sceneUrl) {
+    await loadStudy({ sceneUrl });
+    return;
+  }
+  const source = await resolveSource(setLoad);
+  if (!source) {
+    showEmptyChrome();
     return;
   }
 
-  await mountStudyFromSource(source, gpu, preferred, srgb, names, cv, cx);
+  await loadStudy(source);
 }
 
 async function mountStudyFromSource(
-  input: Source | { sceneUrl: string },
+  input:
+    | Source
+    | { sceneUrl: string }
+    | { sceneDoc: import("./ira-cast.ts").IraLiveSceneDoc }
+    | {
+        localVolume: CTVolume;
+        label: string;
+        anonymized: boolean;
+      },
   gpu: Awaited<ReturnType<typeof initDevice>>,
   preferred: GPUTextureFormat,
   srgb: GPUTextureFormat,
   names: readonly ["axial", "threeD", "coronal", "sagittal"],
   cv: Record<string, HTMLCanvasElement>,
   cx: Record<string, GPUCanvasContext>,
-): Promise<void> {
+  signal?: AbortSignal,
+): Promise<{ dispose: () => void }> {
   let source: Source;
   let ct: CTVolume;
   let seg: SegLabelmap | undefined;
@@ -383,31 +599,69 @@ async function mountStudyFromSource(
   let applyIdcGeom: ((ijkToRAS: number[]) => void) | null = null;
 
   let sceneLodField: ImageField | undefined;
-  if ("sceneUrl" in input) {
+  if ("localVolume" in input) {
+    setIraLiveScene(null);
+    setIraImagingStudyContext([]);
+    syncIraStudyUrl({});
+    ct = input.localVolume;
+    const patientBit = input.anonymized
+      ? "Anonymous"
+      : (input.label.split("·")[0] || "Local").trim();
+    source = {
+      c: "",
+      cb: "",
+      m: ct.modality || "CT",
+      col: "Local",
+      st: "",
+      sd: input.anonymized
+        ? `Anonymous · ${input.label}`
+        : input.label || `${patientBit} · Local`,
+      lic: "Local",
+    };
+    status(`loaded local series · ${ct.dims.join("×")}`);
+  } else if ("sceneDoc" in input || "sceneUrl" in input) {
     status("loading scene…");
-    try {
-      const doc = await fetchLiveSceneDoc(input.sceneUrl);
-      setIraLiveScene(doc);
-    } catch (err) {
-      console.warn("[ira] LiveScene document fetch failed", err);
-      setIraLiveScene(null);
+    let sceneDoc: import("./ira-cast.ts").IraLiveSceneDoc | null = null;
+    if ("sceneDoc" in input) {
+      sceneDoc = input.sceneDoc;
+      setIraLiveScene(sceneDoc);
+      setIraImagingStudyContext(imagingStudyContextFromSceneDoc(sceneDoc));
+    } else {
+      try {
+        sceneDoc = await fetchLiveSceneDoc(input.sceneUrl);
+        setIraLiveScene(sceneDoc);
+      } catch (err) {
+        console.warn("[ira] LiveScene document fetch failed", err);
+        setIraLiveScene(null);
+      }
+      setIraImagingStudyContext(imagingStudyContextFromSceneUrl(input.sceneUrl));
     }
-    setIraImagingStudyContext(imagingStudyContextFromSceneUrl(input.sceneUrl));
+    const sceneSource =
+      "sceneDoc" in input
+        ? {
+            blobBase: input.sceneDoc.blobBase,
+            nodes: input.sceneDoc.nodes,
+            url: input.sceneDoc.url,
+          }
+        : input.sceneUrl;
     let mb = 0;
     let resolveReady!: (sv: SceneVolume) => void;
     const ready = new Promise<SceneVolume>((r) => {
       resolveReady = r;
     });
-    sceneStreamDone = loadSceneVolumeFieldProgressive(gpu.device, input.sceneUrl, {
+    sceneStreamDone = loadSceneVolumeFieldProgressive(gpu.device, sceneSource, {
       onBytes: (n) => {
+        if (signal?.aborted) return;
         mb += n;
         status(`streaming scene… ${(mb / 1e6).toFixed(1)} MB`);
       },
       onReady: (sv) => {
+        if (signal?.aborted) return;
         sceneLodField = sv.field;
         resolveReady(sv);
       },
       onSlab: (zStart, zCount, sv) => {
+        if (signal?.aborted) return;
         if (sceneStream) {
           sceneStream.patch(sv.voxels, zStart, zCount);
           if (!sceneRedrawRaf) {
@@ -419,14 +673,16 @@ async function mountStudyFromSource(
         }
       },
       onUpgrade: (sv) => {
+        if (signal?.aborted) return;
         status(`refining… ${sv.dims.join("×")}`);
         sceneLodField = sv.field;
         if (sceneStream?.upgrade) sceneStream.upgrade(sv);
         else pendingLodUpgrade = sv;
       },
-    });
+    }, { signal });
     const sv = await ready;
-    ct = ctVolumeFromSceneVolume(sv);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    ct = iraVolumeFromSceneVolume(sv);
     sceneVr = vrPresetFromSceneVolume(sv);
     source = {
       c: "",
@@ -448,9 +704,11 @@ async function mountStudyFromSource(
     const modality = ({ CT: "CT", MR: "MR", PT: "PET" } as Record<string, string>)[source.m] || source.m;
     sceneStreamDone = loadSeries(source, {
       onProgress: (p: { msg: string; frac?: number }) => {
+        if (signal?.aborted) return;
         status(`${p.msg}${p.frac ? ` — ${Math.round(p.frac * 100)}%` : ""}`);
       },
       onCTReady: (meta) => {
+        if (signal?.aborted) return;
         const [nx, ny, nz] = meta.dims;
         // Below-window fill so unset slices read as black (zeros window to mid-gray).
         const empty = meta.lev - meta.win / 2 - 1;
@@ -467,6 +725,7 @@ async function mountStudyFromSource(
         });
       },
       onCTGeom: (meta) => {
+        if (signal?.aborted) return;
         if (ct) {
           ct.ijkToRAS = meta.ijkToRAS;
           if (Number.isFinite(meta.win!)) ct.win = meta.win!;
@@ -475,6 +734,7 @@ async function mountStudyFromSource(
         applyIdcGeom?.(meta.ijkToRAS);
       },
       onCTSlab: (info) => {
+        if (signal?.aborted) return;
         const host = idcStreamVol;
         if (!host) return;
         const [nx, ny] = info.dims;
@@ -490,6 +750,7 @@ async function mountStudyFromSource(
         }
       },
       onCT: (full) => {
+        if (signal?.aborted) return;
         // Keep host buffer in sync if the final transfer landed a fresh ArrayBuffer.
         if (idcStreamVol && full.vol instanceof Float32Array && full.vol !== idcStreamVol) {
           idcStreamVol.set(full.vol);
@@ -505,6 +766,7 @@ async function mountStudyFromSource(
         }
       },
       onLabelmap: (lab) => {
+        if (signal?.aborted) return;
         pendingIdcSeg = lab;
       },
     }, {
@@ -515,6 +777,7 @@ async function mountStudyFromSource(
       return res;
     });
     ct = await ready;
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     seg = undefined; // SEG attaches after mount when the labelmap is ready
   }
 
@@ -522,6 +785,7 @@ async function mountStudyFromSource(
     volumeField: sceneLodField,
   });
   scHold = sc;
+  const thisCastMountId = ++castNiftiMountId;
   if (sceneVr) sc.setVolumePreset(sceneVr);
   // Sampled scalar range of the loaded volume: drives the W/L drag gain (Slicer's
   // vtkMRMLWindowLevelWidget scales by the scalar range) and the VR shift-slider span.
@@ -556,6 +820,7 @@ async function mountStudyFromSource(
   });
   let cardDt = performance.now();
   let cardDrawPending = false;
+  let studyDisposed = false;
 
   // ---- corner annotations (IHE IRA §4.16.4.2.2.5.8) ---------------------------------------
   // The profile mandates overlaid corner text: patient identity (TL), institution/study (TR),
@@ -605,6 +870,7 @@ async function mountStudyFromSource(
   let xhair: Crosshair4up | null = null;
 
   const drawSlice = (p: Plane) => {
+    if (studyDisposed) return;
     ira?.drawOverlay(p);
     if (!cv[p].width) return;
     sc.slice.setPlane(p, off[p]);
@@ -612,6 +878,7 @@ async function mountStudyFromSource(
     updateReadout(p);
   };
   const draw3d = () => {
+    if (studyDisposed) return;
     if (!cv.threeD.width) return;
     sc.scene.setCamera(camera.position, camera.focalPoint, camera.viewUp, camera.viewAngle, cv.threeD.width, cv.threeD.height);
     sc.scene.renderToView(cx.threeD.getCurrentTexture().createView({ format: srgb }), cv.threeD.width, cv.threeD.height);
@@ -677,6 +944,91 @@ async function mountStudyFromSource(
     draw3d();
     xhair?.redraw();
   };
+
+  const refreshSegChrome = (labmap: SegLabelmap) => {
+    seg = labmap;
+    sc.setVolumeOpacity(0.5);
+    segCards.setScene(ct, seg, sc.segments);
+    for (const p of PLANES) {
+      const cell = document.querySelector(`[data-cell="${p}"]`) as HTMLElement | null;
+      const tr = cell?.querySelector(".ann.tr") as HTMLElement | null;
+      if (tr) {
+        tr.innerHTML =
+          `${ct.modality} · ${sc.dims[2]} slices${sc.hasSeg ? " · SEG" : ""}<br>${sc.dims[0]}×${sc.dims[1]}`;
+      }
+    }
+    drawAll();
+  };
+
+  applyCastNiftiSeg = async (event) => {
+    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
+    status("Loading Cast segmentation…");
+    const result = await segLabelmapFromNiftiSendEvent(event, sc.dims, sc.ijkToRAS);
+    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
+    if (!result.ok) {
+      status(result.error, true);
+      return;
+    }
+    let merged = result.seg;
+    let added = result.labelCount;
+    let skipped = 0;
+    try {
+      const m = mergeSegLabelmaps(sc.labelmap() ?? seg, result.seg);
+      merged = m.seg;
+      added = m.added;
+      skipped = m.skipped;
+    } catch (err) {
+      status(`Merge failed: ${(err as Error)?.message ?? err}`, true);
+      return;
+    }
+    sc.replaceSegmentation(merged);
+    if (!sc.hasSeg) {
+      status("Cast segmentation produced no renderable segments", true);
+      return;
+    }
+    refreshSegChrome(merged);
+    const skipNote = skipped ? ` · ${skipped} skipped (label id limit)` : "";
+    status(
+      `Added ${added} TotalSeg segment${added === 1 ? "" : "s"} from ${result.fileName}${skipNote}`,
+    );
+  };
+
+  applyCastDicomSeg = async (event) => {
+    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
+    status("Loading Cast DICOM SEG…");
+    const result = await segLabelmapFromDicomSendEvent(event, {
+      dims: sc.dims,
+      ijkToRAS: sc.ijkToRAS,
+    });
+    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
+    if (!result.ok) {
+      status(result.error, true);
+      return;
+    }
+    let merged = result.seg;
+    let added = result.labelCount;
+    let skipped = 0;
+    try {
+      const m = mergeSegLabelmaps(sc.labelmap() ?? seg, result.seg);
+      merged = m.seg;
+      added = m.added;
+      skipped = m.skipped;
+    } catch (err) {
+      status(`Merge failed: ${(err as Error)?.message ?? err}`, true);
+      return;
+    }
+    sc.replaceSegmentation(merged);
+    if (!sc.hasSeg) {
+      status("Cast DICOM SEG produced no renderable segments", true);
+      return;
+    }
+    refreshSegChrome(merged);
+    const skipNote = skipped ? ` · ${skipped} skipped (label id limit)` : "";
+    status(
+      `Added ${added} segment${added === 1 ? "" : "s"} from ${result.fileName}${skipNote}`,
+    );
+  };
+
   // Progressive stream: patch + redraw while slabs arrive (zarr or IDC); LOD field swaps.
   if (sceneStreamDone) {
     const applyLodUpgrade = (sv: SceneVolume) => {
@@ -775,7 +1127,12 @@ async function mountStudyFromSource(
     drawAll();
   };
   globalThis.addEventListener("resize", resize);
-  for (const n of names) new ResizeObserver(() => resize()).observe(cv[n]);
+  const resizeObservers: ResizeObserver[] = [];
+  for (const n of names) {
+    const ro = new ResizeObserver(() => resize());
+    ro.observe(cv[n]);
+    resizeObservers.push(ro);
+  }
 
   const viewGrid = attachViewGrid(document.getElementById("grid")!, [...names], resize);
   attachDoubleClick(cv.threeD, () => viewGrid.toggleMax("threeD"));
@@ -1147,7 +1504,7 @@ async function mountStudyFromSource(
       },
     },
   ];
-  installChrome({
+  const chrome = installChrome({
     help: false,
     controls,
     anchor: cv.threeD.parentElement ?? undefined,
@@ -1168,21 +1525,43 @@ async function mountStudyFromSource(
   if (sceneStreamDone) {
     status(idcStreamVol ? "streaming volume…" : "streaming scene…");
     await sceneStreamDone;
+    if (signal?.aborted) {
+      return {
+        dispose: () => {
+          studyDisposed = true;
+          labelsOn = false;
+          try {
+            segCards.clear();
+          } catch {
+            /* ignore */
+          }
+          try {
+            ira?.detachKeys();
+          } catch {
+            /* ignore */
+          }
+          try {
+            chrome?.destroy();
+          } catch {
+            /* ignore */
+          }
+          try {
+            sc.destroy();
+          } catch {
+            /* ignore */
+          }
+          resetIraToolbarShell();
+          for (const el of document.querySelectorAll(".ann, .ira-overlay")) {
+            el.remove();
+          }
+        },
+      };
+    }
     sampleRange();
     if (pendingIdcSeg) {
       seg = pendingIdcSeg;
       sc.attachSegmentation(pendingIdcSeg);
-      sc.setVolumeOpacity(0.5);
-      segCards.setScene(ct, seg, sc.segments);
-      // Refresh corner "· SEG" once the labelmap lands.
-      for (const p of PLANES) {
-        const cell = document.querySelector(`[data-cell="${p}"]`) as HTMLElement | null;
-        const tr = cell?.querySelector(".ann.tr") as HTMLElement | null;
-        if (tr) {
-          tr.innerHTML =
-            `${ct.modality} · ${sc.dims[2]} slices${sc.hasSeg ? " · SEG" : ""}<br>${sc.dims[0]}×${sc.dims[1]}`;
-        }
-      }
+      refreshSegChrome(pendingIdcSeg);
     }
     // Apply refined W/L from final CT (MR/PET) if the worker updated it after fill.
     if (idcStreamVol && Number.isFinite(ct.win) && Number.isFinite(ct.lev)) {
@@ -1191,6 +1570,75 @@ async function mountStudyFromSource(
     drawAll();
   }
   status("");
+
+  return {
+    dispose: () => {
+      studyDisposed = true;
+      if (thisCastMountId === castNiftiMountId) {
+        applyCastNiftiSeg = null;
+        applyCastDicomSeg = null;
+      }
+      labelsOn = false;
+      globalThis.removeEventListener("resize", resize);
+      for (const ro of resizeObservers) ro.disconnect();
+      try {
+        segCards.clear();
+      } catch {
+        /* ignore */
+      }
+      try {
+        ira?.detachKeys();
+      } catch {
+        /* ignore */
+      }
+      try {
+        chrome.destroy();
+      } catch {
+        /* ignore */
+      }
+      try {
+        sc.destroy();
+      } catch {
+        /* ignore */
+      }
+      try {
+        sceneLodField?.destroy();
+      } catch {
+        /* ignore */
+      }
+      resetIraToolbarShell();
+      for (const el of document.querySelectorAll(".ann, .ira-overlay")) {
+        el.remove();
+      }
+      for (const p of PLANES) {
+        document.querySelector(`[data-cell="${p}"]`)?.classList.remove("ira-cell-selected");
+        const readout = document.getElementById("sr-" + p);
+        if (readout) readout.textContent = "";
+      }
+      const info = document.getElementById("info");
+      if (info) info.textContent = "";
+      for (const n of names) {
+        try {
+          const tex = cx[n].getCurrentTexture();
+          const enc = gpu.device.createCommandEncoder();
+          const pass = enc.beginRenderPass({
+            colorAttachments: [
+              {
+                view: tex.createView(),
+                clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                loadOp: "clear",
+                storeOp: "store",
+              },
+            ],
+          });
+          pass.end();
+          gpu.device.queue.submit([enc.finish()]);
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+  };
 }
 
 main().catch((e) => status("error: " + ((e as Error)?.message ?? e), true));

@@ -118,6 +118,69 @@ export function displayClass(): "phone" | "desktop" | "large" {
   return "desktop";
 }
 
+function ensureIraStyle(): void {
+  if (document.getElementById("ira-style")) return;
+  const st = document.createElement("style");
+  st.id = "ira-style";
+  st.textContent = STYLE;
+  document.head.appendChild(st);
+}
+
+function syncIraToolbarToggle(
+  tb: HTMLElement,
+  toggleBtn: HTMLButtonElement,
+): void {
+  const collapsed = tb.classList.contains("collapsed");
+  toggleBtn.innerHTML = ICONS[collapsed ? "toolsExpand" : "toolsCollapse"] ?? "?";
+  toggleBtn.title = collapsed ? "Show tools" : "Hide tools";
+  toggleBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  toggleBtn.setAttribute("aria-label", collapsed ? "Show tools" : "Hide tools");
+}
+
+/**
+ * Persistent collapsed IRA toolbar shell (layout height stays stable across study open/close).
+ * Creates once after `bar`; subsequent calls reuse the same DOM.
+ */
+export function ensureIraToolbarShell(bar: HTMLElement): HTMLElement {
+  ensureIraStyle();
+  let tb = document.getElementById("ira-toolbar");
+  if (tb) return tb;
+
+  tb = document.createElement("div");
+  tb.id = "ira-toolbar";
+  tb.classList.add("collapsed");
+  bar.after(tb);
+
+  const toggleBtn = document.createElement("button");
+  toggleBtn.id = "ira-toolbar-toggle";
+  toggleBtn.type = "button";
+  toggleBtn.setAttribute("aria-expanded", "false");
+  toggleBtn.setAttribute("aria-controls", "ira-toolbar-body");
+  syncIraToolbarToggle(tb, toggleBtn);
+  toggleBtn.addEventListener("click", () => {
+    tb!.classList.toggle("collapsed");
+    syncIraToolbarToggle(tb!, toggleBtn);
+    globalThis.dispatchEvent(new Event("resize"));
+  });
+
+  const tbBody = document.createElement("div");
+  tbBody.id = "ira-toolbar-body";
+  tb.append(toggleBtn, tbBody);
+  return tb;
+}
+
+/** Clear tool buttons but keep the collapsed shell (empty / after ImagingStudy-close). */
+export function resetIraToolbarShell(): void {
+  const tb = document.getElementById("ira-toolbar");
+  const body = document.getElementById("ira-toolbar-body");
+  const toggle = document.getElementById("ira-toolbar-toggle") as HTMLButtonElement | null;
+  if (body) body.replaceChildren();
+  if (tb) {
+    tb.classList.add("collapsed");
+    if (toggle) syncIraToolbarToggle(tb, toggle);
+  }
+}
+
 // ---- icons — redrawn from the IRA suggested symbols (Tables 13-1/2/3) -------------------
 
 const I = (body: string): string =>
@@ -246,12 +309,7 @@ const STYLE = `
 `;
 
 export function mountIra(cfg: IraCfg): IraApi {
-  if (!document.getElementById("ira-style")) {
-    const st = document.createElement("style");
-    st.id = "ira-style";
-    st.textContent = STYLE;
-    document.head.appendChild(st);
-  }
+  ensureIraStyle();
 
   // ---- state ------------------------------------------------------------------------------
   let tool: IraTool = "scroll"; // spec: Scroll is the default modal tool
@@ -270,6 +328,8 @@ export function mountIra(cfg: IraCfg): IraApi {
   for (const p of cfg.planes) {
     const cell = cfg.cellOf(p);
     if (!cell) continue;
+    // Drop prior overlays from a previous mount so remount doesn't stack canvases.
+    cell.querySelectorAll("canvas.ira-overlay").forEach((el) => el.remove());
     const c = document.createElement("canvas");
     c.className = "ira-overlay";
     c.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;";
@@ -405,34 +465,10 @@ export function mountIra(cfg: IraCfg): IraApi {
   }
   markSelected();
 
-  // ---- toolbar ---------------------------------------------------------------------------
-  const tb = document.createElement("div");
-  tb.id = "ira-toolbar";
-  tb.classList.add("collapsed");
-  cfg.bar.after(tb);
-
-  const tbBody = document.createElement("div");
-  tbBody.id = "ira-toolbar-body";
-
-  const toggleBtn = document.createElement("button");
-  toggleBtn.id = "ira-toolbar-toggle";
-  toggleBtn.type = "button";
-  toggleBtn.setAttribute("aria-expanded", "false");
-  toggleBtn.setAttribute("aria-controls", "ira-toolbar-body");
-  const syncToggleChrome = () => {
-    const collapsed = tb.classList.contains("collapsed");
-    toggleBtn.innerHTML = ICONS[collapsed ? "toolsExpand" : "toolsCollapse"] ?? "?";
-    toggleBtn.title = collapsed ? "Show tools" : "Hide tools";
-    toggleBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-    toggleBtn.setAttribute("aria-label", collapsed ? "Show tools" : "Hide tools");
-  };
-  syncToggleChrome();
-  toggleBtn.addEventListener("click", () => {
-    tb.classList.toggle("collapsed");
-    syncToggleChrome();
-    globalThis.dispatchEvent(new Event("resize"));
-  });
-  tb.append(toggleBtn, tbBody);
+  // ---- toolbar (persistent shell; reuse across remounts so grid height stays stable) ------
+  ensureIraToolbarShell(cfg.bar);
+  const tbBody = document.getElementById("ira-toolbar-body") as HTMLElement;
+  tbBody.replaceChildren();
 
   const buttons = new Map<string, HTMLButtonElement>();
   const btn = (

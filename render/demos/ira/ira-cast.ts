@@ -5,13 +5,22 @@
  */
 import CastClient, {
   castRadioStatusVisual,
+  cloneContextArray,
   generateSubscriberName,
+  getHubEventLower,
   isRequestEvent,
   isRunningInCloud,
+  messageEventContext,
+  parseStatusUpdateMessage,
+  publishCastUrlSend,
+  requestCastProductStatus,
   requestEventFor,
   resolveCastConferenceView,
+  resolveCastFileMessage,
   resolveCastHubAdminUrl,
+  batchContextFiles,
   type CastConferenceView,
+  type CastProductStatusProbe,
 } from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
 
 const LOG = "[ira-cast]";
@@ -175,10 +184,11 @@ export function iraUrlHasStudyParams(): boolean {
 }
 
 /**
- * Reload IRA preserving Cast topic/token, optionally with new study params.
- * Used for ImagingStudy-open / -close so the scene fully resets without tear-down.
+ * Update the address bar study params without navigating (keeps Cast WebSocket alive).
+ * Used for ImagingStudy-open / -close and shareable deep links.
  */
-export function assignIraLocation(studyParams: Record<string, string> = {}): void {
+export function syncIraStudyUrl(studyParams: Record<string, string> = {}): void {
+  if (!globalThis.history?.replaceState) return;
   const url = new URL(globalThis.location.href);
   for (const key of STUDY_URL_KEYS) url.searchParams.delete(key);
 
@@ -196,7 +206,14 @@ export function assignIraLocation(studyParams: Record<string, string> = {}): voi
     if (v) url.searchParams.set(key, v);
   }
 
-  globalThis.location.assign(url.toString());
+  globalThis.history.replaceState(null, "", url.toString());
+}
+
+/**
+ * @deprecated Prefer {@link syncIraStudyUrl} — kept as an alias (no page reload).
+ */
+export function assignIraLocation(studyParams: Record<string, string> = {}): void {
+  syncIraStudyUrl(studyParams);
 }
 
 export function getIraCastSessionInfo(): {
@@ -301,23 +318,128 @@ export function getIraImagingStudyOpenContext(): unknown[] {
   return cloneContextArray(lastImagingStudyOpenContext);
 }
 
+/** Ignore hub echoes of ImagingStudy events we just published (avoid dispose/remount). */
+let suppressInboundImagingStudy = 0;
+
+function beginSuppressInboundImagingStudy(ms = 1500): void {
+  suppressInboundImagingStudy += 1;
+  globalThis.setTimeout(() => {
+    suppressInboundImagingStudy = Math.max(0, suppressInboundImagingStudy - 1);
+  }, ms);
+}
+
+function buildIraPublishPayload(hubEvent: string, context: unknown[]) {
+  return {
+    event: {
+      "hub.topic": topic,
+      "hub.event": hubEvent,
+      context,
+    },
+    actor: ID_ACTOR,
+    "target.actor": "*",
+    "target.product.name": "*",
+  };
+}
+
+/**
+ * After a successful local (or other IRA-owned) load: publish ImagingStudy-close for the
+ * previously open study (if any), then ImagingStudy-open for ``nextContext``.
+ * Updates local open context. No-ops publish when not connected (still sets local context).
+ */
+export async function publishIraImagingStudyTransition(
+  nextContext: unknown[]
+): Promise<{ closed: boolean; opened: boolean }> {
+  const next = Array.isArray(nextContext) ? cloneContextArray(nextContext) : [];
+  const previous = cloneContextArray(lastImagingStudyOpenContext);
+
+  if (!client || connection !== "connected" || !topic) {
+    lastImagingStudyOpenContext = next;
+    lastLiveScene = null;
+    onLiveSceneChange?.();
+    console.warn(`${LOG} ImagingStudy transition local-only (not connected)`);
+    return { closed: false, opened: false };
+  }
+
+  beginSuppressInboundImagingStudy();
+  let closed = false;
+  let opened = false;
+  try {
+    if (previous.length) {
+      try {
+        const res = await client.publish(
+          buildIraPublishPayload("ImagingStudy-close", previous)
+        );
+        closed = Boolean(res?.ok);
+        if (!closed) {
+          console.warn(
+            `${LOG} ImagingStudy-close failed`,
+            res ? `HTTP ${res.status}` : "No response"
+          );
+        } else {
+          console.info(`${LOG} published ImagingStudy-close`);
+        }
+      } catch (err) {
+        console.error(`${LOG} ImagingStudy-close exception`, err);
+      }
+    }
+
+    try {
+      const res = await client.publish(
+        buildIraPublishPayload("ImagingStudy-open", next)
+      );
+      opened = Boolean(res?.ok);
+      if (!opened) {
+        console.warn(
+          `${LOG} ImagingStudy-open failed`,
+          res ? `HTTP ${res.status}` : "No response"
+        );
+      } else {
+        console.info(`${LOG} published ImagingStudy-open`);
+      }
+    } catch (err) {
+      console.error(`${LOG} ImagingStudy-open exception`, err);
+    }
+  } finally {
+    lastImagingStudyOpenContext = next;
+    lastLiveScene = null;
+    onLiveSceneChange?.();
+  }
+  return { closed, opened };
+}
+
 export function getIraCastClient(): ReturnType<typeof CastClient.newInstance> | null {
   return client;
 }
 
-export type InferenceProbeResult = {
-  online: boolean;
-  items: unknown[];
-  job?: string;
-  error?: string;
-  raw?: unknown;
-};
+export type InferenceProbeResult = CastProductStatusProbe;
 
 type StatusUpdateHandler = (message: string, level: string) => void;
 let onStatusUpdate: StatusUpdateHandler | null = null;
 
 export function setIraStatusUpdateHandler(fn: StatusUpdateHandler | null): void {
   onStatusUpdate = fn;
+}
+
+/** Handler for inbound Cast ``nifti-send`` (resolved event with file bytes). */
+export type IraNiftiSendHandler = (
+  event: Record<string, unknown>,
+) => void | Promise<void>;
+
+let onNiftiSend: IraNiftiSendHandler | null = null;
+
+export function setIraNiftiSendHandler(fn: IraNiftiSendHandler | null): void {
+  onNiftiSend = fn;
+}
+
+/** Handler for inbound Cast ``dicom-send`` (resolved event with file bytes). */
+export type IraDicomSendHandler = (
+  event: Record<string, unknown>,
+) => void | Promise<void>;
+
+let onDicomSend: IraDicomSendHandler | null = null;
+
+export function setIraDicomSendHandler(fn: IraDicomSendHandler | null): void {
+  onDicomSend = fn;
 }
 
 /** Probe a Cast resource-server product via STATUS request. */
@@ -331,64 +453,13 @@ export async function probeInferenceProduct(
     subscriberName || client.getSessionConfig()?.subscriberName?.trim() || "";
   if (!subscriber) return { online: false, items: [], error: "No subscriber name" };
 
-  const product = String(productName || "").trim();
-  try {
-    const result = await client.request({
-      "subscriber.name": subscriber,
-      "subscriber.product.name": "SLICERLIVE-IRA",
-      "subscriber.actor": ID_ACTOR,
-      "target.product.name": product,
-      event: {
-        "hub.event": requestEventFor("STATUS"),
-        ...(topic ? { "hub.topic": topic } : {}),
-        context: { dataType: "STATUS" },
-      },
-    });
-    if (!result.ok) {
-      return {
-        online: false,
-        items: [],
-        error: `HTTP ${result.status}`,
-        raw: result.data,
-      };
-    }
-    const envelope =
-      result.data && typeof result.data === "object"
-        ? (result.data as { responses?: Array<{ data?: unknown; productName?: unknown }> })
-        : {};
-    const responses = Array.isArray(envelope.responses) ? envelope.responses : [];
-    for (const item of responses) {
-      const data = item?.data;
-      if (!data || typeof data !== "object") continue;
-      const payload = data as {
-        source?: unknown;
-        product?: unknown;
-        items?: unknown;
-      };
-      const items = Array.isArray(payload.items) ? payload.items : [];
-      let online = false;
-      let job: string | undefined;
-      for (const entry of items) {
-        if (!entry || typeof entry !== "object") continue;
-        const key = String((entry as { key?: unknown }).key ?? "")
-          .trim()
-          .toLowerCase();
-        const value = String((entry as { value?: unknown }).value ?? "").trim();
-        if (key === "availability" && value.toLowerCase() === "online") online = true;
-        if (key === "job" && value) job = value;
-      }
-      // Some servers only return items without explicit availability key.
-      if (!online && items.length > 0 && payload.source === "status") online = true;
-      return { online, items, job, raw: result.data };
-    }
-    return { online: false, items: [], raw: result.data };
-  } catch (err) {
-    return {
-      online: false,
-      items: [],
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
+  return requestCastProductStatus(client, {
+    targetProductName: productName,
+    subscriberName: subscriber,
+    subscriberProductName: "SLICERLIVE-IRA",
+    subscriberActor: ID_ACTOR,
+    topic: topic || undefined,
+  });
 }
 
 /** Publish a URL-file job to an inference product (dicom-send / nifti-send). */
@@ -396,6 +467,7 @@ export async function publishInferenceJob(opts: {
   product: string;
   hubEvent: string;
   files: Array<{ url: string; fileName: string }>;
+  contextExtras?: Record<string, unknown>;
 }): Promise<{ ok: boolean; detail: string }> {
   if (!client || connection !== "connected") {
     return { ok: false, detail: "Not connected" };
@@ -406,31 +478,16 @@ export async function publishInferenceJob(opts: {
   if (!topic) return { ok: false, detail: "No Cast topic" };
   if (!opts.files.length) return { ok: false, detail: "No volume files" };
 
-  try {
-    const res = await client.publish({
-      "subscriber.name": subscriber,
-      "subscriber.product.name": "SLICERLIVE-IRA",
-      "subscriber.actor": ID_ACTOR,
-      "target.product.name": opts.product,
-      event: {
-        "hub.topic": topic,
-        "hub.event": opts.hubEvent,
-        context: {
-          files: opts.files.map((f) => ({
-            url: f.url,
-            fileName: f.fileName,
-          })),
-        },
-      },
-    });
-    const ok = Boolean(res && (res as Response).ok !== false);
-    return {
-      ok,
-      detail: ok ? "published" : `publish status ${(res as Response)?.status ?? "?"}`,
-    };
-  } catch (err) {
-    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
-  }
+  return publishCastUrlSend(client, {
+    targetProductName: opts.product,
+    hubEvent: opts.hubEvent,
+    files: opts.files,
+    subscriberName: subscriber,
+    subscriberProductName: "SLICERLIVE-IRA",
+    subscriberActor: ID_ACTOR,
+    topic,
+    contextExtras: opts.contextExtras,
+  });
 }
 
 export function getIraLiveScene(): IraLiveSceneDoc | null {
@@ -489,12 +546,6 @@ function stripCastParamsFromUrl(): void {
   globalThis.history.replaceState(null, "", url.toString());
 }
 
-function getHubEventLower(event: { "hub.event"?: string } | undefined): string {
-  return String(event?.["hub.event"] || "")
-    .trim()
-    .toLowerCase();
-}
-
 function extractActorKeywords(actor: unknown): string[] {
   if (actor == null) return [];
   if (typeof actor === "string") {
@@ -513,21 +564,6 @@ function extractActorKeywords(actor: unknown): string[] {
   }
   const keyword = String(actor).trim();
   return keyword ? [keyword] : [];
-}
-
-function cloneContextArray(context: unknown): unknown[] {
-  if (!Array.isArray(context)) return [];
-  try {
-    return structuredClone(context);
-  } catch {
-    return JSON.parse(JSON.stringify(context));
-  }
-}
-
-function messageEventContext(message: Record<string, unknown>): unknown[] {
-  const event = message?.event as { context?: unknown } | undefined;
-  if (Array.isArray(event?.context)) return event.context as unknown[];
-  return [];
 }
 
 function handleStatusRequest(message: Record<string, unknown>): boolean {
@@ -567,22 +603,83 @@ function handleStatusRequest(message: Record<string, unknown>): boolean {
 }
 
 function handleStatusUpdate(message: Record<string, unknown>): boolean {
-  const event = message?.event as
-    | { "hub.event"?: string; context?: Record<string, unknown> }
-    | undefined;
-  const name = getHubEventLower(event);
-  if (name !== "status-update") return false;
-  const ctx =
-    event?.context && typeof event.context === "object" ? event.context : {};
-  const text = String(ctx.message ?? "").trim();
-  if (text) onStatusUpdate?.(text, String(ctx.level ?? "info"));
+  const update = parseStatusUpdateMessage(message);
+  if (!update) return false;
+  if (update.message) onStatusUpdate?.(update.message, update.level);
   return true;
+}
+
+function isNiftiSendMessage(message: Record<string, unknown>): boolean {
+  const event = message?.event as { "hub.event"?: string } | undefined;
+  return getHubEventLower(event) === "nifti-send";
+}
+
+function isDicomSendMessage(message: Record<string, unknown>): boolean {
+  const event = message?.event as { "hub.event"?: string } | undefined;
+  return getHubEventLower(event) === "dicom-send";
+}
+
+async function handleResolvedFileSend(
+  message: Record<string, unknown>,
+  kind: "nifti-send" | "dicom-send",
+  handler: IraNiftiSendHandler | IraDicomSendHandler | null,
+): Promise<void> {
+  if (!client || !handler) return;
+  try {
+    const resolved = (await resolveCastFileMessage(client, message)) as Record<
+      string,
+      unknown
+    >;
+    const event = (resolved?.event ?? message.event) as
+      | Record<string, unknown>
+      | undefined;
+    if (!event || typeof event !== "object") {
+      console.warn(`${LOG} ${kind}: missing event after resolve`);
+      return;
+    }
+    const files = batchContextFiles(event);
+    const withData = files.filter((f) => {
+      const data = (f as { data?: unknown }).data;
+      return (
+        data instanceof ArrayBuffer ||
+        data instanceof Uint8Array ||
+        typeof data === "string"
+      );
+    });
+    if (!withData.length) {
+      console.warn(`${LOG} ${kind}: no file payloads after resolve`);
+      return;
+    }
+    console.info(
+      `${LOG} ${kind}: ${withData.length} file(s) ready`,
+      withData.map((f) => (f as { fileName?: string }).fileName || "?"),
+    );
+    await handler(event);
+  } catch (err) {
+    console.error(`${LOG} ${kind} handler failed`, err);
+  }
+}
+
+async function handleNiftiSendMessage(
+  message: Record<string, unknown>,
+): Promise<void> {
+  await handleResolvedFileSend(message, "nifti-send", onNiftiSend);
+}
+
+async function handleDicomSendMessage(
+  message: Record<string, unknown>,
+): Promise<void> {
+  await handleResolvedFileSend(message, "dicom-send", onDicomSend);
 }
 
 function handleImagingStudyMessage(message: Record<string, unknown>): boolean {
   const event = message?.event as { "hub.event"?: string } | undefined;
   const name = getHubEventLower(event);
   if (name === "imagingstudy-close") {
+    if (suppressInboundImagingStudy > 0) {
+      console.info(`${LOG} ImagingStudy-close ignored (local publish echo)`);
+      return true;
+    }
     lastImagingStudyOpenContext = [];
     lastLiveScene = null;
     onLiveSceneChange?.();
@@ -593,6 +690,13 @@ function handleImagingStudyMessage(message: Record<string, unknown>): boolean {
     return true;
   }
   if (name !== "imagingstudy-open") return false;
+
+  if (suppressInboundImagingStudy > 0) {
+    const context = messageEventContext(message);
+    lastImagingStudyOpenContext = cloneContextArray(context);
+    console.info(`${LOG} ImagingStudy-open ignored (local publish echo)`);
+    return true;
+  }
 
   if (conference && !conferenceFollowHost) {
     console.info(`${LOG} ImagingStudy-open ignored (not following host)`);
@@ -617,19 +721,25 @@ type StatusResponseItem = {
 };
 
 /**
- * Ask the worklist for current STATUS once the websocket is connected.
- * Always sends so the worklist can mark this Image Display connected.
- * If it reports an open ImagingStudy and we are not already loading one, open it.
+ * Ask a worklist for STATUS.
+ * Default (connect): presence ping on local topic; apply ImagingStudy only if we have none.
+ * Join-and-follow: pass host topic + forceApply to adopt the host's open study.
  */
-async function requestStatusFromWorklist(): Promise<void> {
+async function requestStatusFromWorklist(opts?: {
+  topic?: string;
+  forceApply?: boolean;
+}): Promise<void> {
   if (!client) {
     console.warn(`${LOG} STATUS skip: no client`);
     return;
   }
-  if (statusRequestState !== "idle") return;
+  const forceApply = Boolean(opts?.forceApply);
+  const requestTopic = String(opts?.topic || topic || "").trim();
+  if (!forceApply && statusRequestState !== "idle") return;
 
   const skipApplyStudy =
-    iraUrlHasStudyParams() || lastImagingStudyOpenContext.length > 0;
+    !forceApply &&
+    (iraUrlHasStudyParams() || lastImagingStudyOpenContext.length > 0);
   if (skipApplyStudy) {
     console.warn(
       `${LOG} STATUS presence only (already have study URL or context)`
@@ -643,7 +753,7 @@ async function requestStatusFromWorklist(): Promise<void> {
     return;
   }
 
-  statusRequestState = "pending";
+  if (!forceApply) statusRequestState = "pending";
   const statusDataType = "STATUS";
 
   try {
@@ -654,15 +764,16 @@ async function requestStatusFromWorklist(): Promise<void> {
       "target.actor": WORKLIST_ACTOR,
       event: {
         "hub.event": requestEventFor(statusDataType),
-        ...(topic ? { "hub.topic": topic } : {}),
+        ...(requestTopic ? { "hub.topic": requestTopic } : {}),
         context: { dataType: statusDataType },
       },
     };
 
     console.warn(`${LOG} STATUS request → ${WORKLIST_ACTOR}`, {
       subscriber,
-      topic,
+      topic: requestTopic,
       presenceOnly: skipApplyStudy,
+      forceApply,
     });
     const result = await client.request(message);
     console.warn(`${LOG} STATUS response`, {
@@ -672,12 +783,17 @@ async function requestStatusFromWorklist(): Promise<void> {
     });
 
     if (!result.ok) {
-      statusRequestState = "idle";
+      if (!forceApply) statusRequestState = "idle";
       return;
     }
 
     // Presence ping done; do not re-open a study we already have from URL/open.
-    if (skipApplyStudy || lastImagingStudyOpenContext.length || iraUrlHasStudyParams()) {
+    if (
+      !forceApply &&
+      (skipApplyStudy ||
+        lastImagingStudyOpenContext.length ||
+        iraUrlHasStudyParams())
+    ) {
       statusRequestState = "done";
       return;
     }
@@ -712,11 +828,14 @@ async function requestStatusFromWorklist(): Promise<void> {
         `${LOG} STATUS: no ImagingStudy in ${responses.length} response(s)`
       );
       // Allow a later retry (e.g. worklist stored context after we asked).
-      statusRequestState = "idle";
+      if (!forceApply) statusRequestState = "idle";
       return;
     }
 
-    if (lastImagingStudyOpenContext.length || iraUrlHasStudyParams()) {
+    if (
+      !forceApply &&
+      (lastImagingStudyOpenContext.length || iraUrlHasStudyParams())
+    ) {
       statusRequestState = "done";
       return;
     }
@@ -724,24 +843,37 @@ async function requestStatusFromWorklist(): Promise<void> {
     const context = cloneContextArray(chosen.context);
     if (!context.length) {
       console.warn(`${LOG} STATUS: ImagingStudy context empty`);
-      statusRequestState = "idle";
+      if (!forceApply) statusRequestState = "idle";
       return;
     }
 
     lastImagingStudyOpenContext = context;
-    statusRequestState = "done";
+    if (!forceApply) statusRequestState = "done";
     console.warn(
       `${LOG} ImagingStudy from STATUS context items=`,
-      context.length
+      context.length,
+      forceApply ? "(follow host)" : ""
     );
     void Promise.resolve(onImagingStudyOpen?.(lastImagingStudyOpenContext)).catch(
       (err) =>
         console.error(`${LOG} STATUS ImagingStudy-open handler failed`, err)
     );
   } catch (err) {
-    statusRequestState = "idle";
+    if (!forceApply) statusRequestState = "idle";
     console.error(`${LOG} failed to request STATUS`, err);
   }
+}
+
+/** Join-and-follow: pull open study from the host worklist topic. */
+export async function requestIraStatusFromHostWorklist(
+  hostTopic: string
+): Promise<void> {
+  const topicOverride = String(hostTopic || "").trim();
+  if (!topicOverride) {
+    console.warn(`${LOG} host STATUS skip: no host topic`);
+    return;
+  }
+  await requestStatusFromWorklist({ topic: topicOverride, forceApply: true });
 }
 
 /** Schedule STATUS catch-up after the bind socket is up (hub registers on handshake). */
@@ -810,6 +942,8 @@ export async function connectIraCast(): Promise<void> {
         "status-update",
         "conference-start",
         "conference-end",
+        "dicom-send",
+        "nifti-send",
       ],
       lease: 7200,
       defaultTargetActor: "*",
@@ -823,6 +957,14 @@ export async function connectIraCast(): Promise<void> {
     if (handleStatusRequest(message)) return;
     if (handleConferenceHubEvent(message)) return;
     if (handleStatusUpdate(message)) return;
+    if (isDicomSendMessage(message)) {
+      void handleDicomSendMessage(message);
+      return;
+    }
+    if (isNiftiSendMessage(message)) {
+      void handleNiftiSendMessage(message);
+      return;
+    }
     handleImagingStudyMessage(message);
   });
 
