@@ -771,7 +771,7 @@ async function mountStudyFromSource(
       },
     }, {
       // Cache-bust the classic worker (browsers often keep idc-worker.js sticky across IRA reloads).
-      workerUrl: new URL("./idc-worker.js?v=idc-fetch-10", import.meta.url),
+      workerUrl: new URL("./idc-worker.js?v=idc-fetch-11", import.meta.url),
     }).then((res) => {
       if (res.seg) pendingIdcSeg = res.seg;
       return res;

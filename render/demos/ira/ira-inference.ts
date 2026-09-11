@@ -2,6 +2,7 @@
 import {
   CAST_INFERENCE_SERVERS,
   extractImagingStudyFiles,
+  probeCastInferenceServers,
   renderInferenceServerInfoCardHtml,
   type CastInferenceServerDef,
   type CastProductStatusProbe,
@@ -12,13 +13,21 @@ import {
   getIraCastSessionInfo,
   getIraImagingStudyOpenContext,
   publishInferenceJob,
-  probeInferenceProduct,
   setIraStatusUpdateHandler,
 } from "./ira-cast.ts";
 import {
-  TOTAL_SEG_DEFAULT_TASK,
-  TOTAL_SEG_TASK_OPTIONS,
+  TOTAL_SEG_GROUP_LABELS,
+  defaultTaskId,
+  getTotalSegTask,
+  groupsForModality,
+  searchClasses,
+  taskOptionLabel,
+  taskSupportsFast,
+  tasksInGroup,
+  type TotalSegModality,
+  type TotalSegTask,
 } from "./totalseg-tasks.ts";
+import { resolveOpenStudyTotalSegModality } from "./totalseg-modality.ts";
 
 export type InferenceServerDef = CastInferenceServerDef;
 export type InferenceProbeResult = CastProductStatusProbe;
@@ -259,16 +268,195 @@ function orderedRows(): RowState[] {
   });
 }
 
-function ensureTotalSegTaskSelect(): void {
-  const select = $("iraTotalSegTask") as HTMLSelectElement | null;
-  if (!select || select.options.length > 0) return;
-  for (const opt of TOTAL_SEG_TASK_OPTIONS) {
+let totalSegUiBound = false;
+let totalSegModality: TotalSegModality | null = "CT";
+let totalSegAssumed = false;
+let totalSegUnsupportedReason = "";
+
+function fillSelect(
+  select: HTMLSelectElement,
+  options: Array<{ value: string; label: string }>,
+  selected: string,
+): void {
+  select.replaceChildren();
+  for (const opt of options) {
     const el = document.createElement("option");
     el.value = opt.value;
-    el.textContent = opt.title;
-    if (opt.value === TOTAL_SEG_DEFAULT_TASK) el.selected = true;
+    el.textContent = opt.label;
+    if (opt.value === selected) el.selected = true;
     select.append(el);
   }
+  if (!select.value && options[0]) select.value = options[0].value;
+}
+
+function syncTotalSegTaskSelect(preferredTaskId?: string): void {
+  const groupSel = $("iraTotalSegGroup") as HTMLSelectElement | null;
+  const taskSel = $("iraTotalSegTask") as HTMLSelectElement | null;
+  if (!groupSel || !taskSel || !totalSegModality) {
+    if (taskSel) taskSel.replaceChildren();
+    return;
+  }
+  const group = groupSel.value || "total";
+  const tasks = tasksInGroup(group, totalSegModality);
+  const preferred =
+    preferredTaskId && tasks.some((t) => t.id === preferredTaskId)
+      ? preferredTaskId
+      : tasks[0]?.id || "";
+  fillSelect(
+    taskSel,
+    tasks.map((t) => ({ value: t.id, label: taskOptionLabel(t) })),
+    preferred,
+  );
+  const taskRow = taskSel.closest(".ira-totalseg-row") as HTMLElement | null;
+  if (taskRow) taskRow.hidden = tasks.length <= 1;
+}
+
+function syncTotalSegGroupSelect(preferredTaskId?: string): void {
+  const groupSel = $("iraTotalSegGroup") as HTMLSelectElement | null;
+  if (!groupSel || !totalSegModality) {
+    if (groupSel) groupSel.replaceChildren();
+    return;
+  }
+  const groups = groupsForModality(totalSegModality);
+  const preferredTask = preferredTaskId
+    ? getTotalSegTask(preferredTaskId)
+    : undefined;
+  const preferredGroup =
+    preferredTask && preferredTask.modality === totalSegModality
+      ? preferredTask.group
+      : groups.includes("total")
+        ? "total"
+        : groups[0] || "";
+  fillSelect(
+    groupSel,
+    groups.map((g) => ({
+      value: g,
+      label: TOTAL_SEG_GROUP_LABELS[g] || g,
+    })),
+    preferredGroup,
+  );
+  syncTotalSegTaskSelect(preferredTaskId || defaultTaskId(totalSegModality));
+}
+
+function clearTotalSegHits(): void {
+  const hits = $("iraTotalSegHits");
+  if (!hits) return;
+  hits.replaceChildren();
+  hits.hidden = true;
+}
+
+function selectTotalSegTask(task: TotalSegTask): void {
+  if (!totalSegModality || task.modality !== totalSegModality) return;
+  syncTotalSegGroupSelect(task.id);
+  clearTotalSegHits();
+  const find = $("iraTotalSegFind") as HTMLInputElement | null;
+  if (find) find.value = "";
+}
+
+function renderTotalSegHits(query: string): void {
+  const hitsEl = $("iraTotalSegHits");
+  if (!hitsEl || !totalSegModality) {
+    clearTotalSegHits();
+    return;
+  }
+  const hits = searchClasses(query, totalSegModality);
+  hitsEl.replaceChildren();
+  if (!hits.length) {
+    hitsEl.hidden = true;
+    return;
+  }
+  for (const hit of hits) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ira-totalseg-hit";
+    btn.setAttribute("role", "option");
+    const cls = document.createElement("div");
+    cls.className = "ira-totalseg-hit-class";
+    cls.textContent = hit.className;
+    const taskLine = document.createElement("div");
+    taskLine.className = "ira-totalseg-hit-task";
+    taskLine.textContent = `${TOTAL_SEG_GROUP_LABELS[hit.task.group] || hit.task.group} · ${taskOptionLabel(hit.task)} (${hit.task.id})`;
+    btn.append(cls, taskLine);
+    btn.addEventListener("click", () => selectTotalSegTask(hit.task));
+    hitsEl.append(btn);
+  }
+  hitsEl.hidden = false;
+}
+
+function currentTotalSegTaskId(): string | undefined {
+  const taskSel = $("iraTotalSegTask") as HTMLSelectElement | null;
+  const raw = String(taskSel?.value || "").trim();
+  return raw || undefined;
+}
+
+function refreshTotalSegModalityUi(opts?: { resetSelection?: boolean }): void {
+  const prevModality = totalSegModality;
+  const prevTask = currentTotalSegTaskId();
+  const resolved = resolveOpenStudyTotalSegModality();
+  totalSegUnsupportedReason = "";
+  totalSegAssumed = false;
+  if (resolved.modality) {
+    totalSegModality = resolved.modality;
+    totalSegAssumed = Boolean(resolved.assumed);
+  } else {
+    totalSegModality = null;
+    totalSegUnsupportedReason = resolved.reason;
+  }
+
+  const modEl = $("iraTotalSegModality");
+  if (modEl) {
+    if (totalSegModality) {
+      modEl.textContent = totalSegAssumed
+        ? `${totalSegModality} (assumed)`
+        : totalSegModality;
+    } else {
+      modEl.textContent = "unsupported";
+    }
+  }
+
+  const modalityChanged = prevModality !== totalSegModality;
+  const find = $("iraTotalSegFind") as HTMLInputElement | null;
+  if (find) {
+    find.disabled = !totalSegModality;
+    if (modalityChanged || opts?.resetSelection) {
+      find.value = "";
+      clearTotalSegHits();
+    }
+  } else {
+    clearTotalSegHits();
+  }
+
+  if (totalSegModality) {
+    const keep =
+      !opts?.resetSelection &&
+      prevTask &&
+      getTotalSegTask(prevTask)?.modality === totalSegModality
+        ? prevTask
+        : defaultTaskId(totalSegModality);
+    syncTotalSegGroupSelect(keep);
+  } else {
+    const groupSel = $("iraTotalSegGroup") as HTMLSelectElement | null;
+    const taskSel = $("iraTotalSegTask") as HTMLSelectElement | null;
+    groupSel?.replaceChildren();
+    taskSel?.replaceChildren();
+  }
+}
+
+function ensureTotalSegUiBindings(): void {
+  if (totalSegUiBound) return;
+  totalSegUiBound = true;
+  const groupSel = $("iraTotalSegGroup") as HTMLSelectElement | null;
+  const taskSel = $("iraTotalSegTask") as HTMLSelectElement | null;
+  const find = $("iraTotalSegFind") as HTMLInputElement | null;
+  groupSel?.addEventListener("change", () => syncTotalSegTaskSelect());
+  find?.addEventListener("input", () => {
+    renderTotalSegHits(find.value);
+  });
+  find?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") clearTotalSegHits();
+  });
+  // Keep task select interactive; no extra handler needed beyond group change.
+  void taskSel;
 }
 
 function syncTotalSegOptionsVisibility(): void {
@@ -276,16 +464,25 @@ function syncTotalSegOptionsVisibility(): void {
   if (!panel) return;
   const show = selectedId === "totalseg";
   panel.hidden = !show;
-  if (show) ensureTotalSegTaskSelect();
+  if (show) {
+    ensureTotalSegUiBindings();
+    // Preserve group/task across probes and detail refreshes while a job runs.
+    refreshTotalSegModalityUi({ resetSelection: false });
+  }
 }
 
 function readTotalSegOptions(): { task: string; fast: boolean } {
   const select = $("iraTotalSegTask") as HTMLSelectElement | null;
-  const raw = String(select?.value || TOTAL_SEG_DEFAULT_TASK).trim();
-  const known = TOTAL_SEG_TASK_OPTIONS.some((o) => o.value === raw);
+  const fallback = totalSegModality
+    ? defaultTaskId(totalSegModality)
+    : "total";
+  const raw = String(select?.value || fallback).trim();
+  const known = getTotalSegTask(raw);
+  const task = known ? raw : fallback;
   return {
-    task: known ? raw : TOTAL_SEG_DEFAULT_TASK,
-    fast: true,
+    task,
+    // Prefer --fast when TotalSeg allows it for this task (catalog supportsFast).
+    fast: taskSupportsFast(task),
   };
 }
 
@@ -378,6 +575,9 @@ function updateDetail(): void {
   const needsNifti = row.def.hubEvent === "nifti-send";
   const hasNifti = files.some((f) => /\.nii(\.gz)?$/i.test(f.fileName) || /\.nii(\.gz)?(\?|$)/i.test(f.url));
 
+  // Refresh TotalSeg modality/task UI before Run enablement checks.
+  syncTotalSegOptionsVisibility();
+
   let disableReason = "";
   if (!connected) disableReason = "Connect to Cast (open from the worklist) to run inference.";
   else if (!online) disableReason = "Server is offline — refresh status or start the resource server.";
@@ -385,6 +585,10 @@ function updateDetail(): void {
   else if (needsNifti && !hasNifti) {
     disableReason =
       "This server expects NIfTI; the open study only has DICOM/prefix URLs. Use Lung Screening or Total Segmentator, or send NIfTI.";
+  } else if (row.def.id === "totalseg" && !totalSegModality) {
+    disableReason =
+      totalSegUnsupportedReason ||
+      "TotalSegmentator requires a CT or MR study.";
   }
 
   runBtn.disabled = Boolean(disableReason);
@@ -392,24 +596,31 @@ function updateDetail(): void {
     if (disableReason) {
       note.textContent = disableReason;
     } else if (row.def.id === "totalseg") {
-      // Options panel replaces the ready message for TotalSeg.
-      note.textContent = "";
+      note.textContent = totalSegAssumed
+        ? "Assuming CT — open an MR study for MR tasks."
+        : "";
     } else {
       note.textContent = "Ready to run on the open study.";
     }
   }
-  syncTotalSegOptionsVisibility();
 }
 
 function appendLog(line: string): void {
   const pre = $("iraInferenceLog");
   if (!pre) return;
-  const stamp = new Date().toLocaleTimeString();
-  pre.textContent = `${pre.textContent || ""}${pre.textContent ? "\n" : ""}[${stamp}] ${line}`;
+  const text = String(line || "").replace(/\s+$/, "");
+  if (!text) return;
+  // Server status-update lines already include ``[HH:MM:SS]``; don't double-stamp.
+  const stamped = /^\[[^\]]+\]\s/.test(text)
+    ? text
+    : `[${new Date().toLocaleTimeString()}] ${text}`;
+  pre.textContent = `${pre.textContent || ""}${pre.textContent ? "\n" : ""}${stamped}`;
   pre.scrollTop = pre.scrollHeight;
 }
 
 let closeAfterJobTimer: number | null = null;
+/** When true, keep the dialog open after ``Job finished`` (errors / empty SEG). */
+let keepDialogOpenAfterJob = false;
 
 function scheduleCloseAfterJobFinished(): void {
   if (closeAfterJobTimer != null) window.clearTimeout(closeAfterJobTimer);
@@ -420,10 +631,22 @@ function scheduleCloseAfterJobFinished(): void {
   }, 700);
 }
 
-function onInferenceStatusUpdate(message: string, _level: string): void {
+function onInferenceStatusUpdate(message: string, level: string): void {
   appendLog(message);
+  if (
+    level === "error" ||
+    /No segmentation to save/i.test(message) ||
+    /Segmentation failed/i.test(message) ||
+    /no output produced/i.test(message) ||
+    /Failed to publish/i.test(message)
+  ) {
+    keepDialogOpenAfterJob = true;
+  }
   if (/\bJob finished\b/i.test(message)) {
-    scheduleCloseAfterJobFinished();
+    if (!keepDialogOpenAfterJob) {
+      scheduleCloseAfterJobFinished();
+    }
+    keepDialogOpenAfterJob = false;
   }
 }
 
@@ -437,7 +660,8 @@ function selectPreferredOnlineServer(): void {
 
 async function probeAll(): Promise<void> {
   const info = getIraCastSessionInfo();
-  if (info.connection !== "connected" || !getIraCastClient()) {
+  const client = getIraCastClient();
+  if (info.connection !== "connected" || !client) {
     for (const row of rows) {
       row.probing = false;
       row.probe = { online: false, items: [], error: "Not connected to Cast" };
@@ -456,21 +680,30 @@ async function probeAll(): Promise<void> {
   updateDetail();
   appendLog("Probing inference servers…");
 
-  await Promise.all(
-    rows.map(async (row) => {
-      try {
-        row.probe = await probeInferenceProduct(row.def.product);
-      } catch (err) {
-        row.probe = {
-          online: false,
-          items: [],
-          error: err instanceof Error ? err.message : String(err),
-        };
-      } finally {
-        row.probing = false;
-      }
-    }),
-  );
+  try {
+    const results = await probeCastInferenceServers(client, {
+      subscriberName: info.subscriberName,
+      subscriberProductName: "SLICERLIVE-IRA",
+      subscriberActor: "ID",
+      topic: info.topic || undefined,
+    });
+    const byId = new Map(results.map((r) => [r.server.id, r.probe]));
+    for (const row of rows) {
+      row.probe = byId.get(row.def.id) || {
+        online: false,
+        items: [],
+        error: "No STATUS response",
+      };
+      row.probing = false;
+    }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    for (const row of rows) {
+      row.probe = { online: false, items: [], error };
+      row.probing = false;
+    }
+  }
+
   selectPreferredOnlineServer();
   renderList();
   updateDetail();
@@ -487,6 +720,11 @@ async function runSelected(): Promise<void> {
   if (!row) return;
   const runBtn = $("iraInferenceRunBtn") as HTMLButtonElement | null;
   if (runBtn) runBtn.disabled = true;
+  keepDialogOpenAfterJob = false;
+  if (closeAfterJobTimer != null) {
+    window.clearTimeout(closeAfterJobTimer);
+    closeAfterJobTimer = null;
+  }
   appendLog(`Running ${row.def.title} (${row.def.product})…`);
   try {
     const rawFiles = volumeFilesFromOpenStudy();
@@ -500,7 +738,9 @@ async function runSelected(): Promise<void> {
     const contextExtras =
       row.def.id === "totalseg" ? readTotalSegOptions() : undefined;
     if (contextExtras) {
-      appendLog(`TotalSeg options: task=${contextExtras.task}, fast`);
+      appendLog(
+        `TotalSeg options: task=${contextExtras.task}, fast=${contextExtras.fast}`,
+      );
     }
     const result = await publishInferenceJob({
       product: row.def.product,
@@ -510,7 +750,9 @@ async function runSelected(): Promise<void> {
     });
     appendLog(result.ok ? `Published ${row.def.hubEvent} → ${row.def.product}` : `Publish failed: ${result.detail}`);
     if (result.ok) appendLog("Watch this log for status-update lines from the server.");
+    else keepDialogOpenAfterJob = true;
   } catch (err) {
+    keepDialogOpenAfterJob = true;
     appendLog(`Run error: ${err instanceof Error ? err.message : String(err)}`);
   }
   updateDetail();
@@ -531,7 +773,7 @@ export function openMedicalInferenceDialog(): void {
   const panel = modal.querySelector(".ira-modal-inference") as HTMLElement | null;
   if (panel) applyFloatPos(modal, panel);
   try {
-    ensureTotalSegTaskSelect();
+    ensureTotalSegUiBindings();
     renderList();
     updateDetail();
   } catch (err) {
@@ -555,7 +797,7 @@ export function closeMedicalInferenceDialog(): void {
 export function installMedicalInferenceUi(): void {
   if (installed) return;
   installed = true;
-  ensureTotalSegTaskSelect();
+  ensureTotalSegUiBindings();
   installInferenceWindowDrag();
   $("iraInferenceRefreshBtn")?.addEventListener("click", () => {
     void probeAll();

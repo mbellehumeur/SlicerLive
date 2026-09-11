@@ -127,6 +127,7 @@
     background: color-mix(in srgb, #f87171 18%, var(--ira-surface-2));
   }
   .ira-leave-conference-btn[hidden] { display: none !important; }
+  .ira-start-conference-btn[hidden] { display: none !important; }
   .ira-modal.ira-modal-wide { width: min(720px, 100%); max-height: min(90vh, 640px); overflow: auto; }
   /* Floating Remote AI window — non-modal so the viewer stays interactive. */
   #iraInferenceModal.ira-floating-window {
@@ -287,13 +288,39 @@
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     font-size: 12px; color: var(--ira-fg);
   }
-  .ira-totalseg-row label { font-weight: 600; min-width: 2.5rem; }
-  .ira-totalseg-row select {
+  .ira-totalseg-row label { font-weight: 600; min-width: 4.5rem; }
+  .ira-totalseg-row select,
+  .ira-totalseg-row input[type="search"] {
     flex: 1; min-width: 12rem; max-width: 100%;
     padding: 4px 8px; border-radius: 5px;
     border: 1px solid var(--ira-border); background: var(--ira-surface);
     color: var(--ira-fg); font-size: 12px;
   }
+  .ira-totalseg-modality {
+    font-size: 12px; color: var(--ira-fg-muted);
+  }
+  .ira-totalseg-modality strong { color: var(--ira-fg); font-weight: 700; }
+  .ira-totalseg-link {
+    font-size: 12px; color: var(--ira-accent); text-decoration: none;
+  }
+  .ira-totalseg-link:hover { text-decoration: underline; }
+  .ira-totalseg-hits {
+    margin: 0; padding: 0; list-style: none;
+    max-height: 8.5rem; overflow: auto;
+    border: 1px solid var(--ira-border); border-radius: 5px;
+    background: var(--ira-surface);
+  }
+  .ira-totalseg-hits[hidden] { display: none !important; }
+  .ira-totalseg-hit {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    border: 0; border-bottom: 1px solid var(--ira-border);
+    background: transparent; color: var(--ira-fg);
+    padding: 6px 8px; font: 12px/1.35 -apple-system, system-ui, sans-serif;
+  }
+  .ira-totalseg-hit:last-child { border-bottom: 0; }
+  .ira-totalseg-hit:hover { background: var(--ira-surface-2); }
+  .ira-totalseg-hit-class { font-weight: 600; }
+  .ira-totalseg-hit-task { color: var(--ira-fg-muted); font-size: 11px; }
   .ira-load-local-body { display: flex; flex-direction: column; gap: 12px; }
   .ira-load-local-check {
     display: inline-flex; align-items: center; gap: 8px;
@@ -533,6 +560,15 @@
         ></div>
         <button
           type="button"
+          id="iraStartConferenceBtn"
+          class="ira-icon-btn ira-text-btn ira-start-conference-btn"
+          aria-label="Start a conference"
+          title="Start a conference"
+        >
+          Start a conference
+        </button>
+        <button
+          type="button"
           id="iraLeaveConferenceBtn"
           class="ira-icon-btn ira-text-btn ira-leave-conference-btn"
           aria-label="Leave conference"
@@ -551,15 +587,21 @@
         >
           Load local study
         </button>
+        <button
+          type="button"
+          id="iraMedicalInferenceBtn"
+          class="ira-icon-btn ira-text-btn"
+          aria-label="Remote AI"
+          title="Remote AI — inference servers"
+        >
+          Remote AI
+        </button>
         <div class="ira-menu-wrap">
           <button type="button" id="iraCastStatusBtn" class="ira-icon-btn" aria-label="Cast Interface"
             aria-haspopup="menu" aria-expanded="false" title="Cast Interface">
             <div id="iraCastStatus" class="ira-cast-status ira-cast-idle" aria-hidden="true"></div>
           </button>
           <div id="iraCastStatusMenu" class="ira-menu" role="menu" hidden>
-            <button type="button" id="iraMedicalInferenceBtn" class="ira-menu-item" role="menuitem">Remote AI</button>
-            <button type="button" id="iraConferenceBtn" class="ira-menu-item" role="menuitem">Conferencing</button>
-            <div class="ira-menu-sep" role="separator"></div>
             <button type="button" id="iraSessionInfoBtn" class="ira-menu-item" role="menuitem">Session info</button>
             <button type="button" id="iraSceneViewBtn" class="ira-menu-item" role="menuitem" disabled title="No LiveScene loaded">Scene View</button>
             <button type="button" id="iraHubBtn" class="ira-menu-item" role="menuitem">Hub</button>
@@ -632,6 +674,30 @@
             <pre id="iraInferenceDetail" class="ira-inference-detail">Select an inference server.</pre>
             <p id="iraInferenceNote" class="ira-inference-note"></p>
             <div id="iraTotalSegOptions" class="ira-totalseg-options" hidden>
+              <div class="ira-totalseg-row ira-totalseg-modality">
+                <span>Study modality: <strong id="iraTotalSegModality">—</strong></span>
+                <a
+                  class="ira-totalseg-link"
+                  href="https://backend.totalsegmentator.com/find-task/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >Browse on totalsegmentator.com</a>
+              </div>
+              <div class="ira-totalseg-row">
+                <label for="iraTotalSegFind">Find</label>
+                <input
+                  type="search"
+                  id="iraTotalSegFind"
+                  placeholder="Structure name (e.g. spleen, liver…)"
+                  autocomplete="off"
+                  aria-label="Find TotalSegmentator structure"
+                />
+              </div>
+              <ul id="iraTotalSegHits" class="ira-totalseg-hits" hidden role="listbox" aria-label="Matching structures"></ul>
+              <div class="ira-totalseg-row">
+                <label for="iraTotalSegGroup">Group</label>
+                <select id="iraTotalSegGroup" aria-label="TotalSegmentator task group"></select>
+              </div>
               <div class="ira-totalseg-row">
                 <label for="iraTotalSegTask">Task</label>
                 <select id="iraTotalSegTask" aria-label="TotalSegmentator task"></select>
@@ -690,6 +756,6 @@
     </div>
   </div>
 
-  <script type="module" src="ira.js?v=close-on-job-done"></script>
+  <script type="module" src="ira.js?v=single-status-stamp"></script>
 </body>
 </html>

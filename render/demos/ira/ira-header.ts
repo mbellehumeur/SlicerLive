@@ -1,5 +1,5 @@
 /**
- * IRA top-bar Cast radio menu (Session / Scene View / Hub / Conferencing) + ? opens controls help.
+ * IRA top-bar Cast radio menu (Session / Scene View / Hub) + Start/Leave conference + Remote AI + ?.
  */
 import {
   castRadioStatusMarkup,
@@ -476,11 +476,27 @@ function refreshLeaveConferenceButton(view: CastConferenceView | null): void {
   btn.setAttribute("aria-label", label);
 }
 
+/** Shown only when no conference is in progress. */
+function refreshStartConferenceButton(view: CastConferenceView | null): void {
+  const btn = document.getElementById(
+    "iraStartConferenceBtn"
+  ) as HTMLButtonElement | null;
+  if (!btn) return;
+  const active = Boolean(view);
+  const connected = getIraCastSessionInfo().connection === "connected";
+  btn.hidden = active;
+  btn.disabled = active || !connected;
+  btn.title = connected
+    ? "Start a conference"
+    : "Connect to Cast hub to start a conference";
+}
+
 function refreshRadio(): void {
   const statusEl = document.getElementById("iraCastStatus");
   if (statusEl) applyIraCastRadioVisual(statusEl);
   const view = getIraCastSessionInfo().conference;
   renderConferenceChips(view);
+  refreshStartConferenceButton(view);
   refreshLeaveConferenceButton(view);
 }
 
@@ -593,10 +609,14 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
   document.addEventListener("click", () => closeMenus());
   castMenu.addEventListener("click", (ev) => ev.stopPropagation());
 
-  document.getElementById("iraConferenceBtn")?.addEventListener("click", () => {
-    closeMenus();
-    openConferenceDialog();
-  });
+  document
+    .getElementById("iraStartConferenceBtn")
+    ?.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      closeMenus();
+      if (getIraCastSessionInfo().conference) return;
+      openConferenceDialog();
+    });
   document.getElementById("iraMedicalInferenceBtn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
     closeMenus();
