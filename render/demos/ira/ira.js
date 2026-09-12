@@ -7580,6 +7580,13 @@ function runWorker(ctKeys, segKeys, ctBucket, segBucket, modality, handlers, opt
             console.error("[idc_tools] onCTGeom", err);
           }
           break;
+        case "ctfocus":
+          try {
+            handlers.onCTFocus?.(m.z);
+          } catch (err) {
+            console.error("[idc_tools] onCTFocus", err);
+          }
+          break;
         case "ctslab": {
           const data = new Float32Array(m.vol);
           try {
@@ -16457,6 +16464,56 @@ async function main() {
   installIraHeader({
     onMountLocalSeries: (entry, opts) => mountLocalSeries(entry, opts)
   });
+  let resolveLoadStudy = null;
+  const loadStudyWhenReady = new Promise((resolve) => {
+    resolveLoadStudy = resolve;
+  });
+  let openApplyChain = Promise.resolve();
+  const applyImagingStudyOpen = async (ctx) => {
+    const loadStudy2 = await loadStudyWhenReady;
+    const sceneDoc = sceneDocFromOpenContext(ctx);
+    if (sceneDoc) {
+      status("Opening scene\u2026");
+      syncIraStudyUrl(studyParamsFromSceneDoc(sceneDoc));
+      await loadStudy2({ sceneDoc });
+      return;
+    }
+    const sceneUrl2 = sceneUrlFromOpenContext(ctx);
+    if (sceneUrl2) {
+      status("Opening scene\u2026");
+      syncIraStudyUrl(studyParamsFromSceneUrl(sceneUrl2));
+      await loadStudy2({ sceneUrl: sceneUrl2 });
+      return;
+    }
+    const idcSource = sourceFromIdcOpenContext(ctx);
+    if (!idcSource) {
+      status(
+        "Cast ImagingStudy-open: unsupported context (need scene JSON or idc CRDC prefix URLs)",
+        true
+      );
+      return;
+    }
+    status("Opening study\u2026");
+    syncIraStudyUrl(studyParamsFromIdcSource(idcSource));
+    await loadStudy2(idcSource);
+  };
+  setIraImagingStudyOpenHandler((ctx) => {
+    status("Opening study\u2026");
+    openApplyChain = openApplyChain.then(() => applyImagingStudyOpen(ctx)).catch((err) => {
+      console.error("[ira] ImagingStudy-open apply failed", err);
+      status("error: " + (err?.message ?? err), true);
+    });
+    return openApplyChain;
+  });
+  let closeStudyImpl = null;
+  let pendingClose = false;
+  setIraImagingStudyCloseHandler(() => {
+    if (closeStudyImpl) {
+      closeStudyImpl();
+      return;
+    }
+    pendingClose = true;
+  });
   void connectIraCast();
   if (!navigator.gpu) {
     status("WebGPU not available \u2014 try Chrome/Edge 113+ or Safari 18+.", true);
@@ -16601,41 +16658,20 @@ async function main() {
       showEmptyChrome();
     }
   };
-  setIraImagingStudyOpenHandler(async (ctx) => {
-    const sceneDoc = sceneDocFromOpenContext(ctx);
-    if (sceneDoc) {
-      status("Opening scene\u2026");
-      syncIraStudyUrl(studyParamsFromSceneDoc(sceneDoc));
-      await loadStudy({ sceneDoc });
-      return;
-    }
-    const sceneUrl2 = sceneUrlFromOpenContext(ctx);
-    if (sceneUrl2) {
-      status("Opening scene\u2026");
-      syncIraStudyUrl(studyParamsFromSceneUrl(sceneUrl2));
-      await loadStudy({ sceneUrl: sceneUrl2 });
-      return;
-    }
-    const idcSource = sourceFromIdcOpenContext(ctx);
-    if (!idcSource) {
-      status(
-        "Cast ImagingStudy-open: unsupported context (need scene JSON or idc CRDC prefix URLs)",
-        true
-      );
-      return;
-    }
-    status("Opening study\u2026");
-    syncIraStudyUrl(studyParamsFromIdcSource(idcSource));
-    await loadStudy(idcSource);
-  });
-  setIraImagingStudyCloseHandler(() => {
+  resolveLoadStudy?.(loadStudy);
+  resolveLoadStudy = null;
+  closeStudyImpl = () => {
     setIraLiveScene(null);
     setIraImagingStudyContext([]);
     disposeStudy();
     syncIraStudyUrl({});
     showEmptyChrome();
     status("No study loaded");
-  });
+  };
+  if (pendingClose) {
+    pendingClose = false;
+    closeStudyImpl();
+  }
   mountLocalSeries = async (entry, { anonymized }) => {
     status("Reconstructing local series\u2026");
     const vol = loadEntry(entry);
@@ -16695,6 +16731,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   let idcCtAssembled = false;
   let scHold = null;
   let applyIdcGeom = null;
+  let applyIdcFocusZ = null;
+  let pendingIdcFocusZ = null;
   let sceneLodField;
   if ("localVolume" in input) {
     setIraLiveScene(null);
@@ -16822,6 +16860,12 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         }
         applyIdcGeom?.(meta.ijkToRAS);
       },
+      onCTFocus: (z2) => {
+        if (signal?.aborted) return;
+        if (!Number.isFinite(z2)) return;
+        if (applyIdcFocusZ) applyIdcFocusZ(z2);
+        else pendingIdcFocusZ = z2;
+      },
       onCTSlab: (info) => {
         if (signal?.aborted) return;
         const host = idcStreamVol;
@@ -16859,7 +16903,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       }
     }, {
       // Cache-bust the classic worker (browsers often keep idc-worker.js sticky across IRA reloads).
-      workerUrl: new URL("./idc-worker.js?v=idc-fetch-11", import.meta.url)
+      workerUrl: new URL("./idc-worker.js?v=idc-fetch-13", import.meta.url)
     }).then((res) => {
       if (res.seg) pendingIdcSeg = res.seg;
       return res;
@@ -17139,6 +17183,28 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
     drawAll();
   };
+  applyIdcFocusZ = (z2) => {
+    const [nx, ny, nz] = sc.dims;
+    const zz = Math.max(0, Math.min(nz - 1, Math.round(z2)));
+    const ijk = [(nx - 1) / 2, (ny - 1) / 2, zz];
+    const M2 = sc.ijkToRAS;
+    const ras = [
+      M2[0] * ijk[0] + M2[1] * ijk[1] + M2[2] * ijk[2] + M2[3],
+      M2[4] * ijk[0] + M2[5] * ijk[1] + M2[6] * ijk[2] + M2[7],
+      M2[8] * ijk[0] + M2[9] * ijk[1] + M2[10] * ijk[2] + M2[11]
+    ];
+    for (const p of PLANES) {
+      const axis = p === "axial" ? 2 : p === "coronal" ? 1 : 0;
+      const span = sc.rasHi[axis] - sc.rasLo[axis];
+      off[p] = span === 0 ? 0.5 : (ras[axis] - sc.rasLo[axis]) / span;
+      off[p] = Math.max(0, Math.min(1, off[p]));
+    }
+    drawAll();
+  };
+  if (pendingIdcFocusZ != null) {
+    applyIdcFocusZ(pendingIdcFocusZ);
+    pendingIdcFocusZ = null;
+  }
   const updateReadout = (p) => {
     const el = document.getElementById("sr-" + p);
     if (!el) return;

@@ -55,6 +55,14 @@ function runWorker(ctKeys, segKeys, ctBucket, segBucket, modality, handlers, opt
                         console.error('[idc_tools] onCTGeom', err);
                     }
                     break;
+                case 'ctfocus':
+                    try {
+                        handlers.onCTFocus?.(m.z);
+                    }
+                    catch (err) {
+                        console.error('[idc_tools] onCTFocus', err);
+                    }
+                    break;
                 case 'ctslab': {
                     const data = new Float32Array(m.vol);
                     try {

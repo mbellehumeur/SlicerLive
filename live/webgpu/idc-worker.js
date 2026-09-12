@@ -83,9 +83,10 @@ async function buildVolume(ctKeys) {
     const nz = ctKeys.length;
     post({ t: 'ctinfo', count: nz });
     // Practical progressive schedule:
-    //  1) full-fetch evenly spaced probe keys (mid first) → mount + paint + geometry
-    //  2) refine spacing/origin from all probe IPPs
-    //  3) concurrent fetch of remaining keys prefers running mid, then center-out
+    //  1) full-fetch mid ASAP → ctready + park mid at volume center (default crosshair)
+    //  2) lo/hi → span-lock + one ctgeom/rewrite; follow with ctfocus (no flash-to-empty)
+    //  3) remaining probes; deferred remap only (no rewriteAll per origin nudge)
+    //  4) final assemble ctgeom once
     const decoded = []; // { sortKey, ipp, pixels, inst, key }
     let nx, ny, iop, rowDir, colDir, normal, ps, win, lev;
     let originIPP = null;
@@ -94,6 +95,8 @@ async function buildVolume(ctKeys) {
     let vol = null;
     let slicePix = 0;
     let ready = false;
+    let geomLocked = false; // after span lock: no mid-stream ctgeom (avoids FOV thrash)
+    let paintedMidKey = null;
     let done = 0;
     const isPET = MODNAME === 'PET';
     const CONC = 8;
@@ -157,6 +160,10 @@ async function buildVolume(ctKeys) {
         post({ t: 'ctslab', zStart: z, zCount: 1, dims: [nx, ny, nz], vol: slab.buffer }, [slab.buffer]);
     }
 
+    function postFocusZ(z) {
+        post({ t: 'ctfocus', z: Math.max(0, Math.min(nz - 1, z | 0)) });
+    }
+
     function rewriteAll() {
         vol.fill(lev - win / 2 - 1);
         for (const item of decoded) {
@@ -167,16 +174,17 @@ async function buildVolume(ctKeys) {
         post({ t: 'ctslab', zStart: 0, zCount: nz, dims: [nx, ny, nz], vol: full.buffer }, [full.buffer]);
     }
 
+    /** Track spatial min for later remap — never rewriteAll here (that blanks the mid view). */
     function maybeRefineOrigin(item) {
         if (item.sortKey >= originSk - 1e-3)
             return;
         originIPP = item.ipp;
         originSk = item.sortKey;
-        post({ t: 'ctgeom', ijkToRAS: provisionalIjkToRAS(spacing, originIPP), win, lev });
-        rewriteAll();
+        if (!geomLocked) {
+            post({ t: 'ctgeom', ijkToRAS: provisionalIjkToRAS(spacing, originIPP), win, lev });
+        }
     }
 
-    /** Pick SliceThickness vs SpacingBetweenSlices by closeness to an IPP-derived gap. */
     function spacingFromTags(ds, gapHint) {
         const st = Number(ds.SliceThickness);
         const sbs = Number(ds.SpacingBetweenSlices);
@@ -192,56 +200,57 @@ async function buildVolume(ctKeys) {
         return Number.isFinite(gapHint) && gapHint > 0 ? gapHint : 1;
     }
 
-    function medianGap(sortedKeys) {
-        if (sortedKeys.length < 2)
-            return NaN;
-        const gaps = [];
-        for (let i = 1; i < sortedKeys.length; i++) {
-            const g = sortedKeys[i] - sortedKeys[i - 1];
-            if (g > 1e-6)
-                gaps.push(g);
+    function applyMetaFromDs(ds) {
+        nx = ds.Columns;
+        ny = ds.Rows;
+        slicePix = nx * ny;
+        iop = ds.ImageOrientationPatient.map(Number);
+        rowDir = iop.slice(0, 3);
+        colDir = iop.slice(3, 6);
+        normal = cross(rowDir, colDir);
+        ps = ds.PixelSpacing.map(Number);
+        applyWlFrom(ds);
+    }
+
+    /** Span-lock spacing from spatial lo/hi among samples; nz known from key count. */
+    function lockSpanGeometry(samples) {
+        if (!samples.length)
+            return false;
+        let lo = samples[0], hi = samples[0];
+        for (const s of samples) {
+            if (s.sortKey < lo.sortKey)
+                lo = s;
+            if (s.sortKey > hi.sortKey)
+                hi = s;
         }
-        if (!gaps.length)
-            return NaN;
-        gaps.sort((a, b) => a - b);
-        return gaps[gaps.length >> 1];
+        originIPP = lo.ipp;
+        originSk = lo.sortKey;
+        if (samples.length >= 2 && hi.sortKey > lo.sortKey + 1e-6) {
+            spacing = (hi.sortKey - lo.sortKey) / Math.max(1, nz - 1);
+        }
+        else {
+            spacing = spacingFromTags(lo.ds || samples[0].ds, NaN);
+        }
+        geomLocked = true;
+        return true;
+    }
+
+    function focusPaintedMid() {
+        if (!paintedMidKey)
+            return;
+        const midItem = decoded.find((d) => d.key === paintedMidKey);
+        if (midItem)
+            postFocusZ(zFor(midItem));
     }
 
     /**
-     * Sparse probes are not adjacent slices — median ΔIPP is often K× true spacing.
-     * Divide out the integer stride when it matches a DICOM tag (or fall back to tag).
+     * @param {number|null} forceZ  park voxels at this index (early mid at center); null = zFor
      */
-    function perSliceSpacing(probeGap, tagSp) {
-        if (Number.isFinite(tagSp) && tagSp > 0 && Number.isFinite(probeGap) && probeGap > 0) {
-            const ratio = probeGap / tagSp;
-            const k = Math.max(1, Math.round(ratio));
-            if (Math.abs(ratio - k) <= 0.25 * k)
-                return probeGap / k;
-            // Prefer tag when the probe gap is not a clean multiple (irregular / bad sample).
-            return tagSp;
-        }
-        if (Number.isFinite(probeGap) && probeGap > 0)
-            return probeGap;
-        if (Number.isFinite(tagSp) && tagSp > 0)
-            return tagSp;
-        return 1;
-    }
-
-    function ingest(ds, key) {
+    function ingest(ds, key, forceZ = null) {
         const ipp = ds.ImagePositionPatient.map(Number);
         if (!ready) {
-            // Fallback if probe failed: mount on first full decode.
-            // dims = [Columns, Rows, N] — matches DICOM row-major + GPU bytesPerRow.
-            nx = ds.Columns;
-            ny = ds.Rows;
-            slicePix = nx * ny;
-            iop = ds.ImageOrientationPatient.map(Number);
-            rowDir = iop.slice(0, 3);
-            colDir = iop.slice(3, 6);
-            normal = cross(rowDir, colDir);
-            ps = ds.PixelSpacing.map(Number);
+            applyMetaFromDs(ds);
             spacing = spacingFromTags(ds, NaN);
-            applyWlFrom(ds);
             originIPP = ipp;
             originSk = dot(ipp, normal);
             publishReady();
@@ -253,7 +262,7 @@ async function buildVolume(ctKeys) {
         const pixels = extractPixels(ds);
         const item = { sortKey, ipp, pixels, inst, key };
         decoded.push(item);
-        const z = zFor(item);
+        const z = forceZ != null ? forceZ : zFor(item);
         vol.set(pixels, z * slicePix);
         postSlice(z);
         maybeRefineOrigin(item);
@@ -266,7 +275,7 @@ async function buildVolume(ctKeys) {
         return item;
     }
 
-    // ---- Phase 1: full-fetch sparse probes (geometry + pixels; no Range then re-GET) ----
+    // ---- Phase 1: mid first (paint), then lo/hi span-lock, then other probes --------------
     prog('probing geometry…', 0.02);
     const nProbe = Math.min(16, nz);
     const probeIdx = [];
@@ -281,82 +290,123 @@ async function buildVolume(ctKeys) {
     const probeKeys = probeIdx.map((ji) => ctKeys[ji]);
     if (!probeKeys.length)
         throw new Error('idc_tools: geometry probe returned no slices');
-    // Listing-middle first for early paint (IDC listings are often roughly spatial).
-    const midListKey = probeKeys[probeKeys.length >> 1];
 
-    // 1) Mid first → mount + paint one real slice ASAP.
-    let tagSp = 1;
-    {
-        const ds = naturalize(await fetchBuf(midListKey));
-        // dims = [Columns, Rows, N] (Cornerstone / demos/idc-worker.js convention).
-        nx = ds.Columns;
-        ny = ds.Rows;
-        slicePix = nx * ny;
-        iop = ds.ImageOrientationPatient.map(Number);
-        rowDir = iop.slice(0, 3);
-        colDir = iop.slice(3, 6);
-        normal = cross(rowDir, colDir);
-        ps = ds.PixelSpacing.map(Number);
-        tagSp = spacingFromTags(ds, NaN);
-        spacing = tagSp;
-        applyWlFrom(ds);
-        const ipp = ds.ImagePositionPatient.map(Number);
-        originIPP = ipp;
-        originSk = dot(ipp, normal);
-        publishReady();
-        prog('loading probe slices…', 0.04);
-        ingest(ds, midListKey);
+    const loListKey = probeKeys[0];
+    const midListKey = probeKeys[probeKeys.length >> 1];
+    const hiListKey = probeKeys[probeKeys.length - 1];
+    const priorityKeys = [...new Set([loListKey, midListKey, hiListKey])];
+    const centerZ = (nz - 1) >> 1;
+
+    async function fetchDs(key) {
+        return naturalize(await fetchBuf(key));
     }
 
-    const knownSk = new Map(); // key -> sortKey
-    knownSk.set(midListKey, originSk);
+    // Start lo/mid/hi together, but mount as soon as mid arrives (do not wait on ends).
+    const midPromise = fetchDs(midListKey);
+    const loPromise = loListKey === midListKey ? midPromise : fetchDs(loListKey);
+    const hiPromise = hiListKey === midListKey
+        ? midPromise
+        : hiListKey === loListKey
+            ? loPromise
+            : fetchDs(hiListKey);
 
-    // 2) Remaining probes in parallel (full objects — already have pixels when geometry refines).
-    const otherProbeKeys = probeKeys.filter((k) => k !== midListKey);
+    const midDs = await midPromise;
+    applyMetaFromDs(midDs);
+    {
+        const ipp = midDs.ImagePositionPatient.map(Number);
+        originIPP = ipp;
+        originSk = dot(ipp, normal);
+        spacing = spacingFromTags(midDs, NaN);
+    }
+    publishReady();
+    prog('loading probe slices…', 0.04);
+    paintedMidKey = midListKey;
+    // Park mid at volume center so IRA's default crosshair shows anatomy immediately.
+    ingest(midDs, midListKey, centerZ);
+    postFocusZ(centerZ);
+
+    const knownSk = new Map();
+    knownSk.set(midListKey, decoded[decoded.length - 1].sortKey);
+
+    const loDs = await loPromise;
+    const hiDs = await hiPromise;
+    const endFetched = [];
+    if (loListKey !== midListKey)
+        endFetched.push({ key: loListKey, ds: loDs });
+    if (hiListKey !== midListKey && hiListKey !== loListKey)
+        endFetched.push({ key: hiListKey, ds: hiDs });
+
+    for (const { key, ds } of endFetched) {
+        ingest(ds, key);
+        knownSk.set(key, decoded[decoded.length - 1].sortKey);
+    }
+
+    // Span-lock from mid + ends; one matrix publish + remap; keep view on painted mid.
+    {
+        const samples = decoded.map((d) => ({
+            key: d.key,
+            ds: null,
+            ipp: d.ipp,
+            sortKey: d.sortKey,
+        }));
+        // Attach mid ds for tag fallback inside lockSpanGeometry.
+        const midSample = samples.find((s) => s.key === midListKey);
+        if (midSample)
+            midSample.ds = midDs;
+        lockSpanGeometry(samples);
+        post({ t: 'ctgeom', ijkToRAS: provisionalIjkToRAS(spacing, originIPP), win, lev });
+        rewriteAll();
+        focusPaintedMid();
+    }
+
+    // Remaining probes in parallel (no per-slice rewriteAll).
+    const otherProbeKeys = probeKeys.filter((k) => !priorityKeys.includes(k));
     await Promise.all(otherProbeKeys.map(async (key) => {
-        const ds = naturalize(await fetchBuf(key));
+        const ds = await fetchDs(key);
         const ipp = ds.ImagePositionPatient.map(Number);
         knownSk.set(key, dot(ipp, normal));
         ingest(ds, key);
     }));
 
-    // 3) Refine spacing/origin from all probe IPPs (sparse ΔIPP ÷ stride).
+    // Mid-coverage / probe-span refine — at most one remap + focus follow.
     {
         const bySk = decoded.slice().sort((a, b) => a.sortKey - b.sortKey);
-        const loItem = bySk[0];
-        const hiItem = bySk[bySk.length - 1];
-        const probeGap = medianGap(bySk.map((d) => d.sortKey));
-        const nextSpacing = perSliceSpacing(probeGap, tagSp);
-        let geomDirty = false;
-        if (nextSpacing > 1e-4 &&
-            Math.abs(nextSpacing - spacing) / Math.max(spacing, 1e-6) > 0.05) {
-            spacing = nextSpacing;
-            geomDirty = true;
-        }
-        // Also refine from mid↔hi span when we have both ends.
-        if (loItem && hiItem && loItem.key !== hiItem.key) {
-            const midItem = bySk[bySk.length >> 1];
-            const dSk = Math.abs(hiItem.sortKey - midItem.sortKey);
-            const dZ = Math.max(1, Math.round(dSk / Math.max(1e-6, spacing)));
-            const refined = dSk / dZ;
-            if (refined > 1e-4 && Math.abs(refined - spacing) / Math.max(spacing, 1e-6) > 0.05) {
-                spacing = refined;
-                geomDirty = true;
+        const midZ = (nz - 1) / 2;
+        const tol = Math.max(2, Math.round(0.1 * nz));
+        const coversMid = decoded.some((d) => Math.abs(zFor(d) - midZ) <= tol);
+        let dirty = false;
+        if (bySk.length >= 2) {
+            const loItem = bySk[0];
+            const hiItem = bySk[bySk.length - 1];
+            const nextSp = (hiItem.sortKey - loItem.sortKey) / Math.max(1, nz - 1);
+            if (!coversMid ||
+                (nextSp > 1e-4 &&
+                    Math.abs(nextSp - spacing) / Math.max(spacing, 1e-6) > 0.02)) {
+                if (nextSp > 1e-4 &&
+                    Math.abs(nextSp - spacing) / Math.max(spacing, 1e-6) > 0.02) {
+                    spacing = nextSp;
+                    dirty = true;
+                }
+            }
+            if (loItem.sortKey < originSk - 1e-3) {
+                originIPP = loItem.ipp;
+                originSk = loItem.sortKey;
+                dirty = true;
             }
         }
-        if (loItem && loItem.sortKey < originSk - 1e-3) {
-            originIPP = loItem.ipp;
-            originSk = loItem.sortKey;
-            geomDirty = true;
-        }
-        if (geomDirty) {
+        if (dirty) {
             post({ t: 'ctgeom', ijkToRAS: provisionalIjkToRAS(spacing, originIPP), win, lev });
             rewriteAll();
+            focusPaintedMid();
+        }
+        else {
+            // Still remap once so zFor matches locked origin after deferred origin nudges.
+            rewriteAll();
+            focusPaintedMid();
         }
     }
 
     // ---- Phase 2: remaining full fetches (probe keys already ingested) -----------------
-    // knownSk grows with every decode. bestMid = closest to (min+max)/2 among known keys.
     function bestMidKey() {
         let loSk = Infinity, hiSk = -Infinity;
         for (const sk of knownSk.values()) {
@@ -379,7 +429,6 @@ async function buildVolume(ctKeys) {
         return best;
     }
 
-    /** Prefer pending best-mid; else an unknown key (expands IPP range); else closest known. */
     function claimNext(pending) {
         if (!pending.size)
             return null;
@@ -388,7 +437,6 @@ async function buildVolume(ctKeys) {
             pending.delete(prefer);
             return prefer;
         }
-        // Expand known IPP span so the mid target improves before we drain the rest.
         for (const k of pending) {
             if (!knownSk.has(k)) {
                 pending.delete(k);
@@ -427,7 +475,7 @@ async function buildVolume(ctKeys) {
             const key = claimNext(pending);
             if (!key)
                 break;
-            const ds = naturalize(await fetchBuf(key));
+            const ds = await fetchDs(key);
             const ipp = ds.ImagePositionPatient.map(Number);
             knownSk.set(key, dot(ipp, normal));
             ingest(ds, key);
@@ -435,7 +483,7 @@ async function buildVolume(ctKeys) {
     }
     await Promise.all(Array.from({ length: Math.min(CONC, Math.max(1, nz)) }, worker));
 
-    // Canonical z-order + geometry from full IPP sort.
+    // Canonical z-order + geometry from full IPP sort — sole endgame ctgeom.
     decoded.sort((a, b) => a.sortKey - b.sortKey);
     for (let z = 0; z < decoded.length; z++)
         vol.set(decoded[z].pixels, z * slicePix);
@@ -448,6 +496,15 @@ async function buildVolume(ctKeys) {
         post({ t: 'ctslab', zStart: 0, zCount: nz, dims: [nx, ny, nz], vol: full.buffer }, [full.buffer]);
     }
     post({ t: 'ctgeom', ijkToRAS, win, lev });
+    {
+        const midItem = paintedMidKey
+            ? decoded.find((d) => d.key === paintedMidKey)
+            : null;
+        if (midItem) {
+            const z = decoded.indexOf(midItem);
+            postFocusZ(z >= 0 ? z : zFor(midItem));
+        }
+    }
     if (MODNAME !== 'CT') {
         const N = vol.length, step = Math.max(1, (N / 200000) | 0), samp = [];
         for (let i = 0; i < N; i += step) {

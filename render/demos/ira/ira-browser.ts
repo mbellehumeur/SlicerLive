@@ -282,8 +282,8 @@ const CT_WL_PRESETS = [
 ];
 
 async function main() {
-  // Cast header (radio + settings) and deep-link subscribe before study load / empty return.
-  // Local-series mount is filled in after loadStudy exists (GPU ready).
+  // Cast header (radio + settings). Open handler is registered before connect so
+  // STATUS / ImagingStudy-open can queue until loadStudy exists (GPU ready).
   let mountLocalSeries: (
     entry: SeriesEntry,
     opts: { anonymized: boolean },
@@ -293,6 +293,75 @@ async function main() {
   installIraHeader({
     onMountLocalSeries: (entry, opts) => mountLocalSeries(entry, opts),
   });
+
+  type LoadStudyFn = (
+    input:
+      | Source
+      | { sceneUrl: string }
+      | { sceneDoc: import("./ira-cast.ts").IraLiveSceneDoc }
+      | {
+          localVolume: CTVolume;
+          label: string;
+          anonymized: boolean;
+        },
+  ) => Promise<void>;
+
+  let resolveLoadStudy: ((fn: LoadStudyFn) => void) | null = null;
+  const loadStudyWhenReady = new Promise<LoadStudyFn>((resolve) => {
+    resolveLoadStudy = resolve;
+  });
+  let openApplyChain: Promise<void> = Promise.resolve();
+
+  const applyImagingStudyOpen = async (ctx: unknown[]) => {
+    const loadStudy = await loadStudyWhenReady;
+    const sceneDoc = sceneDocFromOpenContext(ctx);
+    if (sceneDoc) {
+      status("Opening scene…");
+      syncIraStudyUrl(studyParamsFromSceneDoc(sceneDoc));
+      await loadStudy({ sceneDoc });
+      return;
+    }
+    const sceneUrl = sceneUrlFromOpenContext(ctx);
+    if (sceneUrl) {
+      status("Opening scene…");
+      syncIraStudyUrl(studyParamsFromSceneUrl(sceneUrl));
+      await loadStudy({ sceneUrl });
+      return;
+    }
+    const idcSource = sourceFromIdcOpenContext(ctx);
+    if (!idcSource) {
+      status(
+        "Cast ImagingStudy-open: unsupported context (need scene JSON or idc CRDC prefix URLs)",
+        true,
+      );
+      return;
+    }
+    status("Opening study…");
+    syncIraStudyUrl(studyParamsFromIdcSource(idcSource));
+    await loadStudy(idcSource);
+  };
+
+  setIraImagingStudyOpenHandler((ctx) => {
+    status("Opening study…");
+    openApplyChain = openApplyChain
+      .then(() => applyImagingStudyOpen(ctx))
+      .catch((err) => {
+        console.error("[ira] ImagingStudy-open apply failed", err);
+        status("error: " + ((err as Error)?.message ?? err), true);
+      });
+    return openApplyChain;
+  });
+
+  let closeStudyImpl: (() => void) | null = null;
+  let pendingClose = false;
+  setIraImagingStudyCloseHandler(() => {
+    if (closeStudyImpl) {
+      closeStudyImpl();
+      return;
+    }
+    pendingClose = true;
+  });
+
   void connectIraCast();
 
   if (!(navigator as unknown as { gpu?: unknown }).gpu) {
@@ -412,17 +481,7 @@ async function main() {
     status("No study loaded");
   };
 
-  const loadStudy = async (
-    input:
-      | Source
-      | { sceneUrl: string }
-      | { sceneDoc: import("./ira-cast.ts").IraLiveSceneDoc }
-      | {
-          localVolume: CTVolume;
-          label: string;
-          anonymized: boolean;
-        },
-  ) => {
+  const loadStudy: LoadStudyFn = async (input) => {
     emptyCleanup?.();
     emptyCleanup = null;
     disposeStudy();
@@ -461,42 +520,22 @@ async function main() {
     }
   };
 
-  // Cast open/close: mount in-place; sync shareable URL via replaceState (no reload / WS drop).
-  setIraImagingStudyOpenHandler(async (ctx) => {
-    const sceneDoc = sceneDocFromOpenContext(ctx);
-    if (sceneDoc) {
-      status("Opening scene…");
-      syncIraStudyUrl(studyParamsFromSceneDoc(sceneDoc));
-      await loadStudy({ sceneDoc });
-      return;
-    }
-    const sceneUrl = sceneUrlFromOpenContext(ctx);
-    if (sceneUrl) {
-      status("Opening scene…");
-      syncIraStudyUrl(studyParamsFromSceneUrl(sceneUrl));
-      await loadStudy({ sceneUrl });
-      return;
-    }
-    const idcSource = sourceFromIdcOpenContext(ctx);
-    if (!idcSource) {
-      status(
-        "Cast ImagingStudy-open: unsupported context (need scene JSON or idc CRDC prefix URLs)",
-        true,
-      );
-      return;
-    }
-    status("Opening study…");
-    syncIraStudyUrl(studyParamsFromIdcSource(idcSource));
-    await loadStudy(idcSource);
-  });
-  setIraImagingStudyCloseHandler(() => {
+  // Unblock any STATUS / ImagingStudy-open that arrived during GPU startup.
+  resolveLoadStudy?.(loadStudy);
+  resolveLoadStudy = null;
+
+  closeStudyImpl = () => {
     setIraLiveScene(null);
     setIraImagingStudyContext([]);
     disposeStudy();
     syncIraStudyUrl({});
     showEmptyChrome();
     status("No study loaded");
-  });
+  };
+  if (pendingClose) {
+    pendingClose = false;
+    closeStudyImpl();
+  }
 
   mountLocalSeries = async (entry, { anonymized }) => {
     status("Reconstructing local series…");
@@ -597,6 +636,8 @@ async function mountStudyFromSource(
   /** Scene/camera for mid-stream ctgeom refinements (set after mount). */
   let scHold: SegrouletteScene | null = null;
   let applyIdcGeom: ((ijkToRAS: number[]) => void) | null = null;
+  let applyIdcFocusZ: ((z: number) => void) | null = null;
+  let pendingIdcFocusZ: number | null = null;
 
   let sceneLodField: ImageField | undefined;
   if ("localVolume" in input) {
@@ -733,6 +774,12 @@ async function mountStudyFromSource(
         }
         applyIdcGeom?.(meta.ijkToRAS);
       },
+      onCTFocus: (z) => {
+        if (signal?.aborted) return;
+        if (!Number.isFinite(z)) return;
+        if (applyIdcFocusZ) applyIdcFocusZ(z);
+        else pendingIdcFocusZ = z;
+      },
       onCTSlab: (info) => {
         if (signal?.aborted) return;
         const host = idcStreamVol;
@@ -771,7 +818,7 @@ async function mountStudyFromSource(
       },
     }, {
       // Cache-bust the classic worker (browsers often keep idc-worker.js sticky across IRA reloads).
-      workerUrl: new URL("./idc-worker.js?v=idc-fetch-11", import.meta.url),
+      workerUrl: new URL("./idc-worker.js?v=idc-fetch-13", import.meta.url),
     }).then((res) => {
       if (res.seg) pendingIdcSeg = res.seg;
       return res;
@@ -1079,6 +1126,29 @@ async function mountStudyFromSource(
     sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
     drawAll();
   };
+  // Keep MPR on the worker's painted mid slice when remaps move its IJK index.
+  applyIdcFocusZ = (z) => {
+    const [nx, ny, nz] = sc.dims;
+    const zz = Math.max(0, Math.min(nz - 1, Math.round(z)));
+    const ijk = [(nx - 1) / 2, (ny - 1) / 2, zz];
+    const M = sc.ijkToRAS;
+    const ras = [
+      M[0] * ijk[0] + M[1] * ijk[1] + M[2] * ijk[2] + M[3],
+      M[4] * ijk[0] + M[5] * ijk[1] + M[6] * ijk[2] + M[7],
+      M[8] * ijk[0] + M[9] * ijk[1] + M[10] * ijk[2] + M[11],
+    ];
+    for (const p of PLANES) {
+      const axis = p === "axial" ? 2 : p === "coronal" ? 1 : 0;
+      const span = sc.rasHi[axis] - sc.rasLo[axis];
+      off[p] = span === 0 ? 0.5 : (ras[axis] - sc.rasLo[axis]) / span;
+      off[p] = Math.max(0, Math.min(1, off[p]));
+    }
+    drawAll();
+  };
+  if (pendingIdcFocusZ != null) {
+    applyIdcFocusZ(pendingIdcFocusZ);
+    pendingIdcFocusZ = null;
+  }
   const updateReadout = (p: Plane) => {
     const el = document.getElementById("sr-" + p);
     if (!el) return;

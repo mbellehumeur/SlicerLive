@@ -66,6 +66,8 @@ export interface LoadHandlers {
     onCTReady?: (meta: Omit<CTVolume, 'vol'> & { vol?: Float32Array }) => void | Promise<void>;
     /** refined ijkToRAS as better reference slices arrive (or at end after full IPP sort) */
     onCTGeom?: (meta: { ijkToRAS: number[]; win?: number; lev?: number }) => void | Promise<void>;
+    /** keep MPR crosshair on the painted mid slice index (IJK k) during progressive remap */
+    onCTFocus?: (z: number) => void | Promise<void>;
     /** contiguous z-slab of the assembling float32 volume (z-order after IPP sort) */
     onCTSlab?: (info: {
         zStart: number;
