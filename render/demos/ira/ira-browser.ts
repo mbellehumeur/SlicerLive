@@ -35,17 +35,27 @@ import { openVrPresetMenu, type VrPresetItem } from "../vr-preset-menu.ts";
 import type { Vec3 } from "../../mat4.ts";
 import {
   connectIraCast,
+  getIraCastSessionInfo,
+  getIraLiveScene,
   setIraDicomSendHandler,
   setIraImagingStudyCloseHandler,
   setIraImagingStudyContext,
   setIraImagingStudyOpenHandler,
   setIraLiveScene,
   setIraNiftiSendHandler,
+  setIraSceneUpdateHandler,
+  setIraSegCatalog,
   syncIraStudyUrl,
   publishIraImagingStudyTransition,
 } from "./ira-cast.ts";
+import {
+  applySceneUpdateOps,
+  buildIraLiveSceneDoc,
+  opsFromSceneUpdateContext,
+} from "./ira-live-scene-bridge.ts";
 import { mergeSegLabelmaps, segLabelmapFromNiftiSendEvent } from "./ira-nifti-seg.ts";
 import { segLabelmapFromDicomSendEvent } from "./ira-dicom-seg.ts";
+import { buildSegCatalog, EMPTY_SEG_CATALOG } from "./ira-seg-catalog.ts";
 import { installIraHeader } from "./ira-header.ts";
 import {
   sourceFromIdcOpenContext,
@@ -59,11 +69,13 @@ import {
   imagingStudyContextFromLocalStudy,
   imagingStudyContextFromSceneDoc,
   imagingStudyContextFromSceneUrl,
+  loadVolumeFromRemoteFile,
   sceneDocFromOpenContext,
   sceneUrlFromOpenContext,
   studyParamsFromSceneDoc,
   studyParamsFromSceneUrl,
   takeEmbeddedSceneFromStorage,
+  volumeFileFromOpenContext,
   vrPresetFromSceneVolume,
 } from "./ira-scene.ts";
 import { loadEntry, type SeriesEntry } from "../../../logic/readers/dicom-local.ts";
@@ -329,16 +341,36 @@ async function main() {
       return;
     }
     const idcSource = sourceFromIdcOpenContext(ctx);
-    if (!idcSource) {
-      status(
-        "Cast ImagingStudy-open: unsupported context (need scene JSON or idc CRDC prefix URLs)",
-        true,
-      );
+    if (idcSource) {
+      status("Opening study…");
+      syncIraStudyUrl(studyParamsFromIdcSource(idcSource));
+      await loadStudy(idcSource);
       return;
     }
-    status("Opening study…");
-    syncIraStudyUrl(studyParamsFromIdcSource(idcSource));
-    await loadStudy(idcSource);
+    const volumeFile = volumeFileFromOpenContext(ctx);
+    if (volumeFile) {
+      status("Downloading volume…");
+      const hubEndpoint = getIraCastSessionInfo().hubEndpoint;
+      let hubOrigin = "http://127.0.0.1:2018";
+      try {
+        hubOrigin = new URL(hubEndpoint).origin;
+      } catch {
+        /* keep default */
+      }
+      const { localVolume, label } = await loadVolumeFromRemoteFile(
+        volumeFile,
+        hubOrigin
+      );
+      syncIraStudyUrl({ volume: volumeFile.fileName });
+      await loadStudy({ localVolume, label, anonymized: false });
+      const info = document.getElementById("info");
+      if (info) info.textContent = label;
+      return;
+    }
+    status(
+      "Cast ImagingStudy-open: unsupported context (need scene JSON, idc CRDC prefix URLs, or volume files)",
+      true,
+    );
   };
 
   setIraImagingStudyOpenHandler((ctx) => {
@@ -526,6 +558,7 @@ async function main() {
 
   closeStudyImpl = () => {
     setIraLiveScene(null);
+    setIraSegCatalog(EMPTY_SEG_CATALOG);
     setIraImagingStudyContext([]);
     disposeStudy();
     syncIraStudyUrl({});
@@ -949,11 +982,20 @@ async function mountStudyFromSource(
       });
     }
   };
+  let syncLiveScene = () => {
+    /* assigned below once sc helpers exist */
+  };
+  let drawAll = () => {
+    for (const p of PLANES) drawSlice(p);
+    draw3d();
+    xhair?.redraw();
+  };
   const segCards = mountSegmentCards(gpu, srgb, cardFont, cv.threeD, camera, {
     apply: (id, action) => {
       if (action === "reset") sc.setSegmentOpacities(sc.segments.map((s) => [s.num, 1]));
       else if (action === "hide") sc.setSegmentOpacity(id, 0);
       else sc.setSegmentOpacities(sc.segments.map((s) => [s.num, s.num === id ? 1 : 0.4]));
+      syncLiveScene();
       drawAll();
     },
     redraw: () => draw3d(),
@@ -986,16 +1028,78 @@ async function mountStudyFromSource(
     segVisible: (num) => sc.isSegmentVisible(num),
   });
   segCards.setScene(ct, seg ?? null, sc.segments);
-  const drawAll = () => {
+  drawAll = () => {
     for (const p of PLANES) drawSlice(p);
     draw3d();
     xhair?.redraw();
   };
 
+  syncLiveScene = () => {
+    if (studyDisposed) return;
+    setIraLiveScene(
+      buildIraLiveSceneDoc({
+        base: getIraLiveScene(),
+        dims: sc.dims,
+        ijkToRAS: sc.ijkToRAS,
+        modality: ct.modality,
+        volumeName: source.sd || ct.modality || "Volume",
+        segments: sc.segments.map((s) => ({
+          num: s.num,
+          name: s.name,
+          color: s.color,
+          visible: sc.isSegmentVisible(s.num),
+        })),
+        labelsVisible: labelsOn,
+        hasSeg: sc.hasSeg,
+      }),
+    );
+  };
+  syncLiveScene();
+  if (seg) setIraSegCatalog(buildSegCatalog(seg, sc.ijkToRAS));
+  else setIraSegCatalog(EMPTY_SEG_CATALOG);
+
+  setIraSceneUpdateHandler((context) => {
+    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
+    const ops = opsFromSceneUpdateContext(context);
+    if (!ops.length) return;
+    // Refresh from live sc so patch targets exist even if STATUS scene was volume-only.
+    const base = buildIraLiveSceneDoc({
+      base: getIraLiveScene(),
+      dims: sc.dims,
+      ijkToRAS: sc.ijkToRAS,
+      modality: ct.modality,
+      volumeName: source.sd || ct.modality || "Volume",
+      segments: sc.segments.map((s) => ({
+        num: s.num,
+        name: s.name,
+        color: s.color,
+        visible: sc.isSegmentVisible(s.num),
+      })),
+      labelsVisible: labelsOn,
+      hasSeg: sc.hasSeg || sc.segments.length > 0,
+    });
+    const { doc, result } = applySceneUpdateOps(base, ops);
+    setIraLiveScene(doc);
+    if (typeof result.labelsVisible === "boolean") {
+      labelsOn = result.labelsVisible;
+    }
+    for (const [num, visible] of result.segmentVisibility) {
+      sc.setSegmentVisible(num, visible);
+    }
+    if (typeof result.opacity === "number" && Number.isFinite(result.opacity)) {
+      sc.setSegOpacity(result.opacity);
+      sc.slice.setOverlayOpacity(result.opacity * SEG_FILL);
+    }
+    drawAll();
+    syncLiveScene();
+  });
+
   const refreshSegChrome = (labmap: SegLabelmap) => {
     seg = labmap;
     sc.setVolumeOpacity(0.5);
     segCards.setScene(ct, seg, sc.segments);
+    setIraSegCatalog(buildSegCatalog(labmap, sc.ijkToRAS));
+    syncLiveScene();
     for (const p of PLANES) {
       const cell = document.querySelector(`[data-cell="${p}"]`) as HTMLElement | null;
       const tr = cell?.querySelector(".ann.tr") as HTMLElement | null;
@@ -1521,6 +1625,7 @@ async function mountStudyFromSource(
       get: () => labelsOn,
       set: (on) => {
         labelsOn = on;
+        syncLiveScene();
         draw3d();
       },
       disabled: () => !sc.hasSeg,
@@ -1583,6 +1688,7 @@ async function mountStudyFromSource(
       get: (num) => sc.segmentOpacity(num),
       set: (num, o) => {
         sc.setSegmentOpacity(num, o);
+        syncLiveScene();
         drawAll();
       },
       enabled: () => sc.hasSeg,
@@ -1599,6 +1705,7 @@ async function mountStudyFromSource(
       return {
         dispose: () => {
           studyDisposed = true;
+          setIraSegCatalog(EMPTY_SEG_CATALOG);
           labelsOn = false;
           try {
             segCards.clear();
@@ -1648,7 +1755,9 @@ async function mountStudyFromSource(
         applyCastNiftiSeg = null;
         applyCastDicomSeg = null;
       }
+      setIraSegCatalog(EMPTY_SEG_CATALOG);
       labelsOn = false;
+      setIraSceneUpdateHandler(null);
       globalThis.removeEventListener("resize", resize);
       for (const ro of resizeObservers) ro.disconnect();
       try {

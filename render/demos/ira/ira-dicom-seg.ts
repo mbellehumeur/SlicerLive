@@ -328,6 +328,18 @@ export async function segLabelmapFromDicomSendEvent(
     return { ok: false, error: "DICOM SEG labelmap is empty after resample onto CT" };
   }
 
+  const referencedSeries = asSeq(ds.ReferencedSeriesSequence)[0] as
+    | { SeriesInstanceUID?: unknown }
+    | undefined;
+
+  seg.sopInstanceUID = String(ds.SOPInstanceUID || "");
+  seg.seriesInstanceUID = String(ds.SeriesInstanceUID || "");
+  seg.sourceSeriesInstanceUID = String(
+    referencedSeries?.SeriesInstanceUID || "",
+  );
+  seg.fileName = fileName;
+  seg.modality = "SEG";
+
   return {
     ok: true,
     fileName,

@@ -127,7 +127,41 @@
     background: color-mix(in srgb, #f87171 18%, var(--ira-surface-2));
   }
   .ira-leave-conference-btn[hidden] { display: none !important; }
+  .ira-start-conference-btn[hidden] { display: none !important; }
   .ira-modal.ira-modal-wide { width: min(720px, 100%); max-height: min(90vh, 640px); overflow: auto; }
+  /* Floating Remote AI window — non-modal so the viewer stays interactive. */
+  #iraInferenceModal.ira-floating-window {
+    position: fixed;
+    inset: auto;
+    top: 56px;
+    right: 16px;
+    left: auto;
+    bottom: auto;
+    z-index: 50;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    display: block;
+    align-items: unset;
+    justify-content: unset;
+    pointer-events: none;
+  }
+  #iraInferenceModal.ira-floating-window[hidden] { display: none !important; }
+  #iraInferenceModal .ira-modal-inference {
+    pointer-events: auto;
+    width: min(980px, calc(100vw - 24px));
+    max-height: min(85vh, 720px);
+    overflow: auto;
+    resize: both;
+  }
+  #iraInferenceModal .ira-floating-drag-handle {
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+  }
+  #iraInferenceModal .ira-floating-drag-handle.ira-dragging {
+    cursor: grabbing;
+  }
   .ira-scene-view-pre {
     margin: 0;
     max-height: min(60vh, 28rem);
@@ -144,7 +178,7 @@
   .ira-inference-body { padding-top: 10px; }
   .ira-inference-layout {
     display: grid;
-    grid-template-columns: minmax(14rem, 0.9fr) minmax(16rem, 1.1fr);
+    grid-template-columns: minmax(12rem, 0.7fr) minmax(28rem, 1.8fr);
     gap: 12px;
     min-height: 18rem;
   }
@@ -179,9 +213,21 @@
     margin: 0; padding: 10px 12px; border-radius: 6px;
     border: 1px solid var(--ira-border); background: var(--ira-surface);
     color: var(--ira-fg); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    white-space: pre-wrap; word-break: break-word;
   }
-  .ira-inference-detail { min-height: 6rem; }
+  .ira-inference-detail {
+    min-height: 6rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .ira-inference-log {
+    margin-top: 10px;
+    max-height: 12rem;
+    overflow: auto;
+    color: var(--ira-fg-muted);
+    white-space: pre;
+    word-break: normal;
+    overflow-wrap: normal;
+  }
   .ira-inference-detail-card {
     font: 13px/1.45 -apple-system, system-ui, sans-serif;
     white-space: normal;
@@ -198,7 +244,33 @@
     border: 1px solid var(--ira-border); background: var(--ira-surface-2);
     color: var(--ira-accent); text-decoration: none; font-size: 12px; font-weight: 600;
   }
+  .cast-inference-info-github-icon {
+    flex: 0 0 auto;
+    display: block;
+  }
   .cast-inference-info-coffee { color: #d4a017; border-color: color-mix(in srgb, #d4a017 40%, var(--ira-border)); }
+  .ira-inference-run-btn {
+    margin-top: 6px;
+    min-height: 36px;
+    padding: 0 18px;
+    background: var(--ira-accent);
+    border-color: var(--ira-accent);
+    color: #0b1220;
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .ira-inference-run-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--ira-accent) 88%, #fff);
+    border-color: color-mix(in srgb, var(--ira-accent) 88%, #fff);
+  }
+  .ira-inference-run-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .ira-inference-run-btn:disabled:hover {
+    background: var(--ira-accent);
+    border-color: var(--ira-accent);
+  }
   .ira-inference-op-notes {
     margin: 10px 0 0; padding: 8px 10px; border-radius: 6px;
     border: 1px solid var(--ira-border); background: var(--ira-surface);
@@ -207,7 +279,6 @@
   }
   .ira-inference-note { margin: 8px 0; font-size: 12px; color: var(--ira-fg-muted); min-height: 0; }
   .ira-inference-note:empty { display: none; }
-  .ira-inference-log { margin-top: 10px; max-height: 10rem; overflow: auto; color: var(--ira-fg-muted); }
   .ira-totalseg-options {
     margin: 8px 0;
     display: flex; flex-direction: column; gap: 8px;
@@ -217,18 +288,39 @@
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     font-size: 12px; color: var(--ira-fg);
   }
-  .ira-totalseg-row label { font-weight: 600; min-width: 2.5rem; }
-  .ira-totalseg-row select {
+  .ira-totalseg-row label { font-weight: 600; min-width: 4.5rem; }
+  .ira-totalseg-row select,
+  .ira-totalseg-row input[type="search"] {
     flex: 1; min-width: 12rem; max-width: 100%;
     padding: 4px 8px; border-radius: 5px;
     border: 1px solid var(--ira-border); background: var(--ira-surface);
     color: var(--ira-fg); font-size: 12px;
   }
-  .ira-totalseg-check {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-size: 12px; font-weight: 600; color: var(--ira-fg); cursor: pointer;
+  .ira-totalseg-modality {
+    font-size: 12px; color: var(--ira-fg-muted);
   }
-  .ira-totalseg-hint { margin: 0; font-size: 11px; color: var(--ira-fg-muted); line-height: 1.35; }
+  .ira-totalseg-modality strong { color: var(--ira-fg); font-weight: 700; }
+  .ira-totalseg-link {
+    font-size: 12px; color: var(--ira-accent); text-decoration: none;
+  }
+  .ira-totalseg-link:hover { text-decoration: underline; }
+  .ira-totalseg-hits {
+    margin: 0; padding: 0; list-style: none;
+    max-height: 8.5rem; overflow: auto;
+    border: 1px solid var(--ira-border); border-radius: 5px;
+    background: var(--ira-surface);
+  }
+  .ira-totalseg-hits[hidden] { display: none !important; }
+  .ira-totalseg-hit {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    border: 0; border-bottom: 1px solid var(--ira-border);
+    background: transparent; color: var(--ira-fg);
+    padding: 6px 8px; font: 12px/1.35 -apple-system, system-ui, sans-serif;
+  }
+  .ira-totalseg-hit:last-child { border-bottom: 0; }
+  .ira-totalseg-hit:hover { background: var(--ira-surface-2); }
+  .ira-totalseg-hit-class { font-weight: 600; }
+  .ira-totalseg-hit-task { color: var(--ira-fg-muted); font-size: 11px; }
   .ira-load-local-body { display: flex; flex-direction: column; gap: 12px; }
   .ira-load-local-check {
     display: inline-flex; align-items: center; gap: 8px;
@@ -261,8 +353,11 @@
     display: block; margin-top: 2px; font-weight: 500; font-size: 11px;
     color: var(--ira-fg-muted);
   }
-  @media (max-width: 720px) {
+  @media (max-width: 900px) {
     .ira-inference-layout { grid-template-columns: 1fr; }
+    #iraInferenceModal .ira-modal-inference {
+      width: min(100vw - 16px, 980px);
+    }
   }
   .ira-menu {
     position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; padding: 4px; z-index: 40;
@@ -465,6 +560,15 @@
         ></div>
         <button
           type="button"
+          id="iraStartConferenceBtn"
+          class="ira-icon-btn ira-text-btn ira-start-conference-btn"
+          aria-label="Start a conference"
+          title="Start a conference"
+        >
+          Start a conference
+        </button>
+        <button
+          type="button"
           id="iraLeaveConferenceBtn"
           class="ira-icon-btn ira-text-btn ira-leave-conference-btn"
           aria-label="Leave conference"
@@ -483,17 +587,32 @@
         >
           Load local study
         </button>
+        <button
+          type="button"
+          id="iraMedicalInferenceBtn"
+          class="ira-icon-btn ira-text-btn"
+          aria-label="Remote AI"
+          title="Remote AI — inference servers"
+        >
+          Remote AI
+        </button>
+        <button
+          type="button"
+          id="iraReportingBtn"
+          class="ira-icon-btn ira-text-btn"
+          aria-label="Open DICOM SR reporting"
+          title="Open DICOM SR reporting client"
+        >
+          DICOM SR
+        </button>
         <div class="ira-menu-wrap">
           <button type="button" id="iraCastStatusBtn" class="ira-icon-btn" aria-label="Cast Interface"
             aria-haspopup="menu" aria-expanded="false" title="Cast Interface">
             <div id="iraCastStatus" class="ira-cast-status ira-cast-idle" aria-hidden="true"></div>
           </button>
           <div id="iraCastStatusMenu" class="ira-menu" role="menu" hidden>
-            <button type="button" id="iraConferenceBtn" class="ira-menu-item" role="menuitem">Conferencing</button>
-            <button type="button" id="iraMedicalInferenceBtn" class="ira-menu-item" role="menuitem">Remote AI</button>
-            <div class="ira-menu-sep" role="separator"></div>
             <button type="button" id="iraSessionInfoBtn" class="ira-menu-item" role="menuitem">Session info</button>
-            <button type="button" id="iraSceneViewBtn" class="ira-menu-item" role="menuitem" disabled title="No LiveScene loaded">Scene View</button>
+            <button type="button" id="iraSceneViewBtn" class="ira-menu-item" role="menuitem" disabled title="No LiveScene loaded">Scene</button>
             <button type="button" id="iraHubBtn" class="ira-menu-item" role="menuitem">Hub</button>
           </div>
         </div>
@@ -546,9 +665,9 @@
       </div>
     </div>
   </div>
-  <div id="iraInferenceModal" class="ira-modal-backdrop" hidden>
-    <div class="ira-modal ira-modal-wide" role="dialog" aria-labelledby="iraInferenceTitle">
-      <div class="ira-modal-header">
+  <div id="iraInferenceModal" class="ira-floating-window" hidden>
+    <div class="ira-modal ira-modal-inference" role="dialog" aria-labelledby="iraInferenceTitle">
+      <div class="ira-modal-header ira-floating-drag-handle" data-ira-inference-drag>
         <h2 id="iraInferenceTitle">Remote AI - inference servers</h2>
         <button type="button" class="ira-modal-close" data-ira-close-modal aria-label="Close">×</button>
       </div>
@@ -564,19 +683,36 @@
             <pre id="iraInferenceDetail" class="ira-inference-detail">Select an inference server.</pre>
             <p id="iraInferenceNote" class="ira-inference-note"></p>
             <div id="iraTotalSegOptions" class="ira-totalseg-options" hidden>
+              <div class="ira-totalseg-row ira-totalseg-modality">
+                <span>Study modality: <strong id="iraTotalSegModality">—</strong></span>
+                <a
+                  class="ira-totalseg-link"
+                  href="https://backend.totalsegmentator.com/find-task/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >Browse on totalsegmentator.com</a>
+              </div>
+              <div class="ira-totalseg-row">
+                <label for="iraTotalSegFind">Find</label>
+                <input
+                  type="search"
+                  id="iraTotalSegFind"
+                  placeholder="Structure name (e.g. spleen, liver…)"
+                  autocomplete="off"
+                  aria-label="Find TotalSegmentator structure"
+                />
+              </div>
+              <ul id="iraTotalSegHits" class="ira-totalseg-hits" hidden role="listbox" aria-label="Matching structures"></ul>
+              <div class="ira-totalseg-row">
+                <label for="iraTotalSegGroup">Group</label>
+                <select id="iraTotalSegGroup" aria-label="TotalSegmentator task group"></select>
+              </div>
               <div class="ira-totalseg-row">
                 <label for="iraTotalSegTask">Task</label>
                 <select id="iraTotalSegTask" aria-label="TotalSegmentator task"></select>
               </div>
-              <label class="ira-totalseg-check">
-                <input type="checkbox" id="iraTotalSegFast" />
-                Enable fast processing
-              </label>
-              <p class="ira-totalseg-hint">
-                Fast mode can break DICOM RT Struct export (mask slice count mismatch). Prefer normal when you need RT Struct.
-              </p>
             </div>
-            <button type="button" id="iraInferenceRunBtn" class="ira-icon-btn ira-text-btn" disabled>Run selected</button>
+            <button type="button" id="iraInferenceRunBtn" class="ira-icon-btn ira-text-btn ira-inference-run-btn" disabled>Run</button>
             <pre id="iraInferenceLog" class="ira-inference-log" aria-live="polite"></pre>
           </div>
         </div>
@@ -629,6 +765,6 @@
     </div>
   </div>
 
-  <script type="module" src="ira.js?v=totalseg-options-2"></script>
+  <script type="module" src="ira.js?v=single-status-stamp"></script>
 </body>
 </html>

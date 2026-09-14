@@ -53,6 +53,15 @@
     font: 650 12px/1 -apple-system, system-ui, sans-serif;
     white-space: nowrap;
   }
+  /* Same idea as worklist .wl-viewer-btn-connected */
+  .ira-icon-btn.ira-btn-connected {
+    border-color: var(--ira-accent);
+    background: color-mix(in srgb, var(--ira-accent) 18%, var(--ira-surface));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ira-accent) 35%, transparent);
+  }
+  .ira-icon-btn.ira-btn-connected:hover {
+    background: color-mix(in srgb, var(--ira-accent) 28%, var(--ira-surface-2));
+  }
   .ira-conference-chips {
     display: flex;
     flex-wrap: wrap;
@@ -596,6 +605,15 @@
         >
           Remote AI
         </button>
+        <button
+          type="button"
+          id="iraReportingBtn"
+          class="ira-icon-btn ira-text-btn"
+          aria-label="Open DICOM SR reporting"
+          title="Open DICOM SR reporting client"
+        >
+          DICOM SR
+        </button>
         <div class="ira-menu-wrap">
           <button type="button" id="iraCastStatusBtn" class="ira-icon-btn" aria-label="Cast Interface"
             aria-haspopup="menu" aria-expanded="false" title="Cast Interface">
@@ -603,7 +621,7 @@
           </button>
           <div id="iraCastStatusMenu" class="ira-menu" role="menu" hidden>
             <button type="button" id="iraSessionInfoBtn" class="ira-menu-item" role="menuitem">Session info</button>
-            <button type="button" id="iraSceneViewBtn" class="ira-menu-item" role="menuitem" disabled title="No LiveScene loaded">Scene View</button>
+            <button type="button" id="iraSceneViewBtn" class="ira-menu-item" role="menuitem" disabled title="No LiveScene loaded">Scene</button>
             <button type="button" id="iraHubBtn" class="ira-menu-item" role="menuitem">Hub</button>
           </div>
         </div>

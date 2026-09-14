@@ -239,6 +239,13 @@ export function mergeSegLabelmaps(
       colors,
       names,
       terminology: Object.keys(terminology).length ? terminology : undefined,
+      // Prefer existing DICOM identity when merging Cast overlays onto it.
+      sopInstanceUID: existing.sopInstanceUID || incoming.sopInstanceUID,
+      seriesInstanceUID: existing.seriesInstanceUID || incoming.seriesInstanceUID,
+      sourceSeriesInstanceUID:
+        existing.sourceSeriesInstanceUID || incoming.sourceSeriesInstanceUID,
+      fileName: incoming.fileName || existing.fileName,
+      modality: existing.modality || incoming.modality || "SEG",
     },
     added: remap.size,
     skipped,
@@ -336,6 +343,6 @@ export async function segLabelmapFromNiftiSendEvent(
     ok: true,
     fileName,
     labelCount: present.size,
-    seg: { lab, colors, names },
+    seg: { lab, colors, names, fileName, modality: "SEG" },
   };
 }

@@ -22,6 +22,14 @@ export interface SegLabelmap {
     names: Record<number, string>;
     /** per-segment coded terminology (DICOM SEG SegmentedProperty* / AnatomicRegion), keyed by SegmentNumber */
     terminology?: Record<number, SegmentTerminology>;
+    /** DICOM SEG SOP Instance UID when known (Cast STATUS / TID1500 links). */
+    sopInstanceUID?: string;
+    /** DICOM SEG Series Instance UID when known. */
+    seriesInstanceUID?: string;
+    /** Series Instance UID of the source images used for the SEG. */
+    sourceSeriesInstanceUID?: string;
+    fileName?: string;
+    modality?: string;
 }
 export interface CodedEntry { scheme: string; value: string; meaning: string }
 export interface SegmentTerminology {

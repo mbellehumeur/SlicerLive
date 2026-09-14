@@ -8,6 +8,7 @@ import {
 import type { SceneVolume } from "../../scene-volume.ts";
 import type { CTVolume } from "../../vendor/idc_tools/types.js";
 import type { Volume } from "../../../logic/readers/nifti.ts";
+import { readVolume } from "../../../logic/readers/registry.ts";
 import { autoWindowLevel } from "../../../logic/window-level.ts";
 import type { IraLiveSceneDoc } from "./ira-cast.ts";
 
@@ -49,10 +50,17 @@ function isLiveSceneDoc(value: unknown): value is IraLiveSceneDoc {
 
 /**
  * Prefer ImagingStudy-open `{ key: "scene", resource }` (embedded LiveScene).
+ * Also accepts dict-style context with a top-level ``scene`` key (binary-batch publish).
  */
 export function sceneDocFromOpenContext(
-  context: unknown[]
+  context: unknown[] | Record<string, unknown> | null | undefined
 ): IraLiveSceneDoc | null {
+  if (context && typeof context === "object" && !Array.isArray(context)) {
+    const scene = (context as { scene?: unknown }).scene;
+    if (isLiveSceneDoc(scene)) {
+      return { ...(scene as IraLiveSceneDoc) };
+    }
+  }
   if (!Array.isArray(context)) return null;
   for (const item of context) {
     if (!item || typeof item !== "object") continue;
@@ -63,6 +71,103 @@ export function sceneDocFromOpenContext(
     }
   }
   return null;
+}
+
+/** Normalize ImagingStudy-open context (array or dict) to ``{ key, resource }[]``. */
+export function contextItemsFromOpenContext(context: unknown): unknown[] {
+  if (Array.isArray(context)) return context;
+  if (!context || typeof context !== "object") return [];
+  const out: unknown[] = [];
+  for (const [key, resource] of Object.entries(
+    context as Record<string, unknown>
+  )) {
+    if (key === "files") continue;
+    if (resource && typeof resource === "object") {
+      out.push({ key, resource });
+    }
+  }
+  return out;
+}
+
+type CastFileWithData = {
+  fileName?: string;
+  role?: string;
+  data?: ArrayBuffer | Uint8Array | string;
+};
+
+/**
+ * Map hub-downloaded blob ``files[]`` onto LiveScene ``chunkHashes`` via blob: URLs.
+ * Content-addressed stores use ``blobBase + hash``; we replace hashes with absolute blob: URLs
+ * and clear blobBase so fetch uses the rewritten values.
+ */
+export function materializeLiveSceneBlobUrls(
+  sceneDoc: IraLiveSceneDoc,
+  files: CastFileWithData[]
+): IraLiveSceneDoc {
+  const hashToUrl = new Map<string, string>();
+  for (const entry of files) {
+    const name = String(entry.fileName || "").trim();
+    if (!name) continue;
+    const data = entry.data;
+    let bytes: BlobPart | null = null;
+    if (data instanceof ArrayBuffer) bytes = data;
+    else if (data instanceof Uint8Array) bytes = data;
+    else if (typeof data === "string" && data) {
+      // unexpected for blobs; skip
+      continue;
+    }
+    if (!bytes) continue;
+    hashToUrl.set(name, URL.createObjectURL(new Blob([bytes])));
+  }
+  if (!hashToUrl.size) return { ...sceneDoc };
+
+  const nodesIn = sceneDoc.nodes;
+  if (!nodesIn || typeof nodesIn !== "object") {
+    return { ...sceneDoc, blobBase: "" };
+  }
+
+  const nodes: Record<string, unknown> = {};
+  for (const [id, node] of Object.entries(nodesIn)) {
+    if (!node || typeof node !== "object") {
+      nodes[id] = node;
+      continue;
+    }
+    const n = { ...(node as Record<string, unknown>) };
+    const zarr =
+      n.zarr && typeof n.zarr === "object"
+        ? { ...(n.zarr as Record<string, unknown>) }
+        : null;
+    const attrs =
+      n.attrs && typeof n.attrs === "object"
+        ? { ...(n.attrs as Record<string, unknown>) }
+        : null;
+    const attrsZarr =
+      attrs && attrs.zarr && typeof attrs.zarr === "object"
+        ? { ...(attrs.zarr as Record<string, unknown>) }
+        : null;
+
+    const rewriteHashes = (z: Record<string, unknown>) => {
+      const hashes = z.chunkHashes;
+      if (!hashes || typeof hashes !== "object") return z;
+      const next: Record<string, string> = {};
+      for (const [coord, hash] of Object.entries(
+        hashes as Record<string, unknown>
+      )) {
+        const h = String(hash || "").trim();
+        next[coord] = hashToUrl.get(h) || h;
+      }
+      return { ...z, chunkHashes: next };
+    };
+
+    if (zarr) n.zarr = rewriteHashes(zarr);
+    if (attrsZarr && attrs) {
+      attrs.zarr = rewriteHashes(attrsZarr);
+      n.attrs = attrs;
+    }
+    nodes[id] = n;
+  }
+
+  return { ...sceneDoc, blobBase: "", nodes };
 }
 
 /**
@@ -301,6 +406,125 @@ export function iraVolumeFromLocalVolume(vol: Volume): CTVolume {
     dtype: "float32",
     modality,
   };
+}
+
+export type RemoteVolumeFile = {
+  url: string;
+  fileName: string;
+  label?: string;
+};
+
+function looksLikeVolumeFile(f: PlanFile): boolean {
+  if (looksLikeSceneJson(f)) return false;
+  const name = String(f.fileName || "").toLowerCase();
+  const url = String(f.url || "").toLowerCase();
+  let path = url;
+  try {
+    path = new URL(url).pathname.toLowerCase();
+  } catch {
+    /* keep url */
+  }
+  const tip = name || path;
+  return (
+    tip.endsWith(".nii") ||
+    tip.endsWith(".nii.gz") ||
+    tip.endsWith(".nrrd") ||
+    tip.endsWith(".nrrd.gz") ||
+    tip.endsWith(".nhdr")
+  );
+}
+
+/**
+ * Convert ImagingStudy-open context to a remote volume file, or null.
+ * Expects open-mode `files` with a NIfTI/NRRD entry (not LiveScene JSON).
+ */
+export function volumeFileFromOpenContext(
+  context: unknown[]
+): RemoteVolumeFile | null {
+  const plan = resolveImagingStudyOpenPlan(context) as {
+    mode?: string;
+    files?: PlanFile[];
+  } | null;
+  if (!plan || plan.mode !== "files") return null;
+  const files = Array.isArray(plan.files) ? plan.files : [];
+  const volFile =
+    files.find((f) => looksLikeVolumeFile(f)) ||
+    files.find((f) => {
+      const url = String(f?.url || "").trim();
+      return url && !looksLikeSceneJson(f || {});
+    });
+  const url = String(volFile?.url || "").trim();
+  if (!url || !volFile || looksLikeSceneJson(volFile)) return null;
+  if (!looksLikeVolumeFile(volFile)) return null;
+  let fileName = String(volFile.fileName || "").trim();
+  if (!fileName) {
+    try {
+      fileName = new URL(url).pathname.split("/").pop() || "volume.nii.gz";
+    } catch {
+      fileName = "volume.nii.gz";
+    }
+  }
+  const label = String(volFile.label || "").trim() || undefined;
+  return { url, fileName, label };
+}
+
+async function fetchBytesDirect(url: string): Promise<Uint8Array> {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
+
+async function fetchBytesViaHubProxy(
+  hubOrigin: string,
+  url: string
+): Promise<Uint8Array> {
+  const proxy = new URL("/api/hub/proxy-download", hubOrigin);
+  proxy.searchParams.set("url", url);
+  const r = await fetch(proxy.toString());
+  if (!r.ok) {
+    const detail = await r.text().catch(() => "");
+    throw new Error(
+      `hub proxy-download HTTP ${r.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`
+    );
+  }
+  return new Uint8Array(await r.arrayBuffer());
+}
+
+/** Fetch remote volume bytes; fall back to Cast hub proxy when CORS blocks direct fetch. */
+export async function fetchRemoteVolumeBytes(
+  url: string,
+  hubOrigin?: string
+): Promise<Uint8Array> {
+  try {
+    return await fetchBytesDirect(url);
+  } catch (directErr) {
+    const origin = String(hubOrigin || "").trim();
+    if (!origin) throw directErr;
+    try {
+      return await fetchBytesViaHubProxy(origin, url);
+    } catch (proxyErr) {
+      const d = (directErr as Error)?.message ?? String(directErr);
+      const p = (proxyErr as Error)?.message ?? String(proxyErr);
+      throw new Error(`volume download failed (direct: ${d}; proxy: ${p})`);
+    }
+  }
+}
+
+/** Download + parse a remote NIfTI/NRRD into an IRA-mountable CTVolume. */
+export async function loadVolumeFromRemoteFile(
+  file: RemoteVolumeFile,
+  hubOrigin?: string
+): Promise<{ localVolume: CTVolume; label: string }> {
+  const bytes = await fetchRemoteVolumeBytes(file.url, hubOrigin);
+  const vol = await readVolume(bytes, file.fileName);
+  const localVolume = iraVolumeFromLocalVolume(vol);
+  const stem = file.fileName.replace(/\.(nii(\.gz)?|nrrd(\.gz)?|nhdr)$/i, "");
+  const label =
+    String(file.label || "").trim() ||
+    String(vol.name || "").trim() ||
+    stem ||
+    "Volume";
+  return { localVolume, label };
 }
 
 /** VR bake for setVolumePreset from scene transfer functions (when present). */

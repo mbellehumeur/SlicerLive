@@ -1,5 +1,5 @@
 /**
- * IRA top-bar Cast radio menu (Session / Scene View / Hub) + Start/Leave conference + Remote AI + ?.
+ * IRA top-bar Cast radio menu (Session / Scene View / Hub) + Reporting + Start/Leave conference + Remote AI + ?.
  */
 import {
   castRadioStatusMarkup,
@@ -14,6 +14,7 @@ import {
   getIraCastSessionInfo,
   getIraHubAdminUrl,
   getIraLiveScene,
+  openIraReportingClient,
   requestIraStatusFromHostWorklist,
   setIraCastStatusListener,
   setIraConferenceFollowHost,
@@ -115,7 +116,7 @@ function refreshSceneViewButton(): void {
   if (!btn) return;
   const hasScene = Boolean(getIraLiveScene());
   btn.disabled = !hasScene;
-  btn.title = hasScene ? "Scene View" : "No LiveScene loaded";
+  btn.title = hasScene ? "Scene" : "No LiveScene loaded";
 }
 
 type LocalStudyPick = IraLocalStudyPick;
@@ -621,6 +622,11 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
     ev.stopPropagation();
     closeMenus();
     openMedicalInferenceDialog();
+  });
+  document.getElementById("iraReportingBtn")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    closeMenus();
+    openIraReportingClient();
   });
   document
     .getElementById("iraLeaveConferenceBtn")

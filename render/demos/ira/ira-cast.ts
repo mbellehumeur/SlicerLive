@@ -10,7 +10,11 @@ import CastClient, {
   getHubEventLower,
   isRequestEvent,
   isRunningInCloud,
+  matchesCastProduct,
+  messageActor,
   messageEventContext,
+  messageProductName,
+  messageSubscriberName,
   parseStatusUpdateMessage,
   publishCastUrlSend,
   requestCastProductStatus,
@@ -22,6 +26,15 @@ import CastClient, {
   type CastConferenceView,
   type CastProductStatusProbe,
 } from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+import {
+  contextItemsFromOpenContext,
+  materializeLiveSceneBlobUrls,
+  sceneDocFromOpenContext,
+} from "./ira-scene.ts";
+import {
+  EMPTY_SEG_CATALOG,
+  type SegCatalog,
+} from "./ira-seg-catalog.ts";
 
 const LOG = "[ira-cast]";
 
@@ -73,9 +86,9 @@ function resolveHubConfig(
   };
 }
 
-const EMPTY_CAST_CONTEXT = { "context.type": "", context: [] as unknown[] };
 const ID_ACTOR = "ID";
 const WORKLIST_ACTOR = "WORKLIST_CLIENT";
+const REPORTING_ACTOR = "REPORTING_CLIENT";
 const SS_TOPIC = "ira.cast.topic";
 const SS_TOKEN = "ira.cast.token";
 
@@ -119,12 +132,20 @@ let conferenceFollowHost = false;
 let lastImagingStudyOpenContext: unknown[] = [];
 /** Cached LiveScene document (blobBase + nodes) for STATUS + Scene View. */
 let lastLiveScene: IraLiveSceneDoc | null = null;
+/** Always included on STATUS as context key ``segmentation``. */
+let lastSegCatalog: SegCatalog = EMPTY_SEG_CATALOG;
 /** idle → not attempted; pending → in flight; done → finished or intentionally skipped */
 let statusRequestState: "idle" | "pending" | "done" = "idle";
 let onStatus: StatusListener | null = null;
 let onImagingStudyOpen: ImagingStudyOpenHandler | null = null;
 let onImagingStudyClose: ImagingStudyCloseHandler | null = null;
 let onLiveSceneChange: (() => void) | null = null;
+
+/** Reporting peers (CAST-RPT) — same presence idea as worklist connectedApps. */
+const reportingConnectedApps = new Map<
+  string,
+  { productName: string; actor: string }
+>();
 
 export type IraLiveSceneDoc = {
   url?: string;
@@ -310,6 +331,215 @@ export function getIraHubAdminUrl(): string {
   return resolveCastHubAdminUrl(endpoint) || endpoint;
 }
 
+/**
+ * Base URL for the Cast DICOM SR reporting SPA.
+ * Hub/cloud SPA mounts use same-origin `/reporting-client/`; local dual-server uses :8150.
+ */
+export function resolveIraReportingClientUrl(
+  location: Location = globalThis.location
+): string {
+  if (shouldUseSameOriginHub(location)) {
+    return `${location.origin}/reporting-client/`;
+  }
+  return "http://localhost:8150/";
+}
+
+/** Worklist browser window from STATUS `clientWindow` (startup / presence probe). */
+type WorklistClientWindow = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+type StatusResponseItem = {
+  actor?: unknown;
+  data?: {
+    "context.type"?: unknown;
+    context?: unknown;
+    clientWindow?: unknown;
+  };
+};
+
+const REPORTING_WINDOW_NAME = "castViewer-reporting";
+
+let worklistClientWindow: WorklistClientWindow | null = null;
+let reportingWindow: Window | null = null;
+
+function parseClientWindow(raw: unknown): WorklistClientWindow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const left = Number(obj.left);
+  const top = Number(obj.top);
+  const width = Number(obj.width);
+  const height = Number(obj.height);
+  if (
+    ![left, top, width, height].every((n) => Number.isFinite(n)) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return null;
+  }
+  return {
+    left: Math.floor(left),
+    top: Math.floor(top),
+    width: Math.floor(width),
+    height: Math.floor(height),
+  };
+}
+
+function adoptWorklistClientWindowFromStatusResponses(
+  responses: StatusResponseItem[]
+): void {
+  for (const item of responses) {
+    const actor = String(item?.actor ?? "")
+      .trim()
+      .toUpperCase();
+    if (actor && actor !== WORKLIST_ACTOR) continue;
+    const next = parseClientWindow(
+      item?.data && typeof item.data === "object"
+        ? (item.data as { clientWindow?: unknown }).clientWindow
+        : null
+    );
+    if (!next) continue;
+    worklistClientWindow = next;
+    console.warn(`${LOG} worklist clientWindow from STATUS`, next);
+    return;
+  }
+}
+
+function reportingPopupPlacementFromWorklist(): {
+  width: number;
+  height: number;
+  left: number;
+  top: number;
+} {
+  const width = 540;
+  const height = 394;
+  const availLeft = Number(globalThis.screen?.availLeft) || 0;
+  const availTop = Number(globalThis.screen?.availTop) || 0;
+  const availW =
+    globalThis.screen?.availWidth || globalThis.screen?.width || 1200;
+  const availH =
+    globalThis.screen?.availHeight || globalThis.screen?.height || 800;
+
+  const opener = worklistClientWindow;
+  const openerLeft = opener?.left ?? 0;
+  const openerTop = opener?.top ?? 0;
+  const openerW = opener?.width || availW;
+  const openerH = opener?.height || availH;
+
+  let left = opener
+    ? openerLeft + (openerW - width) / 2
+    : Math.max(0, (availW - width) / 2);
+  let top = opener
+    ? openerTop + (openerH - height) / 2
+    : Math.max(0, (availH - height) / 2);
+  left = Math.max(availLeft, Math.min(left, availLeft + availW - width));
+  top = Math.max(availTop, Math.min(top, availTop + availH - height));
+  return {
+    width,
+    height,
+    left: Math.floor(left),
+    top: Math.floor(top),
+  };
+}
+
+/**
+ * Focus DICOM SR only if this page already holds a live Window handle.
+ * Do not probe with window.open('', name) on the open path — that can steal the
+ * user gesture and block the real open.
+ */
+function focusExistingReportingWindow(): boolean {
+  if (!reportingWindow || reportingWindow.closed) {
+    reportingWindow = null;
+    return false;
+  }
+  try {
+    reportingWindow.focus();
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+/**
+ * Bring DICOM SR to the front after segment growth.
+ * Prefer our Window handle; if reporting is Cast-connected but opened elsewhere
+ * (e.g. worklist), reclaim by shared name and focus (no navigation).
+ */
+function focusReportingWindowAfterSegGrowth(): void {
+  if (focusExistingReportingWindow()) return;
+  if (reportingConnectedApps.size === 0) return;
+  let existing: Window | null = null;
+  try {
+    existing = globalThis.open("", REPORTING_WINDOW_NAME);
+  } catch {
+    return;
+  }
+  if (!existing || existing.closed) return;
+  try {
+    const href = String(existing.location?.href || "");
+    if (!href || href === "about:blank") {
+      try {
+        existing.close();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+  } catch {
+    // Cross-origin reporting app — expected when opened from worklist.
+  }
+  try {
+    existing.focus();
+  } catch {
+    /* ignore */
+  }
+  reportingWindow = existing;
+}
+
+/** Open DICOM SR reporting with the same topic / id-token as this Image Display. */
+export function openIraReportingClient(): Window | null {
+  if (focusExistingReportingWindow()) {
+    return reportingWindow;
+  }
+
+  const url = new URL(resolveIraReportingClientUrl());
+  const persisted = readPersistedCredentials();
+  const nextTopic = topic || persisted.topic;
+  const nextToken =
+    String(client?.getConnectionState?.()?.token || "").trim() ||
+    persisted.token ||
+    String(client?.getHubConfig?.()?.token || "").trim();
+  if (nextTopic) url.searchParams.set("topic", nextTopic);
+  if (nextToken) url.searchParams.set("id-token", nextToken);
+  const href = url.toString();
+  const place = reportingPopupPlacementFromWorklist();
+  const features = [
+    "popup",
+    `width=${place.width}`,
+    `height=${place.height}`,
+    `left=${place.left}`,
+    `top=${place.top}`,
+  ].join(",");
+  // One open() only — named window reuses an existing castViewer-reporting if any.
+  const win = globalThis.open(href, REPORTING_WINDOW_NAME, features);
+  if (!win) {
+    // Popup blocked — still navigate a new tab without window features.
+    return globalThis.open(href, REPORTING_WINDOW_NAME);
+  }
+  reportingWindow = win;
+  try {
+    win.resizeTo(place.width, place.height);
+    win.moveTo(place.left, place.top);
+    win.focus();
+  } catch {
+    /* Cross-origin or browser policy may block move/resize. */
+  }
+  return win;
+}
+
 export function setIraImagingStudyContext(context: unknown[]): void {
   lastImagingStudyOpenContext = Array.isArray(context) ? context : [];
 }
@@ -442,6 +672,28 @@ export function setIraDicomSendHandler(fn: IraDicomSendHandler | null): void {
   onDicomSend = fn;
 }
 
+/** Handler for inbound Cast ``scene-update`` (mrson ops / display patches). */
+export type IraSceneUpdateHandler = (
+  context: unknown[],
+) => void | Promise<void>;
+
+let onSceneUpdate: IraSceneUpdateHandler | null = null;
+
+export function setIraSceneUpdateHandler(fn: IraSceneUpdateHandler | null): void {
+  onSceneUpdate = fn;
+}
+
+function handleSceneUpdateMessage(message: Record<string, unknown>): boolean {
+  const event = message?.event as { "hub.event"?: string } | undefined;
+  if (getHubEventLower(event) !== "scene-update") return false;
+  const context = messageEventContext(message);
+  const items = Array.isArray(context) ? context : [];
+  void Promise.resolve(onSceneUpdate?.(items)).catch((err) =>
+    console.error(`${LOG} scene-update handler failed`, err),
+  );
+  return true;
+}
+
 /** Probe a Cast resource-server product via STATUS request. */
 export async function probeInferenceProduct(
   productName: string,
@@ -503,23 +755,87 @@ export function setIraLiveSceneChangeListener(fn: (() => void) | null): void {
   onLiveSceneChange = fn;
 }
 
+export function getIraSegCatalog(): SegCatalog {
+  return lastSegCatalog;
+}
+
+let lastPublishedSegCount = 0;
+
+/**
+ * Publish StructureReport-update with the current SegCatalog (metadata only).
+ * No-ops when not connected. Used so reporting clients update without STATUS poll.
+ * When the segment count increases, focus the DICOM SR window this page opened
+ * (browsers allow opener→popup focus; the popup cannot focus itself from WS).
+ */
+export async function publishIraStructureReportUpdate(): Promise<boolean> {
+  if (!client || connection !== "connected" || !topic) {
+    return false;
+  }
+  const context = [{ key: "segmentation", resource: lastSegCatalog }];
+  try {
+    const res = await client.publish(
+      buildIraPublishPayload("StructureReport-update", context)
+    );
+    const ok = Boolean(res?.ok);
+    if (!ok) {
+      console.warn(
+        `${LOG} StructureReport-update failed`,
+        res ? `HTTP ${res.status}` : "No response"
+      );
+    } else {
+      const n = lastSegCatalog.segmentations.reduce(
+        (acc, s) => acc + (s.segments?.length || 0),
+        0
+      );
+      console.info(`${LOG} published StructureReport-update segments=`, n);
+      if (n > lastPublishedSegCount) {
+        focusReportingWindowAfterSegGrowth();
+      }
+      lastPublishedSegCount = n;
+    }
+    return ok;
+  } catch (err) {
+    console.error(`${LOG} StructureReport-update exception`, err);
+    return false;
+  }
+}
+
+/** Update the STATUS segmentation catalog (always emitted; use empty when cleared). */
+export function setIraSegCatalog(catalog: SegCatalog | null | undefined): void {
+  lastSegCatalog =
+    catalog && Array.isArray(catalog.segmentations)
+      ? { segmentations: catalog.segmentations }
+      : EMPTY_SEG_CATALOG;
+  void publishIraStructureReportUpdate();
+}
+
+function withSegmentationContext(context: unknown[]): unknown[] {
+  const withoutSeg = context.filter((item) => {
+    if (!item || typeof item !== "object") return true;
+    return (item as { key?: string }).key !== "segmentation";
+  });
+  withoutSeg.push({ key: "segmentation", resource: lastSegCatalog });
+  return withoutSeg;
+}
+
 function buildStatusResponseData(): {
   "context.type": string;
   context: unknown[];
 } {
-  const context = cloneContextArray(lastImagingStudyOpenContext);
+  let context = cloneContextArray(lastImagingStudyOpenContext);
   if (lastLiveScene) {
-    const withoutScene = context.filter((item) => {
+    context = context.filter((item) => {
       if (!item || typeof item !== "object") return true;
       return (item as { key?: string }).key !== "scene";
     });
-    withoutScene.push({ key: "scene", resource: lastLiveScene });
-    return { "context.type": "ImagingStudy", context: withoutScene };
+    context.push({ key: "scene", resource: lastLiveScene });
   }
-  if (context.length) {
+  context = withSegmentationContext(context);
+  if (lastImagingStudyOpenContext.length || lastLiveScene) {
     return { "context.type": "ImagingStudy", context };
   }
-  return EMPTY_CAST_CONTEXT;
+  // No open study — still always include segmentation (may be empty).
+  return { "context.type": "", context };
 }
 
 function setConnection(next: IraCastConnection, detail: string): void {
@@ -528,11 +844,75 @@ function setConnection(next: IraCastConnection, detail: string): void {
   connectionDetail = detail;
   if (wasConnected && next !== "connected") {
     conference = null;
+    clearReportingConnectedApps();
+    worklistClientWindow = null;
   }
   onStatus?.(next, detail);
   if (next === "connected") {
     void syncIraConferenceView();
   }
+}
+
+/** Same connected-class idea as worklist `updateConnectedAppButtons` for DICOM SR. */
+function updateIraReportingButton(): void {
+  const btn = document.getElementById("iraReportingBtn");
+  if (!btn) return;
+  btn.classList.toggle("ira-btn-connected", reportingConnectedApps.size > 0);
+}
+
+function clearReportingConnectedApps(): void {
+  if (reportingConnectedApps.size === 0) {
+    updateIraReportingButton();
+    return;
+  }
+  reportingConnectedApps.clear();
+  updateIraReportingButton();
+}
+
+function isReportingPresencePeer(productName: string, actor: string): boolean {
+  const actorKey = actor.trim().toUpperCase();
+  if (actorKey === REPORTING_ACTOR) return true;
+  return matchesCastProduct(productName, "reporting");
+}
+
+/** Port of worklist `markConnectedApp` / `upsertConnectedApp` for CAST-RPT only. */
+function markReportingConnectedApp(message: Record<string, unknown>): void {
+  const subscriber = messageSubscriberName(message);
+  if (!subscriber) return;
+  const productName = messageProductName(message);
+  const actor = messageActor(message);
+  if (!isReportingPresencePeer(productName, actor)) return;
+
+  const productKey = productName.trim().toUpperCase();
+  if (productKey) {
+    for (const [name, existing] of reportingConnectedApps) {
+      if (
+        name !== subscriber &&
+        existing.productName.trim().toUpperCase() === productKey
+      ) {
+        reportingConnectedApps.delete(name);
+      }
+    }
+  }
+
+  reportingConnectedApps.set(subscriber, {
+    productName: productName.trim(),
+    actor: actor.trim(),
+  });
+  updateIraReportingButton();
+}
+
+/** Port of worklist `removeConnectedApp` for reporting peers. */
+function handleSubscriptionRemoved(message: Record<string, unknown>): boolean {
+  const event = message?.event as { "hub.event"?: string } | undefined;
+  if (!event || getHubEventLower(event) !== "subscription-removed") {
+    return false;
+  }
+  const subscriber = messageSubscriberName(message);
+  if (!subscriber || !reportingConnectedApps.has(subscriber)) return false;
+  reportingConnectedApps.delete(subscriber);
+  updateIraReportingButton();
+  return true;
 }
 
 function stripCastParamsFromUrl(): void {
@@ -590,6 +970,9 @@ function handleStatusRequest(message: Record<string, unknown>): boolean {
     return false;
   }
   if (context.dataType !== "STATUS") return false;
+
+  // Same as worklist: inbound STATUS from reporting lights DICOM SR.
+  markReportingConnectedApp(message);
 
   const responseData = buildStatusResponseData();
 
@@ -682,6 +1065,7 @@ function handleImagingStudyMessage(message: Record<string, unknown>): boolean {
     }
     lastImagingStudyOpenContext = [];
     lastLiveScene = null;
+    lastSegCatalog = EMPTY_SEG_CATALOG;
     onLiveSceneChange?.();
     console.info(`${LOG} ImagingStudy-close`);
     void Promise.resolve(onImagingStudyClose?.()).catch((err) =>
@@ -692,7 +1076,7 @@ function handleImagingStudyMessage(message: Record<string, unknown>): boolean {
   if (name !== "imagingstudy-open") return false;
 
   if (suppressInboundImagingStudy > 0) {
-    const context = messageEventContext(message);
+    const context = imagingStudyContextItems(message);
     lastImagingStudyOpenContext = cloneContextArray(context);
     console.info(`${LOG} ImagingStudy-open ignored (local publish echo)`);
     return true;
@@ -703,27 +1087,71 @@ function handleImagingStudyMessage(message: Record<string, unknown>): boolean {
     return true;
   }
 
-  const context = messageEventContext(message);
-  lastImagingStudyOpenContext = cloneContextArray(context);
-  console.info(`${LOG} ImagingStudy-open context items=`, context.length);
-  void Promise.resolve(onImagingStudyOpen?.(lastImagingStudyOpenContext)).catch(
-    (err) => console.error(`${LOG} ImagingStudy-open handler failed`, err)
-  );
+  void resolveAndApplyImagingStudyOpen(message);
   return true;
 }
 
-type StatusResponseItem = {
-  actor?: unknown;
-  data?: {
-    "context.type"?: unknown;
-    context?: unknown;
-  };
-};
+function imagingStudyContextItems(message: Record<string, unknown>): unknown[] {
+  const event = message?.event as { context?: unknown } | undefined;
+  const ctx = event?.context;
+  if (Array.isArray(ctx)) return ctx;
+  if (ctx && typeof ctx === "object") {
+    return contextItemsFromOpenContext(ctx);
+  }
+  return messageEventContext(message);
+}
+
+async function resolveAndApplyImagingStudyOpen(
+  message: Record<string, unknown>
+): Promise<void> {
+  if (!client) return;
+  try {
+    const resolved = (await resolveCastFileMessage(client, message)) as Record<
+      string,
+      unknown
+    >;
+    const event = (resolved?.event ?? message.event) as
+      | { context?: unknown }
+      | undefined;
+    const ctx = event?.context;
+    let items = imagingStudyContextItems(resolved);
+    let sceneDoc = sceneDocFromOpenContext(
+      Array.isArray(ctx) ? ctx : (ctx as Record<string, unknown>) || items
+    );
+    if (sceneDoc) {
+      const files = batchContextFiles(event as Record<string, unknown>);
+      sceneDoc = materializeLiveSceneBlobUrls(
+        sceneDoc,
+        files as Array<{
+          fileName?: string;
+          role?: string;
+          data?: ArrayBuffer | Uint8Array | string;
+        }>
+      );
+      // Ensure handler sees embedded scene with rewritten blob URLs.
+      items = items.filter((item) => {
+        if (!item || typeof item !== "object") return true;
+        return (item as { key?: unknown }).key !== "scene";
+      });
+      items.push({ key: "scene", resource: sceneDoc });
+    }
+    lastImagingStudyOpenContext = cloneContextArray(items);
+    console.info(
+      `${LOG} ImagingStudy-open context items=`,
+      items.length,
+      sceneDoc ? "(LiveScene)" : ""
+    );
+    await Promise.resolve(onImagingStudyOpen?.(lastImagingStudyOpenContext));
+  } catch (err) {
+    console.error(`${LOG} ImagingStudy-open resolve/apply failed`, err);
+  }
+}
 
 /**
  * Ask a worklist for STATUS.
  * Default (connect): presence ping on local topic; apply ImagingStudy only if we have none.
  * Join-and-follow: pass host topic + forceApply to adopt the host's open study.
+ * Always adopts worklist ``clientWindow`` for DICOM SR popup placement.
  */
 async function requestStatusFromWorklist(opts?: {
   topic?: string;
@@ -787,6 +1215,13 @@ async function requestStatusFromWorklist(opts?: {
       return;
     }
 
+    const envelope =
+      result.data && typeof result.data === "object"
+        ? (result.data as { responses?: StatusResponseItem[] })
+        : {};
+    const responses = Array.isArray(envelope.responses) ? envelope.responses : [];
+    adoptWorklistClientWindowFromStatusResponses(responses);
+
     // Presence ping done; do not re-open a study we already have from URL/open.
     if (
       !forceApply &&
@@ -797,12 +1232,6 @@ async function requestStatusFromWorklist(opts?: {
       statusRequestState = "done";
       return;
     }
-
-    const envelope =
-      result.data && typeof result.data === "object"
-        ? (result.data as { responses?: StatusResponseItem[] })
-        : {};
-    const responses = Array.isArray(envelope.responses) ? envelope.responses : [];
 
     let chosen: StatusResponseItem["data"] | undefined;
     for (const item of responses) {
@@ -944,6 +1373,7 @@ export async function connectIraCast(): Promise<void> {
         "conference-end",
         "dicom-send",
         "nifti-send",
+        "scene-update",
       ],
       lease: 7200,
       defaultTargetActor: "*",
@@ -954,9 +1384,11 @@ export async function connectIraCast(): Promise<void> {
   });
 
   client.onMessage((message: Record<string, unknown>) => {
+    if (handleSubscriptionRemoved(message)) return;
     if (handleStatusRequest(message)) return;
     if (handleConferenceHubEvent(message)) return;
     if (handleStatusUpdate(message)) return;
+    if (handleSceneUpdateMessage(message)) return;
     if (isDicomSendMessage(message)) {
       void handleDicomSendMessage(message);
       return;

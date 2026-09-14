@@ -1,4 +1,4 @@
-// render/device.ts
+// ../../device.ts
 async function initDevice() {
   const gpu = navigator.gpu;
   if (!gpu) throw new Error("WebGPU not available (need Chrome/Edge/Safari or Deno --unstable-webgpu)");
@@ -18,7 +18,7 @@ async function initDevice() {
   return { adapter, device, features: new Set(want) };
 }
 
-// render/mat4.ts
+// ../../mat4.ts
 function identity() {
   const m = new Float32Array(16);
   m[0] = m[5] = m[10] = m[15] = 1;
@@ -178,7 +178,7 @@ function spacingFromIjkToRAS(ijkToRAS) {
   return [col(0), col(1), col(2)];
 }
 
-// render/textures.ts
+// ../../textures.ts
 function writeScalarTexture3DSlices(dev, texture, data, dims, zStart, zCount) {
   const [dx, dy, dz] = dims;
   if (zCount <= 0 || zStart < 0 || zStart >= dz) {
@@ -229,7 +229,7 @@ function writeScalarTexture3DRegion(dev, texture, data, dims, xStart, yStart, zS
   );
 }
 
-// render/fields.ts
+// ../../fields.ts
 function transformedAABB(m, lo, hi2) {
   const mn2 = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < 8; i++) {
@@ -817,7 +817,7 @@ fn sample_field_seg${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
   }
 };
 
-// render/zarr.ts
+// ../../zarr.ts
 var ZDT = {
   "<f4": Float32Array,
   "<f8": Float64Array,
@@ -987,7 +987,7 @@ async function assembleZarr(blobBase, z2, Ctor, opts) {
   return { data: out, dtype: z2.dtype, dims, range: [lo, hi2] };
 }
 
-// render/mrson.ts
+// ../../mrson.ts
 var TYPE_TO_CLASS = {
   image: "vtkMRMLScalarVolumeNode",
   mesh: "vtkMRMLModelNode",
@@ -1060,7 +1060,7 @@ function adaptMrsonScene(scene) {
   return { blobBase: scene.blobBase, nodes: out };
 }
 
-// render/scene-volume.ts
+// ../../scene-volume.ts
 function interpTF(tf, s, comps) {
   if (!tf.length) return new Array(comps).fill(0);
   if (s <= tf[0][0]) return tf[0].slice(1, 1 + comps);
@@ -1300,7 +1300,7 @@ async function loadSceneVolumeFieldProgressive(dev, sceneSource, handlers = {}, 
   return current;
 }
 
-// render/slice-renderer.ts
+// ../../slice-renderer.ts
 var DEFAULT_FORMAT = "rgba8unorm-srgb";
 var SHADER = (
   /* wgsl */
@@ -1977,7 +1977,7 @@ struct VO { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
   }
 };
 
-// render/slice-interactor.ts
+// ../../slice-interactor.ts
 var NORMAL = {
   axial: { axis: 2, sign: 1 },
   // sliceToRAS col2 = +S
@@ -2073,7 +2073,7 @@ var SliceInteractor = class {
   }
 };
 
-// render/scene-renderer.ts
+// ../../scene-renderer.ts
 var DEFAULT_FORMAT2 = "rgba8unorm-srgb";
 var SCENE_FLOATS = 16;
 var CLIP_FLOATS = 36;
@@ -3220,7 +3220,7 @@ ${pickDispatch}
   }
 };
 
-// render/bake.ts
+// ../../bake.ts
 var INIT_WGSL = (
   /* wgsl */
   `
@@ -3436,7 +3436,7 @@ var ColorizeBaker = class {
   }
 };
 
-// render/fiducial-field.ts
+// ../../fiducial-field.ts
 var MAX = 64;
 var FiducialField = class {
   kind = "fid";
@@ -3648,7 +3648,7 @@ fn sample_field_fid${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
   }
 };
 
-// render/roi-box-field.ts
+// ../../roi-box-field.ts
 var RoiBoxField = class {
   kind = "roi";
   bindingCount = 0;
@@ -3762,7 +3762,7 @@ fn sample_field_roi${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
   }
 };
 
-// render/demos/roi-widget.ts
+// ../roi-widget.ts
 function createRoiWidget(lo, hi2, opts = {}) {
   const MIN_HALF = opts.minHalfMm ?? 5;
   const cov = opts.coverage ?? 0.35;
@@ -3847,7 +3847,7 @@ function createRoiWidget(lo, hi2, opts = {}) {
   };
 }
 
-// algorithms/geom.ts
+// ../../../algorithms/geom.ts
 function labelmapHasInternalBoundary(lab, dims) {
   const [nx, ny, nz] = dims;
   const at = (x, y, z2) => lab[(z2 * ny + y) * nx + x];
@@ -3909,7 +3909,7 @@ function spacingFromIjkToRAS2(ijkToRAS) {
   return [col(0), col(1), col(2)];
 }
 
-// algorithms/editable-segmentation.ts
+// ../../../algorithms/editable-segmentation.ts
 var EditableSegmentation = class {
   dims;
   ijkToRAS;
@@ -3995,7 +3995,7 @@ var EditableSegmentation = class {
   }
 };
 
-// render/sdf-bake.ts
+// ../../sdf-bake.ts
 var INIT_WGSL2 = (
   /* wgsl */
   `
@@ -4604,7 +4604,7 @@ var JfaSdfBaker = class {
   }
 };
 
-// logic/segmentation-logic.ts
+// ../../../logic/segmentation-logic.ts
 function invertAffine(m) {
   const r = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
   const det = r[0] * (r[4] * r[8] - r[5] * r[7]) - r[1] * (r[3] * r[8] - r[5] * r[6]) + r[2] * (r[3] * r[7] - r[4] * r[6]);
@@ -4850,7 +4850,7 @@ var SegmentationLogic = class {
   }
 };
 
-// render/demos/segroulette-scene.ts
+// ../segroulette-scene.ts
 var SDF_MAX_DIM = 256;
 function modalityLUT(modality, maxAlpha = 0.42) {
   const lut = new Uint8Array(256 * 4);
@@ -4876,12 +4876,12 @@ function modalityLUT(modality, maxAlpha = 0.42) {
   }
   return lut;
 }
-function buildSegrouletteScene(gpu, format, ct, seg, opts = {}) {
+function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
   const dev = gpu.device;
-  const dims = ct.dims;
-  const data = ct.vol instanceof Float32Array ? ct.vol : Float32Array.from(ct.vol);
-  const clim = [ct.lev - ct.win / 2, ct.lev + ct.win / 2];
-  const grayLut = modalityLUT(ct.modality);
+  const dims = ct2.dims;
+  const data = ct2.vol instanceof Float32Array ? ct2.vol : Float32Array.from(ct2.vol);
+  const clim = [ct2.lev - ct2.win / 2, ct2.lev + ct2.win / 2];
+  const grayLut = modalityLUT(ct2.modality);
   const grayClim = [clim[0], clim[1]];
   const grayShade = [0.25, 0.7, 0.45, 20];
   let baseVolLut = grayLut;
@@ -4895,7 +4895,7 @@ function buildSegrouletteScene(gpu, format, ct, seg, opts = {}) {
   };
   let volumeField = opts.volumeField ?? new ImageField(dev, data, dims, [1, 1, 1], baseVolLut, {
     clim,
-    ijkToRAS: ct.ijkToRAS,
+    ijkToRAS: ct2.ijkToRAS,
     shade: baseShade
   });
   if (opts.volumeField) {
@@ -4939,7 +4939,7 @@ function buildSegrouletteScene(gpu, format, ct, seg, opts = {}) {
   let editable;
   const bakeSegSdf = (labmap) => {
     if (segments.length === 0) return;
-    const cap = resampleIsotropic(labmap.lab, volDims, ct.ijkToRAS, opts.sdfMaxDim ?? SDF_MAX_DIM, opts.sdfMaxVoxels);
+    const cap = resampleIsotropic(labmap.lab, volDims, ct2.ijkToRAS, opts.sdfMaxDim ?? SDF_MAX_DIM, opts.sdfMaxVoxels);
     if (cap.coarsened) console.warn(`SEGRoulette: SDF grid coarsened to fit the device memory budget (${cap.dims.join("\xD7")}, ${cap.vox.toFixed(2)}mm) \u2014 a remote render server would allow full resolution.`);
     editable = new EditableSegmentation(dev, cap.dims, { ijkToRAS: cap.ijkToRAS });
     const boundaryMode = labelmapHasInternalBoundary(cap.lab, cap.dims) ? "all" : "outer";
@@ -5038,7 +5038,7 @@ function buildSegrouletteScene(gpu, format, ct, seg, opts = {}) {
   const slice = new SliceRenderer(gpu, format);
   slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
   slice.setTextures(volumeField.volumeTexture(), colorTex);
-  slice.setWindowLevel(ct.win, ct.lev);
+  slice.setWindowLevel(ct2.win, ct2.lev);
   slice.setOverlayOpacity(activeSeg ? 0.5 : 0);
   const center = [(rasLo[0] + rasHi[0]) / 2, (rasLo[1] + rasHi[1]) / 2, (rasLo[2] + rasHi[2]) / 2];
   const radius = Math.hypot(rasHi[0] - rasLo[0], rasHi[1] - rasLo[1], rasHi[2] - rasLo[2]) / 2;
@@ -5050,10 +5050,10 @@ function buildSegrouletteScene(gpu, format, ct, seg, opts = {}) {
     radius,
     rasLo,
     rasHi,
-    ijkToRAS: ct.ijkToRAS,
+    ijkToRAS: ct2.ijkToRAS,
     dims,
-    win: ct.win,
-    lev: ct.lev,
+    win: ct2.win,
+    lev: ct2.lev,
     segments,
     mode,
     hasSeg,
@@ -5199,7 +5199,7 @@ function buildSegrouletteScene(gpu, format, ct, seg, opts = {}) {
   return out;
 }
 
-// render/demos/crosshair.ts
+// ../crosshair.ts
 function createCrosshair(visible = true) {
   const listeners = /* @__PURE__ */ new Set();
   const notify = () => {
@@ -5323,7 +5323,7 @@ function mountCrosshair(cfg) {
   return { state, redraw };
 }
 
-// render/vtk-camera.ts
+// ../../vtk-camera.ts
 var sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 var add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 var scale = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
@@ -5478,7 +5478,7 @@ var VtkCamera = class _VtkCamera {
   }
 };
 
-// render/vtk-interactor.ts
+// ../../vtk-interactor.ts
 var MOTION_FACTOR = 10;
 var MOUSE_WHEEL_MOTION_FACTOR = 1;
 function actionForButton(button, m = {}) {
@@ -5587,7 +5587,7 @@ var CameraInteractor = class _CameraInteractor {
   }
 };
 
-// render/demos/camera-control.ts
+// ../camera-control.ts
 function attachCameraControls(canvas, camera, opts = {}) {
   const interactor = new CameraInteractor(camera, opts.onChange);
   const local = (e) => {
@@ -5695,7 +5695,7 @@ function framedCamera(center, radius, distMul = 2.6) {
   );
 }
 
-// render/demos/slice-control.ts
+// ../slice-control.ts
 function attachSliceControls(canvas, cfg) {
   const SCROLL_PX = cfg.scrollPx ?? 7;
   const h = cfg.hooks ?? {};
@@ -5858,7 +5858,7 @@ function attachSliceControls(canvas, cfg) {
   };
 }
 
-// render/demos/view-grid.ts
+// ../view-grid.ts
 function attachViewGrid(grid, cells, onResize) {
   let maxed = null;
   const cellDiv = (cell) => grid.querySelector(`.cell[data-cell="${cell}"]`);
@@ -5889,7 +5889,7 @@ function attachDoubleClick(canvas, onDbl) {
   });
 }
 
-// render/demos/widget-control.ts
+// ../widget-control.ts
 var sub2 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 var dot2 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 function camMatrices(cam, w, h) {
@@ -6023,10 +6023,10 @@ function attachWidgetControls(canvas, camera, opts) {
   };
 }
 
-// render/demos/sl-logo.ts
+// ../sl-logo.ts
 var SL_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADkAAAA8CAIAAABTt4VhAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAARGVYSWZNTQAqAAAACAABh2kABAAAAAEAAAAaAAAAAAADoAEAAwAAAAEAAQAAoAIABAAAAAEAAAA5oAMABAAAAAEAAAA8AAAAAH9xBdAAAAHLaVRYdFhNTDpjb20uYWRvYmUueG1wAAAAAAA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIiB4OnhtcHRrPSJYTVAgQ29yZSA2LjAuMCI+CiAgIDxyZGY6UkRGIHhtbG5zOnJkZj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+CiAgICAgIDxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiCiAgICAgICAgICAgIHhtbG5zOmV4aWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20vZXhpZi8xLjAvIj4KICAgICAgICAgPGV4aWY6Q29sb3JTcGFjZT4xPC9leGlmOkNvbG9yU3BhY2U+CiAgICAgICAgIDxleGlmOlBpeGVsWERpbWVuc2lvbj41MDA8L2V4aWY6UGl4ZWxYRGltZW5zaW9uPgogICAgICAgICA8ZXhpZjpQaXhlbFlEaW1lbnNpb24+NTIwPC9leGlmOlBpeGVsWURpbWVuc2lvbj4KICAgICAgPC9yZGY6RGVzY3JpcHRpb24+CiAgIDwvcmRmOlJERj4KPC94OnhtcG1ldGE+ConTBbQAABmbSURBVGgFjZpZkB3XWcd7775919k1o2VGsjZLthw5sR3HiZ3EGMcJJqRIXKmiqAKTByh4yEN4pQJFUVBUUUWRQIViCVQZQ0IWJyGLYyeyY8lYkrXYlmxJtnbNSLPeO3fpvZvfd/pKOOSFnjt97+0+fc7//L/1fOfqjbFZjaPItCLVNU3Xdc3gj3fd0DTP1bZtsD/5yNwnfvmef/23Z1860VlY1dJcM7lrFAYnXePEWeMD/ci/HEWha3mRa0XOvzrzIS+0jAtylbci40XDnNZyq5B3+aQ+FwXf5UKhGZZhWHzmX/qnZ66XAGV0EHNNF0zcWm/3gl77Pfu2Hzv9qmvrZloYprQBpMnEmJl6VB4qDzUEGPJc5yNnBTTPcs3IDb5lZVPOQDZkPvBCe8Ys6FDgCgAQ8cctdegWX9QMNMWQ3FT3ChCYhuHYuu9oFUczbbtSqTiW5jl6bOiWyWRBWWItcUuHJVohhpdg5SVEpvDFma8pf0ZKC0CkhW7qaUY/Q7jyCA8K3BK6dKJkLV0LrxyCT+YgQKESoUKbY2sNX9805e3fv3V6Zvrgy6fTwrRNgGoiFUvOMiU4pj0Pqlmq7mVIAXoTIoCyTLCm4ABcljNKyoBZgexuwlWS5aKSP9wpphU+JXWwCtsykCioUG+YcGwAqOrokyPW3u2jO7ZtPvDcz469di0rTMfKhVRLGticBavBiw+i63QFCvQyK7IsFzqBqFAmqZamWmxqZponCUgYi3ENmYGhw7Rp6Ggw3YhGiB4Ig5kisTxZdF8OUZJiWgIUtmxT8z1jy7R//727PN+bv97pBaDQKq6JyoLSsQ3bpmGexPFgEIVRVuhukhZx1KfNxFijWa8oA9IS5J4VcWrESR4lehzroQ7jJqwqmoZwmd5NuAgEFRGzM0WPwSiHJQrB7ORrYSFNaBV11BxL91297pueYw36Sa8fMgfXFi4rHmLPozBY6iS5XhuZ2rVtz50zs7tWFuePHzmQDHrdOFq9tLBhJKj6HijLl/AK9gLNoU+hLBTicAoiVdFoU3g1DQQCHmYzhDtEClbhVb1MET0odT5Ylu7aYDJqnul7rikM5r4nU6FBp7PeT5wNs+/7yKOP7L7j3ompGdetHD/83Ksv/3Dj3I5N2/ZkSfzakefnz70wmsSmLXqH5on+pdpqR69WR5rNeoG0tVzBzZRkFVxRAww2x2UoZcALiVqWhA5tCxC4J+hSQDXXQsrwao6P1sbGm1EQjTTsRi1N1vpLq9nc3k/c/9FP37bzTsdx0ixlBudOHzl04JmK39i8dXeep8y56lc/+Uj1yc94k2OmIOUwtYtXsy9/NT56yvBdA8srncWQXTUXYVcwgga4eDOQivaXWnATq5iUbg2lbyBoDz9q6J313oWzp2a3TG/dMnH2/Fm/Pvdrv/q597z/Y7phpmmSxBEeYNDvvnH8hTgJ53bthSrRe8ZCmUTxbzoHdRHDgA68XsUBKxDQRkg1IiEO/kTaelrgK7RM/IVosKalQ5sd+iycAGqk44ag0zEN18FhQbTWWY+uXl3ZvHlza2LLvQ+9d27/b/mtqTCK0SnBhEaZ1qV3Xl9cuDQ6MeN5Xs51y0jiJEtjaFOjCIKhGBGdobmOgdWimhIsS5UFtD60+JhOgYswMoQsuqsCgIx2k1elqaipY4kBebZZcXXQOo7tN0ZTb+vcPR/d6t7WG6QAJSLghiQiaXo86IE1yZKZiRlINU1z+frFs68fXJ4/v2cy0XVXoSn1TXiDaSSmdAAlEF4hEEPiM7qqJUDSY2YmpmakWY4Ry6RktrewltI3DczfdUwClecaWOv6enDqfDFz9z3TznbbKUZsK0n0fpAPgiwU3TLnb1xaWbpWq7dc16O7teX5tcV3PvLoY1E4qAZfL4qB2I2SrRouJ3zg8iouvIrPQimEUZErnyEPt4CvykRHyRW4esuzacRYDon7OFSxJ/ChADhI39GhMNEmP3zP79rNfaud0HW1mm/7vm1ZZCD0h/YXN+bfjsLe2Mw2IKVxtL5y5Y79+x9+/LOHnvuOvohzgkZDghMHUcATh0LnjSrxBJUTKXO2yBJkSim806ucxR4JXzxLhCs1SOUugMWr2ZBqa+KqHMNz9SxLB2nr8c/+4W17HgjCSCZO+EmwpxS4vm+iBmvd3tryVRwyvBI/1teut1r1Pe+5x/ereZaeOBEvXFz3wIoQcax60etrb17Q1oP2wmqfuBDTYZrzgZ5rPtruaY6oiWp9k10BXuqy4pX7+CxIdS3TJVNxUZK0EzoPfvzJ/fc9HEdRSTxqJGZuGJ5XQI/j6v2ri0Fv1a/WLNfN8QvR+ty22Y2z2wiuzP6iN3O8vrPwHMlfoAatNIJG5dIHvcHeCQ/CEDSEM4eXLnXPDiIbZw5nkkVIWig3RBUM8gc5iiGvotigRJMwUkvPuqG2bc/DDz76RBbH0pz4LpqihClaispIgOl3FopsUG+Mo4W9oOs41syW2Ypfy1S8d2cn6w9s11pVBgcrfMXX2yNZ8IFs9Vd2jyghy2VMi4zg+uWImKOyR5UIKE1QMaSARzmwfvUmgUB4BautR3Hm1Gcf/dTv2KaJJgBxeICaQ0IGc8NEsjxYdu3cqzfwROGgU6/7k9ObyvboH27HSBMjlsjKRZI3DFsX3sRuJAcT8oj2wiVai99FUXISXFEaU/EDzMyIlXUKr5JJig64eCvUpcjDzH3woU/PbNyaJJHcEnzqrKByIgA6tuO6ccUJm3XH8v2E/DMNmiMbGiPjknGopJ1YYNEvmi6iFIQSGjF5rnBwFlqV9SvLxk74qlIG8a44LeWARYgKhdIBZoEQbVtSliQuWlO33/fAY6jfLaDSNYcaIsvzGOJtLDcZHXEnJ0YCw0n7oWXmrdaI79eAypggkexWnhF0opsEMz5zCZZ5Q4cFrjQRazElmDFJ1g5K19Rgco9Qp8RS6gCXeRbp83ysVR64/+P15ojEz5v4pEFJreqBcXECg07btu2JDdNrfbfbbaPojdaIaVpERnlOVji6acmbkrp8BRj4FVbVtUxAeVjSZfFl3MQ0WMYRI5iaoAY3CiZTHtqW+FchlVy42tpy5/4PlqSqptJM/hVKnpJE2zFJSRcXFhbnr3jNyVartrhwuVpx6s0WvnBImcTzXB9E0IJJih5wI4iZZZDlnVDWh6Wp4h9CyOSruGwWaASFgvQQrKaZu5iWUI/DLW2LSQC2yJPc2rHzfSPjk2kSl6SWQAWq4hVxMkuiKylpd319ZbU9WZ30G0TiXDfdarXO9IczxFhPX/BefQ3wspCB21zDGvtB9JSWffOtNqsGXBLZCfq9FqS91Dh1LeGSePG8kNVOWmRJNDPVwI5Up6XPktgrXk0za7vuuLfksRzy3Wexk5JlIY/0fhCEKZGtbpnVipnpVsX3S6wwQYcP+v5DFaeJvDB55TDnw/Qn9vrohPPAhqr4VyaWSch85uyN7+n3J9uf0L0max8UDF1OoqBz8K9M85Kon5LqMHcRdSh0vzG1acuOoZ9St8EmpArJqJaIgyhgu5bGiiWLmF6sXECrUclNslkyFdoOHYFvGWOm07JsoRQiioKgUo3MlmfN1ByqA9JpVtiG1nQM26gWjUnDHUO8KmTpWhSYdsVhTNFeOYb+lXmTK05MztWbo9K1Okq0fBS46ookYg7GwUFCnRFmcDFREFarrlUBlXjIUglKr4W7vPmwqBy30CLOQjQdStMyoaYVOs01EpZyYkyZxBXzEBnSLU1RJtqxuGFQc3JqzrJthWp4EogKpuKXWUg7wYGqa6lKGomvdsWvVKo+CaGotaiKWBiwRBDDLyIXeYmHEMg3LUA6lkvyJy+aq2/DrwRUMSVuqFvyJnqu22OSg0qj4fG/n4YXUPwwTHECzN7QEvxUrVaR2JiReOJJBGt5CAABd2tkASfHrSvDccoH1GU1NN/LS9KQ8IFPHnYpa0NhVqAaOJ3RoQzVLG+OerOtij2ie6ziqR74BqtcX1KTrNdZa7gteJWkQ/5wF3AqVRmxMrnAY+I+cbi2wdIDkUv+hYWxbqe2wEx1y9UdT5IDmuZ4vIwuZHbclWOYuzAEKyjL86tiBD9/DKel3mAK7mRMwxyfmjKN0PEtsvc4iuM4AR/kpcyFSJknl/udF9LYN230RkJmXqxEydlB75pmkWSSnIiNyAKwOL7Y6xanU/1bpldP44wkETWPozBpXzWmUbYh2GF9QKYoM8Dkfh4rEEuUcl+0EHsKw0TLY6cyMrXZ0e1We2WZp8AjKk9BRtfOvXFw8dLr1p73XW9M4JqUKLgpvmYaq8yKC8AU+QCKa8X4Lv0xLeuszL/6ysENm2+vtybgLnGTE2a/34soTMEBT9/yWaKzjDaEpqgVkDIH8VZIDNqk2GHiWQvKLL2FS426Pr5lDgJcqjSS0kjKeePiievvHLrvQ4/ddd/jlo0X+/8eT/3T3/Qi8/HPfmF60w4MqdNZ+os/+tyNS0dTTRZtgFG8ok64NVYPqaTV7z5KW+EMXRWP9IJUTWOmcaK3O2EU9OqTA782Um00yGXo4ezJFxbePrT37kd33vUI0/p5Gb27Y/l8a6iV5cWn/+XLL7/44mOf/nxrbJqKjunYF8+9QegOo6TAMynNHPIKGkJs0O8qQx12Kpyq/jAP0sVqxSYwBv00UdXJdjdei1ZGZ5Zbo5Ou6wRZeubYs5fPHNl3z8d27HsYoP8X2rvAlbdYEF25eO6F57934NnvVurTTzz5x5u37SFvwEMlUfSz5/8TlSNxG6gUGomXWLmLx4w7ndVbc72FV9hXwxC4Cd/EbHISPAERK+xH/V7YGNHwyldePxDl9fse/Mzu/R8dPvsLb7KG6/dWlheuXDh37MiLb7/5xura+uTMzo/9+hd27n2/5bhpmmH6eN/vf+Pvz711bPfeexcuHhksD8qewKroE+1NVxav/qLU5Iq4IQ5RVgk5fCUl1Vg1gJ5ZZzguM1tyLXdt6cLRF//DIzEo9F4/CPphf9Drddc7a8urK0urq8u9bjfLdNcf2bxt/4Mf/4ONc7vrzQkaU2vCXBzHW19f/vbTXzr002c+9RufX1ldWb58WHyvHGWuTRop4SFbWrgYRQF1PLFYoVo1UWeUAd+eoKpizuIzSFVt03I9CjTR2NSWOz/4uUsXrl5552wQDlzPxpGtrQUR9RMWO07Nr8/M7b5rb3OiOTJVq4+7fs0yHeaZMt2c3M9iqb+6ev3oS99//vtPkcz+9u//6Z3v+/A//90XWYxJ3FJcyRpGOJPVRb66fLmzsjQ+NSOZGYe6BUrJUVItCDIUXRZtgtv0XIoItu/lKIBR3bYJf7u9CMKM+hDuhFwPhVHec9jT0HOJ78JdMeFcSsx53qb48darJw8/f/bNo65Xf+jRJ/bd+0u2V11dW1ycP2+TwKG2Uk26WX+FRqiO+8uXLp6enNlS5vYKrYyEL4yoUElEKXMOKrVEV+qGPVOLdWdbWjTJvOjBccRiw1A6EHCCWcQjCwDeSfuLPA7D9fby5fNvXDh3kvPq8oLr1bbffu9v/t6fTc/uYr3e6barGMDFc8H6jaZyeqUeqhhLB7laCxWDM6+/8t77HhGANw+GZGIyttIKhsQtoDPNVi1OSAoW29f+e3F+vjD8xti0ZXuF7iQpNdqAtJoENwwHfTx6t9NpL62t3GivLGDBlML9amty4233fOiTc9vvGp3cjDJQGFnrLKIUCM51/TOvHzGLLhESfRSKWLnwzovp08IysitvH1+8fmVyw2ZSXlFZhCXuTJIcnpGgwEVZ8+Tj03d4mzY6btFbu9bvzK+tXO8utyyTOnFg2NVOp3vt2o3lVVwFqYBrOnXPH5mcnt2x9wOt8U0jY9ONkSnLcoT5HJRtJJ5mlBbFjhyn0mu3z5896lmUupwsT2jG6EP/SrxOMqlZ9/sLJw7/5LFPPYlh3mRWJsOBDIENXFJB1vJ16m3eBPO2/F07Rx+MQtZJGRlsGW4lj9H1KMolHstiFb8xrKmI92DXQ9bDIV0TQQZBT+wAz6oGoueXD/xX0L4yUiWDkS07IbKMXTRgiRPH8Gy6ZnTy8A+Xb8xLxULZ1q0zzQBKRbJeNeuUBWydZVkah6QrttRxkiSFVOmExdAgZM+jIPay6QDZOG9CTSqvME0jkAkAgaCHYRhFAyVYIY99tCgIjr/8o4odwoOsO8rSnYgWHVAuE3dEVkEFrr924eBPvknapSYpHap/xavUxIlh7MwZJETRgGIcvBSsbLnITEoIfOBiGGe8sPVG1W7WbCr6koiJTqlD+pUKX7/fRlmHjGhaqzV++KUfri+dpWIJnoikSykAzcHKWfwLtZxQseLb6YlXvvvOmZOGI/p062AMSV/YaWQhiRQpEMtOFUU3yZfQH1Y4Mj56b4s7QsvDMO8PWD9mTJyCISUItQ12q0ut11sP40BZj5Baq43cmL/yyoFv1NyYmgFABSteTh0q4ZUcSVZ5Ucw9IamIrv/gm18ZdNfF5ktNUApAzYtKVlamw2p3hnSaxXGMULAJxVwUp1yxHanQYZOULHv9dL1LcCiASw9lGMJIB2G/P+iINxbBivRd2/3Bt/6hCOc9147TIkyKNFELXigo2AesNGCDujtLRlkhienIxsby4rVeP96z736ZklqUU0RyqAQVuYxH7FA1lSQpgohqIrVO2aBDXlEoO29MybJMqKI+gvvHHhgFr0xn3MXpxkm01l6KE2xfgJqmPT624dnvPvXmkWdGG7INisaTkYdJ3h0Amlaa6QrWguE9h5xWvBQ4bJvNwezi+TOGVdu+e7/Ka6U2g7PDpFlmIWmaAQIRR5iK4BDRE6mQGhMAEFegFj5lvU9YZheO9QpyyrU4zVbXrkdxKEFMgFoT45uOHPzxT7/3ldFabJpOEOZBDFCknVNgpQrBIbzyRq4MtaiMLFCGBkSMjt86fdL1R+e23yHkiPdTBVqEyxLANJKsYGsTKExa7dBiK6JIYmFlqUq1pBn4FLOF45DkZ+vd1W6/SxtaWqY9ObHp5JEXv/P0X7a8vuu4gzgbwGgEnVS9tUEsEZ7JgrWupIMHkDgr61v546AiDd3hqZNHTNvfumMfRsxq3WP3EDnGFIVAruOk8ASIFs8AkTCK3mPWokvskNEglRK7BCOokHNGjTlNCWokLoXr+ePjmw7/7EfffurPW26v4ntBlPdDfEheGg8SCGMtUT84oLTRQDo4UwSICig75g0Sh3AdMzx14tCg179t936/wu6shFz2iOGVFxIX7TQpMuP+hWlWOGgtD7MWR4OhmMb0BotR0o8Ga6aZsCcFmkp1vOK1fvTMvz737b8eq8aViofoYTTAG7JMQpdSIlQepSiSToQ3SW1QUoa3JGoIQNEEtIvOuY8qOw4VoGvnjyxdfWvL3M6xiQ0sNMFHLsuM8BuJ1AYk9SmnihcTy0abdKKlbEHCaxhHvd7aoL8G0bJB7lT8+vTywo2n//FPXnv561OjFiuzQYToxVIxgIiAi4hwv5kWZ7htYdF0PIp7yJPtJrDKv1CreEXp1FeUwZoac2v6dbe47Pq+4UzabgW9plofBPzOQsIg6QNPUs5gomxpQy2Mor4sw5Kk224v9QckImatRuVzynUqLz//79/46hc7i6fZ8kUwfYCK6DPUFKBRIls00g/7c9K/xAHTFl5BhxMQrCVQSBGgwjH2rrEqvG1z8yMPbB+pJm+/9tzlc8ebo2N+fTLOXbIIqcLIIbMkHFDEQMmIt0EYkDpFYcd1igqa6I3Um1PY55VzR8+f/Nq5Y1/TsoFhV9BONvewejRVRD8EmknPKHqBDFmMCLhhIAUT9Eh1RPZZuYFtmypjlqIIKQ6lYAzjjdOXmq1GEZ+7dvJvTx8eC/VtzZm7JzbuqtZHTEruLAIkjJLni4sypHLokZJ7ZKNG3Lv89qGDPz519Plg/Z27947duXv62BsLK71gEGb9EHsHJT6ESSIWAYqgZLtPORmhQWEVOsXJqAqwxjCSg0MwgsV95ZEsHSRqtdfDziC3K/xew/XMYKX9+pm3f3r24pcKZ3JseufG2Z2bNs7Obtk4MTWJ3SyvdLu4pc5K0LlSs1Y3TmYLl86cOXk6ilEff2E5uWtfa9NMcHUxxAGHsUhfWZIAJXxgDzg6ASq5tRKZYBWogrrMqWnEFoTQCjPiYwyP3/1QHPDddifIdWdhJUqj0NuzwXKrptWfnHD6Qbdz7dDyxQOnjGJqrHrnHXOMcfy1CzdW+mQwjZp51+7JPVPbalvclZWpMxf764MMZ7yy1t26ZfzM+dVrSxFJotgov+CQX5ugoyVQngaoYJMDXNiWsl+UUwK/cgMKPcahdkqoDGyc9G/fMbGy2tMN+613VtbWIxxts1ltd5P5ZRwlqy/X8/x6vdqoOfxEhh9GIFam6VaqFZ+9V61R9xr1yko7WGCnMciIi9UK6YE9PjFyfam/uBqhCfAqQCVvk7CnGBUmyTJLOpW+ivsTtkHK5gKCV7RK9i8Pi96I11xY6jdHmgQ9FoBhInkJ/bIOG4TMCh0lcuqUDVHTMNWYxlovgS1+4sGPdAjoCzfW6brZ9NZ6HeTeaLZOnLpG4Z4opVyp+GxxxIpU8EqchE2BJaRygFW+wKksp8TqpZEUd9SeDe+o/Hova/eSxbVwEGu3bZs69tolSi8EQ5vapMCVWEWyQneu50IDsJbbUW+QkyslhD629Ayj0+1R8JmbHcWD9np9KphBbBw7cXWxk+EH3g1UlgiCRSmrAqpg6/8DnlUhNsYFwKsAAAAASUVORK5CYII=";
 
-// render/demos/sl-chrome.ts
+// ../sl-chrome.ts
 var DEFAULT_HELP = [
   { title: "3D view", rows: [
     ["Left-drag", "Rotate"],
@@ -6462,7 +6462,7 @@ function installChrome(opts) {
   return { refresh, destroy, openHelp };
 }
 
-// render/sdf-text.ts
+// ../../sdf-text.ts
 function layoutText(font, text, opts = {}) {
   const pxSize = opts.pxSize ?? font.sizePx;
   const s = pxSize / font.sizePx;
@@ -6636,7 +6636,7 @@ function buildFontAtlas(opts = {}) {
   return { sizePx, spread, atlasW, atlasH, data, glyphs, ascent, descent, lineHeight: ascent + descent };
 }
 
-// render/label-layout.ts
+// ../../label-layout.ts
 var DEFAULTS = {
   anchorSpring: 26,
   repulsion: 200,
@@ -6886,7 +6886,7 @@ function layoutStep(cards, anchorsPx, viewport, dtSec, opts = {}) {
   }
 }
 
-// render/label-cards.ts
+// ../../label-cards.ts
 var BUTTONS = [
   { label: "Isolate", part: "isolate" },
   { label: "Hide", part: "hide" },
@@ -7336,7 +7336,7 @@ function boxEdgeToward(cx, cy, hw, hh, tx, ty) {
   return { x: cx + dx * t, y: cy + dy * t };
 }
 
-// render/segment-cards.ts
+// ../../segment-cards.ts
 function bodyText(term, name) {
   if (!term || !term.type && !term.region) return void 0;
   const norm2 = (t) => (t ?? "").trim().toLowerCase();
@@ -7346,9 +7346,9 @@ function bodyText(term, name) {
   if (!parts.length && term.type) parts.push(`${term.type.scheme} ${term.type.value}`.trim());
   return parts.length ? parts.join(" \xB7 ") : void 0;
 }
-function build(ct, seg, segments, maxCards) {
-  const [nx, ny, nz] = ct.dims, M2 = ct.ijkToRAS;
-  const isCT = (ct.modality ?? "CT") === "CT";
+function build(ct2, seg, segments, maxCards) {
+  const [nx, ny, nz] = ct2.dims, M2 = ct2.ijkToRAS;
+  const isCT = (ct2.modality ?? "CT") === "CT";
   const wanted = new Set([...segments].sort((a, b) => b.voxels - a.voxels).slice(0, maxCards).map((s) => s.num));
   const acc = /* @__PURE__ */ new Map();
   for (let k2 = 0; k2 < nz; k2++) for (let j2 = 0; j2 < ny; j2++) for (let i = 0; i < nx; i++) {
@@ -7370,7 +7370,7 @@ function build(ct, seg, segments, maxCards) {
     if (j2 > e.hi[1]) e.hi[1] = j2;
     if (k2 > e.hi[2]) e.hi[2] = k2;
     if (isCT) {
-      const hu = ct.vol[idx];
+      const hu = ct2.vol[idx];
       e.s += hu;
       e.s2 += hu * hu;
     }
@@ -7424,9 +7424,9 @@ function mountSegmentCards(gpu, format, font, canvas, camera, hooks) {
     down = null;
   }, true);
   return {
-    setScene(ct, seg, segments) {
+    setScene(ct2, seg, segments) {
       segs = segments;
-      if (!ct || !seg) {
+      if (!ct2 || !seg) {
         geom = [];
         sceneBox = [];
         overlay.setCards([], dpr);
@@ -7434,10 +7434,10 @@ function mountSegmentCards(gpu, format, font, canvas, camera, hooks) {
       }
       const compact = segments.length > (hooks.compactThreshold ?? 10);
       const cap = compact ? hooks.maxCardsCompact ?? 15 : hooks.maxCards ?? 12;
-      const r = build(ct, seg, segments, cap);
+      const r = build(ct2, seg, segments, cap);
       geom = r.geom;
       overlay.setCards(r.specs, dpr, compact);
-      const [nx, ny, nz] = ct.dims, M2 = ct.ijkToRAS;
+      const [nx, ny, nz] = ct2.dims, M2 = ct2.ijkToRAS;
       const ras = (i, j2, k2) => [M2[0] * i + M2[1] * j2 + M2[2] * k2 + M2[3], M2[4] * i + M2[5] * j2 + M2[6] * k2 + M2[7], M2[8] * i + M2[9] * j2 + M2[10] * k2 + M2[11]];
       sceneBox = [[0, 0, 0], [nx, 0, 0], [0, ny, 0], [nx, ny, 0], [0, 0, nz], [nx, 0, nz], [0, ny, nz], [nx, ny, nz]].map(([i, j2, k2]) => ras(i, j2, k2));
     },
@@ -7477,7 +7477,7 @@ function mountSegmentCards(gpu, format, font, canvas, camera, hooks) {
   };
 }
 
-// render/vendor/idc_tools/s3.js
+// ../../vendor/idc_tools/s3.js
 var idcS3 = (bucket) => "https://" + (bucket || "idc-open-data") + ".s3.us-east-1.amazonaws.com/";
 async function fetchRetry(url, opts, tries = 6) {
   let err;
@@ -7524,7 +7524,7 @@ function ohifViewerURL(studyInstanceUID) {
   return studyInstanceUID ? `https://viewer.imaging.datacommons.cancer.gov/viewer/${studyInstanceUID}` : null;
 }
 
-// render/vendor/idc_tools/loader.js
+// ../../vendor/idc_tools/loader.js
 var _worker = null;
 function resolveWorkerURL(opts) {
   if (opts?.workerUrl)
@@ -7542,7 +7542,7 @@ function runWorker(ctKeys, segKeys, ctBucket, segBucket, modality, handlers, opt
   return new Promise((resolve, reject) => {
     const w = new Worker(resolveWorkerURL(opts));
     _worker = w;
-    let ct, seg;
+    let ct2, seg;
     let chain = Promise.resolve();
     w.onmessage = (e) => {
       const m = e.data;
@@ -7603,8 +7603,8 @@ function runWorker(ctKeys, segKeys, ctBucket, segBucket, modality, handlers, opt
         }
         case "ct": {
           const Ctor = m.dtype === "float32" ? Float32Array : Int16Array;
-          ct = { vol: new Ctor(m.vol), dims: m.dims, ijkToRAS: m.ijkToRAS, win: m.win, lev: m.lev, dtype: m.dtype, modality };
-          chain = chain.then(() => handlers.onCT?.(ct)).catch((err) => console.error("[idc_tools] onCT", err));
+          ct2 = { vol: new Ctor(m.vol), dims: m.dims, ijkToRAS: m.ijkToRAS, win: m.win, lev: m.lev, dtype: m.dtype, modality };
+          chain = chain.then(() => handlers.onCT?.(ct2)).catch((err) => console.error("[idc_tools] onCT", err));
           break;
         }
         case "labelmap": {
@@ -7622,7 +7622,7 @@ function runWorker(ctKeys, segKeys, ctBucket, segBucket, modality, handlers, opt
           w.terminate();
           if (_worker === w)
             _worker = null;
-          chain.then(() => resolve({ ct, seg }));
+          chain.then(() => resolve({ ct: ct2, seg }));
           break;
       }
     };
@@ -7646,7 +7646,7 @@ async function loadSeries(entry, handlers = {}, opts) {
   return r;
 }
 
-// render/demos/ira/ira.ts
+// ira.ts
 var PLANE_COLOR = {
   axial: "#f05a5a",
   sagittal: "#f0d24a",
@@ -8497,7 +8497,7 @@ function mountIra(cfg) {
   };
 }
 
-// render/demos/idc-share.ts
+// ../idc-share.ts
 function studyShareURL(src) {
   const u = new URL(globalThis.location.origin + globalThis.location.pathname);
   if (src.st) u.searchParams.set("StudyInstanceUIDs", src.st);
@@ -8671,7 +8671,7 @@ globalThis.__slicerLiveIdc = {
   downloadStudyWithDialog
 };
 
-// render/demos/segment-stl.ts
+// ../segment-stl.ts
 var OVERLAY_CSS2 = "position:fixed;inset:0;z-index:2000;background:rgba(5,6,10,.85);display:flex;align-items:center;justify-content:center;";
 var CARD_CSS2 = "background:#11141d;border:1px solid #33507e;border-radius:10px;padding:20px 24px;width:420px;max-width:92vw;max-height:80vh;overflow:auto;font:13px -apple-system,system-ui,sans-serif;color:#d6e2f2;";
 function safeStlFileName(name) {
@@ -9416,7 +9416,7 @@ function marchingCubes(mask, sx, sy, sz, ox, oy, oz) {
   return out;
 }
 
-// render/ct-vr-presets.ts
+// ../../ct-vr-presets.ts
 var CT_VR_PRESETS = [
   {
     name: "CT-AAA",
@@ -9524,7 +9524,7 @@ function presetLUT(p) {
   return { lut, clim, shade };
 }
 
-// render/demos/vr-preset-menu.ts
+// ../vr-preset-menu.ts
 function openVrPresetMenu(opts) {
   if (document.getElementById("vr-preset-menu")) return;
   const overlay = document.createElement("div");
@@ -9567,8 +9567,8 @@ function openVrPresetMenu(opts) {
   document.body.appendChild(overlay);
 }
 
-// ../../cast-interface/cast-js-client/dist/cast-client.js
-function hn(e, t) {
+// ../../../../../cast-interface/cast-js-client/dist/cast-client.js
+function mn(e, t) {
   t.classHierarchy || (t.classHierarchy = []), e.getClassName = () => t.classHierarchy[t.classHierarchy.length - 1] || "CastClient", e.isA = (n) => t.classHierarchy.includes(n), typeof e.delete != "function" && (e.delete = () => {
   });
 }
@@ -9578,56 +9578,56 @@ function pn(e, t, n) {
     e[i] = () => t[r];
   });
 }
-function mn(e, t) {
+function yn(e, t) {
   return () => {
     e(), typeof t == "function" && t();
   };
 }
-function yn(e, t) {
+function gn(e, t) {
   return function(r = {}) {
     const i = {};
     return e(i, { classHierarchy: [t] }, r), i;
   };
 }
-var Fe = "CAST";
-var ut = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-function Tt(e, t = Fe) {
+var Me = "CAST";
+var lt = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function Nt(e, t = Me) {
   return String(e || t).trim().replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "") || t;
 }
-function gn(e) {
-  return `${Tt(e)}-`;
+function Sn(e) {
+  return `${Nt(e)}-`;
 }
-function ie(e) {
+function oe(e) {
   return typeof crypto < "u" && crypto.randomUUID ? e + crypto.randomUUID().replace(/-/g, "").slice(0, 16) : e + Math.random().toString(36).substring(2, 18);
 }
-function De(e = Fe) {
-  const t = Tt(e);
+function je(e = Me) {
+  const t = Nt(e);
   let n = "";
   for (let r = 0; r < 6; r++) {
-    const i = Math.floor(Math.random() * ut.length);
-    n += ut[i];
+    const i = Math.floor(Math.random() * lt.length);
+    n += lt[i];
   }
   return `${t}-${n}`;
 }
-var lt = ["dicom", "nifti", "jpg", "png", "nrrd"];
-function Me(e) {
+var ft = ["dicom", "nifti", "jpg", "png", "nrrd", "imagingstudy"];
+function qe(e) {
   if (typeof e != "string") return false;
   const t = e.trim().toLowerCase();
   if (!t) return false;
-  for (let n = 0; n < lt.length; n++) {
-    const r = lt[n];
+  for (let n = 0; n < ft.length; n++) {
+    const r = ft[n];
     if (t === r || t.startsWith(`${r}-`) || t.startsWith(`${r}_`))
       return true;
   }
   return false;
 }
-function Sn(e) {
+function Cn(e) {
   return typeof ArrayBuffer < "u" && ArrayBuffer.isView(e);
 }
-async function ae(e) {
+async function le(e) {
   if (e instanceof ArrayBuffer)
     return e;
-  if (Sn(e)) {
+  if (Cn(e)) {
     const { buffer: t, byteOffset: n, byteLength: r } = e;
     return t.slice(n, n + r);
   }
@@ -9637,14 +9637,14 @@ async function ae(e) {
     "CastClient: binary resource.data must be ArrayBuffer, TypedArray, DataView, Blob, or File"
   );
 }
-function j(e) {
+function z(e) {
   const t = e && e.context;
   if (!t || typeof t != "object" || Array.isArray(t))
     return [];
   const n = t.files;
   return Array.isArray(n) ? n.filter((r) => r && typeof r == "object") : [];
 }
-function je(e) {
+function ze(e) {
   if (!e || typeof e != "object" || e.data != null)
     return { payloadIds: [], chunkByteLengths: [] };
   const t = e.payloadIds;
@@ -9670,12 +9670,12 @@ function je(e) {
   }
   return { payloadIds: [], chunkByteLengths: [] };
 }
-function Cn(e) {
-  const t = j(e);
+function wn(e) {
+  const t = z(e);
   for (let n = 0; n < t.length; n++) {
     const r = t[n];
     if (r.data == null) {
-      const i = je(r);
+      const i = ze(r);
       if (i.payloadIds.length)
         return {
           kind: "files",
@@ -9688,33 +9688,33 @@ function Cn(e) {
   }
   return null;
 }
-function Nt(e) {
-  return Cn(e);
-}
-function Ie(e) {
-  return !!Nt(e);
-}
-function _e(e, t) {
-  return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? t === 0 ? "nifti-send.nii.gz" : `nifti-send-${t + 1}.nii.gz` : t === 0 ? "dicom-send.dcm" : `dicom-send-${t + 1}.dcm`;
+function At(e) {
+  return wn(e);
 }
 function ke(e) {
+  return !!At(e);
+}
+function Ue(e, t) {
+  return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? t === 0 ? "nifti-send.nii.gz" : `nifti-send-${t + 1}.nii.gz` : t === 0 ? "dicom-send.dcm" : `dicom-send-${t + 1}.dcm`;
+}
+function $e(e) {
   return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? "application/octet-stream" : "application/dicom";
 }
-function Ae(e) {
+function Ie(e) {
   const t = e && e.event;
-  if (!t || !Me(t["hub.event"]) || j(t).length)
+  if (!t || !qe(t["hub.event"]) || z(t).length)
     return e;
   const n = t["hub.event"], r = t.context;
   let i = [];
   Array.isArray(r) ? i = r : r != null && (i = [r]);
   const s = [];
-  for (let c = 0; c < i.length; c++) {
-    const a = i[c];
+  for (let o = 0; o < i.length; o++) {
+    const a = i[o];
     if (a && typeof a == "object") {
-      const d = a.resource;
-      if (d && typeof d == "object" && d.data != null) {
-        const f = { ...d };
-        (typeof f.fileName != "string" || !f.fileName.trim()) && (f.fileName = _e(n, c)), (typeof f.mimeType != "string" || !f.mimeType.trim()) && (f.mimeType = ke(n)), s.push(f);
+      const f = a.resource;
+      if (f && typeof f == "object" && f.data != null) {
+        const d = { ...f };
+        (typeof d.fileName != "string" || !d.fileName.trim()) && (d.fileName = Ue(n, o)), (typeof d.mimeType != "string" || !d.mimeType.trim()) && (d.mimeType = $e(n)), s.push(d);
       }
     }
   }
@@ -9728,24 +9728,24 @@ function Ae(e) {
     }
   } : e;
 }
-function wn(e, t) {
+function En(e, t) {
   const n = e && e.event, r = n && n.context;
   let i = [];
   Array.isArray(r) ? i = r : r != null && (i = [r]);
   for (let s = 0; s < i.length; s++) {
-    const c = i[s];
-    if (c && typeof c == "object") {
-      const a = c.resource;
+    const o = i[s];
+    if (o && typeof o == "object") {
+      const a = o.resource;
       if (a && typeof a == "object") {
-        const d = typeof a.fileName == "string" ? a.fileName.trim() : "";
-        if (d)
-          return d;
+        const f = typeof a.fileName == "string" ? a.fileName.trim() : "";
+        if (f)
+          return f;
       }
     }
   }
   return t;
 }
-function ue(e) {
+function fe(e) {
   if (!e || typeof e != "object")
     return false;
   const t = typeof e.url == "string" ? e.url.trim() : "";
@@ -9754,51 +9754,51 @@ function ue(e) {
   const n = t.toLowerCase();
   return n.startsWith("http://") || n.startsWith("https://");
 }
-function En(e) {
+function Tn(e) {
   const t = [];
   for (let n = 0; n < e.length; n += 1)
-    ue(e[n]) || t.push(n);
+    fe(e[n]) || t.push(n);
   return t;
 }
-function Tn(e) {
+function Nn(e) {
   const t = e && e.event;
-  if (!t || !Me(t["hub.event"]))
+  if (!t || !qe(t["hub.event"]))
     return false;
-  const n = j(t);
+  const n = z(t);
   return n.length ? n.some(
-    (r) => r.data != null && !ue(r)
+    (r) => r.data != null && !fe(r)
   ) : false;
 }
-async function Nn(e, t = "", n = 0) {
+async function An(e, t = "", n = 0) {
   if (!e || typeof e != "object")
     throw new Error(
       "CastClient: binary batch publish files[] entries must be objects"
     );
-  const r = ue(e);
+  const r = fe(e);
   let i = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
   if ("data" in e && e.data != null) {
     if (typeof e.data == "string")
       throw new Error(
         "CastClient: binary batch publish string payloads are not supported; pass binary input instead"
       );
-    i = (await ae(e.data)).byteLength;
+    i = (await le(e.data)).byteLength;
   }
   if (i == null && r) {
-    const c = { ...e };
-    return delete c.data, delete c.binaryTransfer, delete c.payloadId, delete c.payloadIds, delete c.chunkByteLengths, delete c.expiresAt, (typeof c.fileName != "string" || !c.fileName.trim()) && (c.fileName = _e(t, n)), (typeof c.mimeType != "string" || !c.mimeType.trim()) && (c.mimeType = ke(t)), c;
+    const o = { ...e };
+    return delete o.data, delete o.binaryTransfer, delete o.payloadId, delete o.payloadIds, delete o.chunkByteLengths, delete o.expiresAt, (typeof o.fileName != "string" || !o.fileName.trim()) && (o.fileName = Ue(t, n)), (typeof o.mimeType != "string" || !o.mimeType.trim()) && (o.mimeType = $e(t)), o;
   }
   if (i == null)
     throw new Error(
       "CastClient: binary batch publish requires files[].data or files[].byteLength"
     );
   const s = { ...e };
-  return delete s.data, delete s.binaryTransfer, r || delete s.url, delete s.payloadId, delete s.payloadIds, delete s.chunkByteLengths, delete s.expiresAt, s.byteLength = i, (typeof s.fileName != "string" || !s.fileName.trim()) && (s.fileName = _e(t, n)), (typeof s.mimeType != "string" || !s.mimeType.trim()) && (s.mimeType = ke(t)), s;
+  return delete s.data, delete s.binaryTransfer, r || delete s.url, delete s.payloadId, delete s.payloadIds, delete s.chunkByteLengths, delete s.expiresAt, s.byteLength = i, (typeof s.fileName != "string" || !s.fileName.trim()) && (s.fileName = Ue(t, n)), (typeof s.mimeType != "string" || !s.mimeType.trim()) && (s.mimeType = $e(t)), s;
 }
-async function An(e) {
+async function vn(e) {
   if (!e.event || typeof e.event != "object")
     throw new Error("CastClient: binary batch publish requires event object");
   const t = e.event;
-  if (!Me(t["hub.event"]))
+  if (!qe(t["hub.event"]))
     return e;
   const n = t.context;
   if (!n || typeof n != "object" || Array.isArray(n))
@@ -9812,7 +9812,7 @@ async function An(e) {
     );
   const i = t["hub.event"], s = await Promise.all(
     r.map(
-      (c, a) => Nn(c, i, a)
+      (o, a) => An(o, i, a)
     )
   );
   return {
@@ -9826,21 +9826,21 @@ async function An(e) {
     }
   };
 }
-async function ft(e) {
+async function dt(e) {
   const t = e && e.event;
   if (!t)
     return [];
-  const r = j(t).filter(
-    (i) => i && typeof i == "object" && i.data != null && !ue(i)
+  const r = z(t).filter(
+    (i) => i && typeof i == "object" && i.data != null && !fe(i)
   );
-  return Promise.all(r.map((i) => ae(i.data)));
+  return Promise.all(r.map((i) => le(i.data)));
 }
-function vn(e, t, n) {
+function In(e, t, n) {
   const r = new TextEncoder(), i = r.encode(`\r
-`), s = [], c = (a) => {
+`), s = [], o = (a) => {
     s.push(r.encode(a));
   };
-  c(
+  o(
     `--${e}\r
 Content-Type: application/dicom+json\r
 \r
@@ -9848,13 +9848,13 @@ ${t}\r
 `
   );
   for (let a = 0; a < n.length; a++) {
-    const d = n[a], f = d && d.mimeType && String(d.mimeType).trim() || "application/octet-stream";
-    c(`--${e}\r
-Content-Type: ${f}\r
+    const f = n[a], d = f && f.mimeType && String(f.mimeType).trim() || "application/octet-stream";
+    o(`--${e}\r
+Content-Type: ${d}\r
 \r
-`), s.push(new Uint8Array(d.buffer)), s.push(i);
+`), s.push(new Uint8Array(f.buffer)), s.push(i);
   }
-  return c(`--${e}--\r
+  return o(`--${e}--\r
 `), new Blob(s);
 }
 async function Ln({
@@ -9863,39 +9863,39 @@ async function Ln({
   hub: n,
   messageIdPrefix: r
 }) {
-  const i = await An(e), s = await Promise.all(
-    (t || []).map((b) => ae(b))
-  ), c = j(i.event), a = En(c);
+  const i = await vn(e), s = await Promise.all(
+    (t || []).map((b) => le(b))
+  ), o = z(i.event), a = Tn(o);
   if (s.length !== a.length)
     throw new Error(
       `CastClient: binary batch publish expected ${a.length} file part(s), got ${s.length}`
     );
-  const d = s.map((b, u) => {
+  const f = s.map((b, u) => {
     const l = a[u];
     return {
       buffer: b,
-      mimeType: c[l] && c[l].mimeType || "application/octet-stream"
+      mimeType: o[l] && o[l].mimeType || "application/octet-stream"
     };
-  }), f = `cast-batch-${ie(r())}`, o = vn(
-    f,
+  }), d = `cast-batch-${oe(r())}`, c = In(
+    d,
     JSON.stringify(i),
-    d
+    f
   );
   try {
     return await fetch(n.hub_endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${n.token}`,
-        "Content-Type": `multipart/related; boundary="${f}"; type="application/dicom"`
+        "Content-Type": `multipart/related; boundary="${d}"; type="application/dicom"`
       },
-      body: o
+      body: c
     });
   } catch (b) {
     const u = b instanceof Error ? b.message : String(b);
     return console.debug("CastClient:", u), null;
   }
 }
-function le(e) {
+function de(e) {
   const t = {
     responses: [],
     expected: [],
@@ -9911,7 +9911,7 @@ function le(e) {
   const n = (
     /** @type {Record<string, unknown>} */
     e
-  ), r = Array.isArray(n.responses) ? n.responses.filter((c) => c && typeof c == "object") : [], i = Array.isArray(n.expected) ? n.expected.map((c) => String(c)) : [], s = Array.isArray(n.missing) ? n.missing.map((c) => String(c)) : [];
+  ), r = Array.isArray(n.responses) ? n.responses.filter((o) => o && typeof o == "object") : [], i = Array.isArray(n.expected) ? n.expected.map((o) => String(o)) : [], s = Array.isArray(n.missing) ? n.missing.map((o) => String(o)) : [];
   return {
     responses: r,
     expected: i,
@@ -9923,76 +9923,76 @@ function le(e) {
     productName: n.productName != null ? String(n.productName) : null
   };
 }
-function In(e) {
-  return le(e).responses;
+function _n(e) {
+  return de(e).responses;
 }
-function At(e, t) {
+function vt(e, t) {
   if (t === "file:")
     return true;
   const n = String(e || "").toLowerCase();
   return !!(n === "localhost" || n === "127.0.0.1" || n === "[::1]" || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(n) || /^192\.168\.\d{1,3}\.\d{1,3}$/.test(n) || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(n));
 }
-function vt(e = typeof window < "u" ? window.location : null) {
-  return e ? !At(e.hostname, e.protocol) : false;
+function It(e = typeof window < "u" ? window.location : null) {
+  return e ? !vt(e.hostname, e.protocol) : false;
 }
 function Lt(e) {
   try {
     const t = new URL(e);
-    return !At(t.hostname, t.protocol);
+    return !vt(t.hostname, t.protocol);
   } catch {
     return false;
   }
 }
-function _n(e, t, n = vt()) {
+function kn(e, t, n = It()) {
   const r = t.find((s) => {
     var a;
-    const c = (a = e[s]) == null ? void 0 : a.hubEndpoint;
-    return c && Lt(c) === n;
+    const o = (a = e[s]) == null ? void 0 : a.hubEndpoint;
+    return o && Lt(o) === n;
   });
   if (r)
     return r;
   const i = n ? "cloud" : "local";
   return e[i] ? i : t[0];
 }
-var G = "-request";
-var W = "-response";
-function qe(e) {
+var V = "-request";
+var J = "-response";
+function He(e) {
   return typeof e != "string" ? "" : e.trim().toLowerCase();
 }
-function ze(e) {
-  const t = qe(e);
-  return t ? `${t}${G}` : "";
+function be(e) {
+  const t = He(e);
+  return t ? `${t}${V}` : "";
 }
-function It(e) {
-  const t = qe(e);
-  return t ? `${t}${W}` : "";
-}
-function kn(e) {
-  return typeof e != "string" ? false : e.endsWith(G);
+function _t(e) {
+  const t = He(e);
+  return t ? `${t}${J}` : "";
 }
 function Un(e) {
-  return typeof e != "string" ? false : e.endsWith(W);
+  return typeof e != "string" ? false : e.endsWith(V);
 }
 function $n(e) {
-  return typeof e != "string" ? "" : e.endsWith(G) ? e.slice(0, -G.length) : e.endsWith(W) ? e.slice(0, -W.length) : "";
+  return typeof e != "string" ? false : e.endsWith(J);
 }
 function Rn(e) {
+  return typeof e != "string" ? "" : e.endsWith(V) ? e.slice(0, -V.length) : e.endsWith(J) ? e.slice(0, -J.length) : "";
+}
+function On(e) {
   if (!(e != null && e.length))
     return ["*"];
   if (e.some((i) => String(i).trim() === "*"))
     return ["*"];
-  const t = ze("STATUS"), n = new Set(
+  const t = be("STATUS"), n = new Set(
     e.map((i) => String(i).trim().toLowerCase()).filter(Boolean)
   ), r = [];
   return t && !n.has(t.toLowerCase()) && (r.push(t), n.add(t.toLowerCase())), n.has("status-update") || r.push("status-update"), r.length ? [...e, ...r] : [...e];
 }
-var _t = "cast-radio-icon";
-var kt = `<svg class="${_t}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>`;
-var Ut = "cast-radio-status-icon";
-var $t = "cast-radio-slash";
-function On(e = {}) {
+var kt = "cast-radio-icon";
+var Ut = `<svg class="${kt}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>`;
+var $t = "cast-radio-status-icon";
+var Rt = "cast-radio-slash";
+function Pn(e = {}) {
   const t = e.slashId || "castRadioSlash";
-  return `<span class="${Ut}">${kt}<span id="${t}" class="${$t}" aria-hidden="true" hidden></span></span>`;
+  return `<span class="${$t}">${Ut}<span id="${t}" class="${Rt}" aria-hidden="true" hidden></span></span>`;
 }
 function xn(e, t = {}) {
   const n = !!t.conferenceActive;
@@ -10018,7 +10018,7 @@ function xn(e, t = {}) {
     conferencePulse: false
   };
 }
-function Pn() {
+function Bn() {
   return {
     name: "",
     friendlyName: "",
@@ -10030,7 +10030,7 @@ function Pn() {
     client_secret: ""
   };
 }
-function Bn() {
+function Dn() {
   return {
     subscriberName: "",
     productName: "",
@@ -10043,14 +10043,14 @@ function Bn() {
     defaultTargetActor: ""
   };
 }
-function se(e) {
+function ce(e) {
   if (e == null)
     return;
   const t = String(e).trim();
   if (!(!t || t === "*"))
     return t;
 }
-function Rt(e) {
+function Ot(e) {
   if (e == null)
     return;
   const t = String(e).trim();
@@ -10067,7 +10067,7 @@ function Fn() {
     websocket: null
   };
 }
-function Dn() {
+function Mn() {
   if (typeof navigator > "u")
     return null;
   const e = {};
@@ -10079,10 +10079,10 @@ function Dn() {
   }
   return Object.keys(e).length ? e : null;
 }
-function dt(e) {
+function bt(e) {
   return e || (typeof window < "u" ? `${window.location.origin}/castCallback` : "");
 }
-function bt(e, t, n, r = "") {
+function ht(e, t, n, r = "") {
   const i = new URLSearchParams();
   i.append("hub.mode", e), i.append("hub.channel.type", "websocket"), i.append("hub.callback", n), i.append("hub.events", (t.events || []).toString()), i.append("hub.topic", t.topic || ""), i.append("hub.lease", String(t.lease || 999)), i.append("subscriber.name", t.subscriberName || ""), i.append("subscriber.product.name", t.productName || ""), i.append(
     "subscriber.product.version",
@@ -10090,11 +10090,11 @@ function bt(e, t, n, r = "") {
   );
   const s = (t.actors || []).map((a) => a.trim()).filter(Boolean);
   s.length && i.append("subscriber.actors", JSON.stringify(s));
-  const c = Dn();
-  return c && i.append("subscriber.client_info", JSON.stringify(c)), i;
+  const o = Mn();
+  return o && i.append("subscriber.client_info", JSON.stringify(o)), i;
 }
-var ve = 25;
-function Mn(e) {
+var Le = 25;
+function jn(e) {
   try {
     const t = new URL(e);
     return t.hostname.toLowerCase() === "localhost" && (t.hostname = "127.0.0.1"), t.toString();
@@ -10102,27 +10102,27 @@ function Mn(e) {
     return e;
   }
 }
-function jn(e) {
+function qn(e) {
   if (!(e instanceof Error))
     return false;
   const t = e.name || "";
   return t === "TypeError" || t === "NetworkError";
 }
-function qn(e, t) {
+function zn(e, t) {
   if (!e)
     return "";
   try {
     const n = `/api/hub/payloads/${encodeURIComponent(e)}`;
-    return Mn(new URL(n, t).toString());
+    return jn(new URL(n, t).toString());
   } catch (n) {
     return console.warn("CastClient: invalid payloadId url", e, n), "";
   }
 }
-function zn(e) {
+function Hn(e) {
   delete e.binaryTransfer, delete e.url, delete e.payloadId, delete e.payloadIds, delete e.chunkByteLengths, delete e.expiresAt;
 }
-function Hn(e, t) {
-  const n = e.reduce((s, c) => s + c.byteLength, 0);
+function Gn(e, t) {
+  const n = e.reduce((s, o) => s + o.byteLength, 0);
   if (typeof t == "number" && t >= 0 && n !== t)
     throw new Error(
       `CastClient: payload size mismatch expected=${t} received=${n}`
@@ -10133,17 +10133,17 @@ function Hn(e, t) {
     r.set(new Uint8Array(e[s]), i), i += e[s].byteLength;
   return r.buffer;
 }
-function ht(e, t, n) {
-  const r = e && e.event, i = r && r.context, s = i && i.files, c = s && s[t];
-  return !c || typeof c != "object" ? false : (zn(c), c.data = n, c.byteLength = n.byteLength, true);
+function mt(e, t, n) {
+  const r = e && e.event, i = r && r.context, s = i && i.files, o = s && s[t];
+  return !o || typeof o != "object" ? false : (Hn(o), o.data = n, o.byteLength = n.byteLength, true);
 }
-async function Gn(e, t, { hubEndpoint: n, accessToken: r }) {
-  const i = qn(e, n);
+async function Wn(e, t, { hubEndpoint: n, accessToken: r }) {
+  const i = zn(e, n);
   if (!i)
     throw new Error("CastClient.fetchPayload: missing or invalid payloadId");
   const s = {};
   r && (s.Authorization = `Bearer ${r}`);
-  async function c() {
+  async function o() {
     const a = await fetch(i, {
       method: "GET",
       credentials: "omit",
@@ -10153,90 +10153,90 @@ async function Gn(e, t, { hubEndpoint: n, accessToken: r }) {
       throw new Error(
         `CastClient.fetchPayload: GET ${a.status} ${a.statusText}`
       );
-    const d = await a.arrayBuffer();
-    if (typeof t == "number" && t >= 0 && d.byteLength !== t)
+    const f = await a.arrayBuffer();
+    if (typeof t == "number" && t >= 0 && f.byteLength !== t)
       throw new Error(
         `CastClient.fetchPayload: chunk size mismatch payloadId=${e.slice(
           0,
           8
-        )} expected=${t} received=${d.byteLength}`
+        )} expected=${t} received=${f.byteLength}`
       );
-    return d;
+    return f;
   }
   try {
-    return await c();
+    return await o();
   } catch (a) {
-    if (jn(a))
-      return c();
+    if (qn(a))
+      return o();
     throw a;
   }
 }
 async function pt(e, t) {
-  const n = je(e);
+  const n = ze(e);
   if (!n.payloadIds.length)
     throw new Error("CastClient.fetchPayload: no payloadIds on file entry");
   const r = [];
-  for (let i = 0; i < n.payloadIds.length; i += ve) {
+  for (let i = 0; i < n.payloadIds.length; i += Le) {
     const s = n.payloadIds.slice(
       i,
-      i + ve
-    ), c = n.chunkByteLengths.slice(
+      i + Le
+    ), o = n.chunkByteLengths.slice(
       i,
-      i + ve
+      i + Le
     ), a = await Promise.all(
       s.map(
-        (d, f) => Gn(d, c[f] ?? null, t)
+        (f, d) => Wn(f, o[d] ?? null, t)
       )
     );
     r.push(...a);
   }
-  return Hn(
+  return Gn(
     r,
     typeof e.byteLength == "number" ? e.byteLength : null
   );
 }
-function mt(e) {
+function yt(e) {
   return JSON.parse(JSON.stringify(e));
 }
-function Wn(e) {
+function Vn(e) {
   const t = () => e();
   return {
     hasPendingPayload(n) {
       const r = n && n.event;
-      return !!(r && Ie(r));
+      return !!(r && ke(r));
     },
     async fetchPayload(n) {
       const r = n && n.event;
-      if (!r || !Ie(r))
+      if (!r || !ke(r))
         return n;
-      const i = Nt(r);
+      const i = At(r);
       if (!i)
         return n;
-      const s = typeof performance < "u" && performance.now ? performance.now() : Date.now(), c = r.context.files[i.index], a = await pt(c, t()), d = mt(n);
-      if (!ht(d, i.index, a))
+      const s = typeof performance < "u" && performance.now ? performance.now() : Date.now(), o = r.context.files[i.index], a = await pt(o, t()), f = yt(n);
+      if (!mt(f, i.index, a))
         throw new Error("CastClient.fetchPayload: no payload slot on message");
-      const o = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - s;
+      const c = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - s;
       return console.debug(
-        `CastClient: payload fetched fileIndex=${i.index} bytes=${a.byteLength} elapsed=${(o / 1e3).toFixed(2)}s`
-      ), d;
+        `CastClient: payload fetched fileIndex=${i.index} bytes=${a.byteLength} elapsed=${(c / 1e3).toFixed(2)}s`
+      ), f;
     },
     async fetchAllPayloads(n) {
-      const r = n && n.event, i = r ? j(r) : [], s = [];
+      const r = n && n.event, i = r ? z(r) : [], s = [];
       for (let a = 0; a < i.length; a++)
-        je(i[a]).payloadIds.length && i[a].data == null && s.push(a);
+        ze(i[a]).payloadIds.length && i[a].data == null && s.push(a);
       if (!s.length)
         return n;
-      const c = mt(n);
+      const o = yt(n);
       for (let a = 0; a < s.length; a++) {
-        const d = s[a], f = c.event.context.files[d], o = await pt(f, t());
-        if (!ht(c, d, o))
+        const f = s[a], d = o.event.context.files[f], c = await pt(d, t());
+        if (!mt(o, f, c))
           throw new Error("CastClient.fetchAllPayloads: attach failed");
       }
-      return c;
+      return o;
     }
   };
 }
-function Z(e) {
+function ee(e) {
   const t = String(e ?? "").trim();
   if (!t)
     return null;
@@ -10247,38 +10247,38 @@ function Z(e) {
     return null;
   }
 }
-function Vn(e) {
-  const t = Z(e);
+function Jn(e) {
+  const t = ee(e);
   if (!t)
     return "";
   const n = t.href.endsWith("/") ? t.href : `${t.href}/`;
   return new URL("admin", n).href;
 }
-function Jn(e, t = {}) {
-  var d, f, o, b;
-  const n = Z(e);
+function Kn(e, t = {}) {
+  var f, d, c, b;
+  const n = ee(e);
   if (!n)
     return "";
-  const r = new URL("/api/hub/conference-client", n.origin), i = (d = t.subscriberName) == null ? void 0 : d.trim(), s = (f = t.topic) == null ? void 0 : f.trim(), c = ((o = t.theme) == null ? void 0 : o.trim()) || "volview", a = ((b = t.mode) == null ? void 0 : b.trim().toLowerCase()) === "light" ? "light" : "dark";
-  return i && r.searchParams.set("subscriberName", i), s && r.searchParams.set("topic", s), r.searchParams.set("theme", c), r.searchParams.set("mode", a), r.href;
+  const r = new URL("/api/hub/conference-client", n.origin), i = (f = t.subscriberName) == null ? void 0 : f.trim(), s = (d = t.topic) == null ? void 0 : d.trim(), o = ((c = t.theme) == null ? void 0 : c.trim()) || "volview", a = ((b = t.mode) == null ? void 0 : b.trim().toLowerCase()) === "light" ? "light" : "dark";
+  return i && r.searchParams.set("subscriberName", i), s && r.searchParams.set("topic", s), r.searchParams.set("theme", o), r.searchParams.set("mode", a), r.href;
 }
-var Kn = { width: 336, height: 288 };
-function Yn(e, t, n = { width: 800, height: 600 }) {
+var Yn = { width: 336, height: 288 };
+function Xn(e, t, n = { width: 800, height: 600 }) {
   if (!e || typeof window > "u")
     return;
-  const r = n.width, i = n.height, s = Math.max(0, Math.floor((window.screen.width - r) / 2)), c = Math.max(0, Math.floor((window.screen.height - i) / 2)), a = [
+  const r = n.width, i = n.height, s = Math.max(0, Math.floor((window.screen.width - r) / 2)), o = Math.max(0, Math.floor((window.screen.height - i) / 2)), a = [
     "popup",
     `width=${r}`,
     `height=${i}`,
     `left=${s}`,
-    `top=${c}`,
+    `top=${o}`,
     "noopener",
     "noreferrer"
   ].join(",");
   window.open(e, t, a);
 }
-var Xn = 3e4;
-var Ot = 1200;
+var Zn = 3e4;
+var Pt = 1200;
 var xt = [
   "Test conference",
   "US annotations",
@@ -10286,34 +10286,34 @@ var xt = [
   "Case discussion",
   "Pedicle screw"
 ];
-function He(e, t) {
-  const n = Z(e);
+function Ge(e, t) {
+  const n = ee(e);
   return n ? new URL(t, n.origin).href : null;
 }
-function Ge(e) {
+function We(e) {
   if (!Array.isArray(e))
     return [];
   const t = /* @__PURE__ */ new Set();
   return e.map((n) => String(n ?? "").trim()).filter((n) => !n || t.has(n) ? false : (t.add(n), true));
 }
-function Q(e) {
+function te(e) {
   return String((e == null ? void 0 : e.hostTopic) ?? (e == null ? void 0 : e.user) ?? "").trim();
 }
-function We(e, t) {
-  const n = Q(t), r = String(e ?? "").trim();
+function Ve(e, t) {
+  const n = te(t), r = String(e ?? "").trim();
   return !r || !n ? false : r === n || r.toLowerCase() === n.toLowerCase();
 }
-function Ve(e, t, n) {
-  const r = String(e ?? "").trim(), i = String(t ?? "").trim(), s = Q(n), c = Array.isArray(n == null ? void 0 : n.topics) ? n.topics.map((a) => String(a).trim()).filter(Boolean) : [];
-  return !!(r && (r === s || c.includes(r)) || i && i === s);
+function Je(e, t, n) {
+  const r = String(e ?? "").trim(), i = String(t ?? "").trim(), s = te(n), o = Array.isArray(n == null ? void 0 : n.topics) ? n.topics.map((a) => String(a).trim()).filter(Boolean) : [];
+  return !!(r && (r === s || o.includes(r)) || i && i === s);
 }
-function V(e, t, n) {
+function K(e, t, n) {
   return n.find(
-    (r) => Ve(e, t, r)
+    (r) => Je(e, t, r)
   ) || null;
 }
-async function Pt(e) {
-  const t = He(e, "/api/hub/conference-topics");
+async function Bt(e) {
+  const t = Ge(e, "/api/hub/conference-topics");
   if (!t)
     return [];
   try {
@@ -10326,8 +10326,8 @@ async function Pt(e) {
     return [];
   }
 }
-async function J(e) {
-  const t = Z(e);
+async function Y(e) {
+  const t = ee(e);
   if (!t)
     return [];
   const n = new URL("/api/hub/conference", t.origin).href;
@@ -10341,66 +10341,66 @@ async function J(e) {
     return [];
   }
 }
-async function Bt(e, t, n, r, i) {
-  const s = He(e, "/api/hub/conference");
+async function Dt(e, t, n, r, i) {
+  const s = Ge(e, "/api/hub/conference");
   if (!s)
     throw new Error("Invalid hub endpoint");
-  const c = {
+  const o = {
     hostTopic: String(t).trim(),
     title: String(n).trim(),
     topics: r
   }, a = String(i ?? "").trim();
-  a && (c.hostUserName = a);
-  const d = await fetch(s, {
+  a && (o.hostUserName = a);
+  const f = await fetch(s, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(c)
+    body: JSON.stringify(o)
   });
-  if (!d.ok) {
-    const f = await d.text();
-    throw new Error(f || `HTTP ${d.status}`);
+  if (!f.ok) {
+    const d = await f.text();
+    throw new Error(d || `HTTP ${f.status}`);
   }
 }
-async function Je(e, t, n) {
-  const r = He(e, "/api/hub/conference");
+async function Ke(e, t, n) {
+  const r = Ge(e, "/api/hub/conference");
   if (!r)
     throw new Error("Invalid hub endpoint");
   const i = { hostTopic: String(t).trim() }, s = n == null ? void 0 : n.trim();
   s && (i.leaveTopic = s);
-  const c = await fetch(r, {
+  const o = await fetch(r, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(i)
   });
-  if (!c.ok) {
-    const a = await c.text();
-    throw new Error(a || `HTTP ${c.status}`);
+  if (!o.ok) {
+    const a = await o.text();
+    throw new Error(a || `HTTP ${o.status}`);
   }
 }
-async function Zn(e, t, n) {
-  const r = await J(e), i = V(t, n, r);
+async function Qn(e, t, n) {
+  const r = await Y(e), i = K(t, n, r);
   return {
     active: !!i,
     title: String((i == null ? void 0 : i.title) ?? "").trim(),
-    participants: Ge(i == null ? void 0 : i.participants)
+    participants: We(i == null ? void 0 : i.participants)
   };
 }
-function Ke(e, t) {
+function Ye(e, t) {
   if (!t)
     return null;
-  const n = String((e == null ? void 0 : e.topic) ?? "").trim(), r = String((e == null ? void 0 : e.subscriberName) ?? "").trim(), i = String((e == null ? void 0 : e.userName) ?? "").trim(), s = Q(t);
-  if (!s || !Ve(n, r, t))
+  const n = String((e == null ? void 0 : e.topic) ?? "").trim(), r = String((e == null ? void 0 : e.subscriberName) ?? "").trim(), i = String((e == null ? void 0 : e.userName) ?? "").trim(), s = te(t);
+  if (!s || !Je(n, r, t))
     return null;
-  const c = Array.isArray(t.topics) ? t.topics.map((l) => String(l).trim()).filter(Boolean) : [], a = Ge(t.participants), d = [], f = /* @__PURE__ */ new Set();
-  for (const l of [n, s, ...c])
-    !l || f.has(l) || (f.add(l), d.push(l));
-  const o = We(n, t) ? "leading" : "following", b = s, u = d.map((l) => {
-    const p = !!n && (l === n || l.toLowerCase() === n.toLowerCase()), h = l === b || l.toLowerCase() === b.toLowerCase(), g = h && o === "following";
+  const o = Array.isArray(t.topics) ? t.topics.map((l) => String(l).trim()).filter(Boolean) : [], a = We(t.participants), f = [], d = /* @__PURE__ */ new Set();
+  for (const l of [n, s, ...o])
+    !l || d.has(l) || (d.add(l), f.push(l));
+  const c = Ve(n, t) ? "leading" : "following", b = s, u = f.map((l) => {
+    const m = !!n && (l === n || l.toLowerCase() === n.toLowerCase()), h = l === b || l.toLowerCase() === b.toLowerCase(), g = h && c === "following";
     let C = "";
-    return p ? C = o === "leading" ? "You \xB7 leading" : "You" : g ? C = "Following" : o === "leading" && (C = "Following you"), {
+    return m ? C = c === "leading" ? "You \xB7 leading" : "You" : g ? C = "Following" : c === "leading" && (C = "Following you"), {
       placeId: l,
-      label: p && i ? i : l,
-      isSelf: p,
+      label: m && i ? i : l,
+      isSelf: m,
       isLeading: h,
       isFollowing: g,
       statusLabel: C
@@ -10411,15 +10411,15 @@ function Ke(e, t) {
     places: u,
     selfPlaceId: n,
     leadingPlaceId: b,
-    selfRole: o,
+    selfRole: c,
     hostTopic: s,
-    attendeeTopics: c,
+    attendeeTopics: o,
     participants: a
   };
 }
 async function Ft(e, t, n, r) {
-  const i = await J(e), s = V(t, n, i);
-  return Ke({ topic: t, subscriberName: n, userName: r }, s);
+  const i = await Y(e), s = K(t, n, i);
+  return Ye({ topic: t, subscriberName: n, userName: r }, s);
 }
 function S(e, t) {
   return `${e}-${t}`;
@@ -10427,11 +10427,11 @@ function S(e, t) {
 function B(e) {
   return String(e ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function Qn(e) {
+function er(e) {
   const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, r = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim(), i = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
   if (!i)
     throw new Error("createCastConferenceDialog requires a DOM root");
-  let s = null, c = false;
+  let s = null, o = false;
   const a = document.createElement("div");
   a.className = S(r, "overlay"), a.hidden = true, a.innerHTML = `
     <div class="${S(r, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${S(r, "title")}" tabindex="-1">
@@ -10447,7 +10447,7 @@ function Qn(e) {
             <select id="${S(r, "title-select")}" class="${S(r, "select")}" data-cast-conference-title-select>
               <option value="">Select a conference title</option>
               ${xt.map(
-    (m) => `<option value="${B(m)}"${m === "Test conference" ? " selected" : ""}>${B(m)}</option>`
+    (p) => `<option value="${B(p)}"${p === "Test conference" ? " selected" : ""}>${B(p)}</option>`
   ).join("")}
               <option value="other">Other\u2026</option>
             </select>
@@ -10475,52 +10475,52 @@ function Qn(e) {
       </div>
     </div>
   `, i.appendChild(a);
-  const d = a.querySelector(`.${S(r, "dialog")}`), f = a.querySelector("[data-cast-conference-status]"), o = a.querySelector("[data-cast-conference-create]"), b = a.querySelector("[data-cast-conference-manage]"), u = a.querySelector("[data-cast-conference-title-select]"), l = a.querySelector("[data-cast-conference-custom-group]"), p = a.querySelector("[data-cast-conference-custom-title]"), h = a.querySelector("[data-cast-conference-topics]"), g = a.querySelector("[data-cast-conference-info]"), C = a.querySelector("[data-cast-conference-create-btn]"), y = a.querySelector("[data-cast-conference-exit-btn]");
-  function E(m, I2) {
-    if (!f)
+  const f = a.querySelector(`.${S(r, "dialog")}`), d = a.querySelector("[data-cast-conference-status]"), c = a.querySelector("[data-cast-conference-create]"), b = a.querySelector("[data-cast-conference-manage]"), u = a.querySelector("[data-cast-conference-title-select]"), l = a.querySelector("[data-cast-conference-custom-group]"), m = a.querySelector("[data-cast-conference-custom-title]"), h = a.querySelector("[data-cast-conference-topics]"), g = a.querySelector("[data-cast-conference-info]"), C = a.querySelector("[data-cast-conference-create-btn]"), y = a.querySelector("[data-cast-conference-exit-btn]");
+  function E(p, L) {
+    if (!d)
       return;
-    const T = String(I2 || "").trim();
-    if (f.classList.remove(
+    const T = String(L || "").trim();
+    if (d.classList.remove(
       S(r, "status-success"),
       S(r, "status-error")
     ), !T) {
-      f.hidden = true, f.textContent = "";
+      d.hidden = true, d.textContent = "";
       return;
     }
-    f.hidden = false, f.textContent = T, m === "success" ? f.classList.add(S(r, "status-success")) : m === "error" && f.classList.add(S(r, "status-error"));
+    d.hidden = false, d.textContent = T, p === "success" ? d.classList.add(S(r, "status-success")) : p === "error" && d.classList.add(S(r, "status-error"));
   }
-  function w(m) {
-    s = m, n && n(m);
+  function w(p) {
+    s = p, n && n(p);
   }
-  function L() {
-    const m = t() || {};
+  function I2() {
+    const p = t() || {};
     return {
-      hubEndpoint: String(m.hubEndpoint ?? "").trim(),
-      topic: String(m.topic ?? "").trim(),
-      subscriberName: String(m.subscriberName ?? "").trim(),
-      userName: String(m.userName ?? "").trim(),
-      connected: !!m.connected
+      hubEndpoint: String(p.hubEndpoint ?? "").trim(),
+      topic: String(p.topic ?? "").trim(),
+      subscriberName: String(p.subscriberName ?? "").trim(),
+      userName: String(p.userName ?? "").trim(),
+      connected: !!p.connected
     };
   }
   function U() {
-    const m = String((u == null ? void 0 : u.value) || "").trim();
-    return m === "other" ? String((p == null ? void 0 : p.value) || "").trim() : m;
+    const p = String((u == null ? void 0 : u.value) || "").trim();
+    return p === "other" ? String((m == null ? void 0 : m.value) || "").trim() : p;
   }
-  function ct() {
+  function at() {
     return h ? Array.from(
       h.querySelectorAll(
         'input[type="checkbox"][data-cast-conference-topic]:checked'
       )
-    ).map((m) => String(m.value || "").trim()).filter(Boolean) : [];
+    ).map((p) => String(p.value || "").trim()).filter(Boolean) : [];
   }
-  function x(m, I2) {
+  function P2(p, L) {
     if (h) {
-      if (h.replaceChildren(), !m.length) {
+      if (h.replaceChildren(), !p.length) {
         const T = document.createElement("p");
         T.className = S(r, "muted"), T.textContent = "No users available", h.appendChild(T);
         return;
       }
-      for (const T of m) {
+      for (const T of p) {
         const N = document.createElement("label");
         N.className = S(r, "topic-row");
         const A = document.createElement("input");
@@ -10530,9 +10530,9 @@ function Qn(e) {
       }
     }
   }
-  function at(m) {
-    if (o && (o.hidden = !!m), b && (b.hidden = !m), m && g) {
-      const I2 = m.places.length ? `<div class="${S(r, "places")}">${m.places.map((T) => {
+  function ut(p) {
+    if (c && (c.hidden = !!p), b && (b.hidden = !p), p && g) {
+      const L = p.places.length ? `<div class="${S(r, "places")}">${p.places.map((T) => {
         const N = [S(r, "place")];
         T.isSelf && N.push(S(r, "place-self")), T.isLeading && N.push(S(r, "place-leading")), T.isFollowing && N.push(S(r, "place-following"));
         const A = T.statusLabel ? `<span class="${S(r, "place-status")}">${B(
@@ -10546,38 +10546,38 @@ function Qn(e) {
         )}">${B(T.label)}</span>${A}</span>`;
       }).join("")}</div>` : `<div class="${S(r, "muted")}">No places</div>`;
       g.innerHTML = `<div><strong>Title:</strong> ${B(
-        m.title || "N/A"
-      )}</div><div class="${S(r, "places-label")}">Participants</div>${I2}`;
+        p.title || "N/A"
+      )}</div><div class="${S(r, "places-label")}">Participants</div>${L}`;
     }
-    y && (y.textContent = (m == null ? void 0 : m.selfRole) === "leading" ? "End conference" : "Leave conference");
+    y && (y.textContent = (p == null ? void 0 : p.selfRole) === "leading" ? "End conference" : "Leave conference");
   }
-  async function re() {
-    const m = L();
-    if (!m.hubEndpoint || !m.connected)
-      return x([], m.topic), at(null), w(null), null;
-    const [I2, T] = await Promise.all([
-      Pt(m.hubEndpoint),
-      J(m.hubEndpoint)
-    ]), N = V(
-      m.topic,
-      m.subscriberName,
+  async function se() {
+    const p = I2();
+    if (!p.hubEndpoint || !p.connected)
+      return P2([], p.topic), ut(null), w(null), null;
+    const [L, T] = await Promise.all([
+      Bt(p.hubEndpoint),
+      Y(p.hubEndpoint)
+    ]), N = K(
+      p.topic,
+      p.subscriberName,
       T
-    ), A = Ke(m, N);
-    return N || x(I2, m.topic), at(A), w(A), A;
+    ), A = Ye(p, N);
+    return N || P2(L, p.topic), ut(A), w(A), A;
   }
-  async function ln() {
-    if (c)
+  async function fn() {
+    if (o)
       return;
-    const m = L(), I2 = U(), T = ct();
-    if (!m.connected) {
+    const p = I2(), L = U(), T = at();
+    if (!p.connected) {
       E("error", "Connect to the Cast hub first.");
       return;
     }
-    if (!m.topic) {
+    if (!p.topic) {
       E("error", "Cast topic is required to host a conference.");
       return;
     }
-    if (!I2) {
+    if (!L) {
       E("error", "Conference title is required.");
       return;
     }
@@ -10585,101 +10585,101 @@ function Qn(e) {
       E("error", "Select at least one attendee topic.");
       return;
     }
-    c = true, C && (C.disabled = true, C.textContent = "Creating\u2026"), E("", "");
+    o = true, C && (C.disabled = true, C.textContent = "Creating\u2026"), E("", "");
     try {
-      await Bt(
-        m.hubEndpoint,
-        m.topic,
-        I2,
+      await Dt(
+        p.hubEndpoint,
+        p.topic,
+        L,
         T,
-        m.userName
-      ), await re(), P2();
+        p.userName
+      ), await se(), x();
     } catch (N) {
       E(
         "error",
         N instanceof Error ? N.message : "Failed to create conference."
       );
     } finally {
-      c = false, C && (C.disabled = false, C.textContent = "Create conference");
+      o = false, C && (C.disabled = false, C.textContent = "Create conference");
     }
   }
-  async function fn() {
-    if (c)
+  async function dn() {
+    if (o)
       return;
-    const m = L(), I2 = await J(m.hubEndpoint), T = V(
-      m.topic,
-      m.subscriberName,
-      I2
+    const p = I2(), L = await Y(p.hubEndpoint), T = K(
+      p.topic,
+      p.subscriberName,
+      L
     );
     if (!T) {
-      await re();
+      await se();
       return;
     }
-    const N = Q(T), A = We(m.topic, T);
-    c = true, y && (y.disabled = true, y.textContent = A ? "Ending\u2026" : "Leaving\u2026"), E("", "");
+    const N = te(T), A = Ve(p.topic, T);
+    o = true, y && (y.disabled = true, y.textContent = A ? "Ending\u2026" : "Leaving\u2026"), E("", "");
     try {
-      await Je(
-        m.hubEndpoint,
+      await Ke(
+        p.hubEndpoint,
         N,
-        A ? void 0 : m.topic
+        A ? void 0 : p.topic
       ), w(null), E(
         "success",
         A ? "Conference ended." : "Left conference."
       ), await new Promise(($2) => {
-        setTimeout($2, Ot);
-      }), P2();
+        setTimeout($2, Pt);
+      }), x();
     } catch ($2) {
       E(
         "error",
         $2 instanceof Error ? $2.message : "Failed to update conference."
       );
     } finally {
-      c = false, y && (y.disabled = false, y.textContent = A ? "End conference" : "Leave conference");
+      o = false, y && (y.disabled = false, y.textContent = A ? "End conference" : "Leave conference");
     }
   }
-  function dn() {
-    E("", ""), u && (u.value = "Test conference"), p && (p.value = ""), l && (l.hidden = true), a.hidden = false, d instanceof HTMLElement && d.focus({ preventScroll: true }), re().catch(() => {
+  function bn() {
+    E("", ""), u && (u.value = "Test conference"), m && (m.value = ""), l && (l.hidden = true), a.hidden = false, f instanceof HTMLElement && f.focus({ preventScroll: true }), se().catch(() => {
     });
   }
-  function P2() {
+  function x() {
     a.hidden = true, E("", "");
   }
-  function bn() {
-    P2(), a.remove();
+  function hn() {
+    x(), a.remove();
   }
   return u == null || u.addEventListener("change", () => {
     l && (l.hidden = String(u.value || "") !== "other");
   }), C == null || C.addEventListener("click", () => {
-    ln().catch(() => {
-    });
-  }), y == null || y.addEventListener("click", () => {
     fn().catch(() => {
     });
-  }), a.querySelectorAll("[data-cast-conference-close]").forEach((m) => {
-    m.addEventListener("click", () => P2());
-  }), a.addEventListener("click", (m) => {
-    m.target === a && P2();
+  }), y == null || y.addEventListener("click", () => {
+    dn().catch(() => {
+    });
+  }), a.querySelectorAll("[data-cast-conference-close]").forEach((p) => {
+    p.addEventListener("click", () => x());
+  }), a.addEventListener("click", (p) => {
+    p.target === a && x();
   }), {
-    open: dn,
-    close: P2,
-    destroy: bn,
-    refresh: re,
+    open: bn,
+    close: x,
+    destroy: hn,
+    refresh: se,
     getView: () => s,
     get element() {
       return a;
     }
   };
 }
-var Ue = "ID";
-function er(e = {}) {
+var Re = "ID";
+function tr(e = {}) {
   const t = Array.isArray(e.selfActors) ? e.selfActors.map((s) => String(s || "").trim()).filter(Boolean) : [], n = Array.isArray(e.connectedActors) ? e.connectedActors.map((s) => String(s || "").trim()).filter(Boolean) : [];
   return t.some(
-    (s) => s === Ue || s.toUpperCase() === "ID"
+    (s) => s === Re || s.toUpperCase() === "ID"
   ) ? true : !n.some(
-    (s) => s === Ue || s.toUpperCase() === "ID"
+    (s) => s === Re || s.toUpperCase() === "ID"
   );
 }
-function Dt(e) {
+function Mt(e) {
   const t = e && typeof e == "object" ? (
     /** @type {{ event?: Record<string, unknown> }} */
     e.event
@@ -10694,27 +10694,27 @@ function Dt(e) {
     t.context
   ) : {}, i = String(
     r.hostTopic || t["hub.topic"] || ""
-  ).trim(), s = String(r.title || "").trim(), c = String(r.hostUserName || "").trim();
+  ).trim(), s = String(r.title || "").trim(), o = String(r.hostUserName || "").trim();
   return {
     hubEvent: n,
     title: s,
     hostTopic: i,
-    hostUserName: c,
-    hostLabel: c || i || "host"
+    hostUserName: o,
+    hostLabel: o || i || "host"
   };
 }
 function v(e, t) {
   return `${e}-${t}`;
 }
-function Mt(e = {}) {
+function jt(e = {}) {
   const t = typeof e.onDecision == "function" ? e.onDecision : null, n = String(
     e.classPrefix || "cast-conference-invite"
   ).trim(), r = e.root || (typeof document < "u" ? document.body : null);
   if (!r)
     throw new Error("createCastConferenceInviteDialog requires a DOM root");
   let i = null, s = false;
-  const c = document.createElement("div");
-  c.className = v(n, "overlay"), c.hidden = true, c.innerHTML = `
+  const o = document.createElement("div");
+  o.className = v(n, "overlay"), o.hidden = true, o.innerHTML = `
     <div class="${v(n, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${v(n, "title")}" tabindex="-1">
       <div class="${v(n, "header")}">
         <h2 id="${v(n, "title")}" class="${v(n, "title")}">Conference invitation</h2>
@@ -10730,20 +10730,20 @@ function Mt(e = {}) {
         </div>
       </div>
     </div>
-  `, r.appendChild(c);
-  const a = c.querySelector(`.${v(n, "dialog")}`), d = c.querySelector("[data-cast-invite-lead]"), f = c.querySelector("[data-cast-invite-status]"), o = c.querySelector("[data-cast-invite-follow]"), b = c.querySelector("[data-cast-invite-join]"), u = c.querySelector("[data-cast-invite-decline]");
+  `, r.appendChild(o);
+  const a = o.querySelector(`.${v(n, "dialog")}`), f = o.querySelector("[data-cast-invite-lead]"), d = o.querySelector("[data-cast-invite-status]"), c = o.querySelector("[data-cast-invite-follow]"), b = o.querySelector("[data-cast-invite-join]"), u = o.querySelector("[data-cast-invite-decline]");
   function l(y, E) {
-    if (!(f instanceof HTMLElement)) return;
+    if (!(d instanceof HTMLElement)) return;
     const w = String(E || "").trim();
-    f.hidden = !w, f.textContent = w, f.classList.toggle(v(n, "status-error"), y === "error");
+    d.hidden = !w, d.textContent = w, d.classList.toggle(v(n, "status-error"), y === "error");
   }
-  function p(y) {
+  function m(y) {
     s = y;
-    for (const E of [o, b, u])
+    for (const E of [c, b, u])
       E instanceof HTMLButtonElement && (E.disabled = y);
   }
   function h() {
-    c.hidden = true, i = null, l("", ""), p(false);
+    o.hidden = true, i = null, l("", ""), m(false);
   }
   function g(y) {
     const E = String((y == null ? void 0 : y.hostLabel) || (y == null ? void 0 : y.hostUserName) || (y == null ? void 0 : y.hostTopic) || "host").trim() || "host", w = String((y == null ? void 0 : y.title) || "").trim();
@@ -10753,122 +10753,123 @@ function Mt(e = {}) {
       hostTopic: String((y == null ? void 0 : y.hostTopic) || "").trim(),
       hostUserName: String((y == null ? void 0 : y.hostUserName) || "").trim(),
       hostLabel: E
-    }, d instanceof HTMLElement && (d.textContent = w ? `${w} \u2014 join and follow ${E}?` : `Join conference and follow ${E}?`), o instanceof HTMLElement && (o.textContent = `Join and follow ${E}`), l("", ""), c.hidden = false, a instanceof HTMLElement && a.focus({ preventScroll: true });
+    }, f instanceof HTMLElement && (f.textContent = w ? `${w} \u2014 join and follow ${E}?` : `Join conference and follow ${E}?`), c instanceof HTMLElement && (c.textContent = `Join and follow ${E}`), l("", ""), o.hidden = false, a instanceof HTMLElement && a.focus({ preventScroll: true });
   }
   async function C(y) {
     if (s || !i) return;
     const E = i;
-    p(true);
+    m(true);
     try {
       t && await t(y, E), h();
     } catch (w) {
       l(
         "error",
         w instanceof Error ? w.message : "Failed to update conference."
-      ), p(false);
+      ), m(false);
     }
   }
-  return o == null || o.addEventListener("click", () => {
+  return c == null || c.addEventListener("click", () => {
     C("join-follow");
   }), b == null || b.addEventListener("click", () => {
     C("join");
   }), u == null || u.addEventListener("click", () => {
     C("decline");
-  }), c.querySelectorAll("[data-cast-invite-close]").forEach((y) => {
+  }), o.querySelectorAll("[data-cast-invite-close]").forEach((y) => {
     y.addEventListener("click", () => h());
-  }), c.addEventListener("click", (y) => {
-    y.target === c && h();
+  }), o.addEventListener("click", (y) => {
+    y.target === o && h();
   }), {
     open: g,
     close: h,
     destroy() {
-      h(), c.remove();
+      h(), o.remove();
     },
     isOpen() {
-      return !c.hidden;
+      return !o.hidden;
     },
     getInvite() {
       return i;
     },
-    element: c
+    element: o
   };
 }
-function tr(e) {
-  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.shouldShow) == "function" ? e.shouldShow : () => true, r = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, i = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, s = (e == null ? void 0 : e.dialog) || Mt({
+function nr(e) {
+  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.shouldShow) == "function" ? e.shouldShow : () => true, r = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, i = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, s = (e == null ? void 0 : e.dialog) || jt({
     root: e == null ? void 0 : e.root,
     classPrefix: e == null ? void 0 : e.classPrefix,
-    onDecision: async (f, o) => {
-      await a(f, o);
+    onDecision: async (d, c) => {
+      await a(d, c);
     }
   });
-  async function c() {
-    const f = t(), o = await Ft(
-      f.hubEndpoint || "",
-      f.topic || "",
-      f.subscriberName || "",
-      f.userName || ""
+  async function o() {
+    const d = t(), c = await Ft(
+      d.hubEndpoint || "",
+      d.topic || "",
+      d.subscriberName || "",
+      d.userName || ""
     );
-    return r == null || r(o), o;
+    return r == null || r(c), c;
   }
-  async function a(f, o) {
-    const b = t(), u = String((o == null ? void 0 : o.hostTopic) || "").trim();
+  async function a(d, c) {
+    const b = t(), u = String((c == null ? void 0 : c.hostTopic) || "").trim();
     if (!u)
       throw new Error("Missing conference host topic.");
-    if (f === "decline") {
-      await Je(
+    if (d === "decline") {
+      await Ke(
         b.hubEndpoint || "",
         u,
         b.topic || ""
       ), i == null || i(false), r == null || r(null);
       return;
     }
-    const l = f === "join-follow";
-    i == null || i(l, l ? o : void 0), await c();
+    const l = d === "join-follow";
+    i == null || i(l, l ? c : void 0), await o();
   }
-  function d(f) {
-    const o = Dt(f);
-    if (!o) return false;
+  function f(d) {
+    const c = Mt(d);
+    if (!c) return false;
     const b = t(), u = String(b.topic || "").trim();
-    if (o.hubEvent === "conference-end") {
+    if (c.hubEvent === "conference-end") {
       const l = (
         /** @type {{ context?: Record<string, unknown> }} */
-        f.event || {}
-      ), p = l.context && typeof l.context == "object" ? l.context : {}, h = String(p.leaveTopic || "").trim();
-      return !h || h === u ? (s.close(), i == null || i(false), r == null || r(null)) : c(), true;
+        d.event || {}
+      ), m = l.context && typeof l.context == "object" ? l.context : {}, h = String(m.leaveTopic || "").trim();
+      return !h || h === u ? (s.close(), i == null || i(false), r == null || r(null)) : o(), true;
     }
-    return u && o.hostTopic && (u === o.hostTopic || u.toLowerCase() === o.hostTopic.toLowerCase()) ? (i == null || i(true), c(), true) : n() ? (s.open(o), c(), true) : (c(), true);
+    return u && c.hostTopic && (u === c.hostTopic || u.toLowerCase() === c.hostTopic.toLowerCase()) ? (i == null || i(true), o(), true) : n() ? (s.open(c), o(), true) : (o(), true);
   }
   return {
-    handleHubMessage: d,
-    open: (f) => s.open(f),
+    handleHubMessage: f,
+    open: (d) => s.open(d),
     close: () => s.close(),
     destroy: () => s.destroy(),
-    refresh: c,
+    refresh: o,
     dialog: s
   };
 }
-var fe = "http://fhircast.hl7.org/StructureDefinition/fhircast-imaging-study-open";
-var de = "urn:dicom:uid";
-var Ye = "urn:cast:nifti-url";
-var Xe = "urn:cast:nifti-filename";
-var be = "urn:cast:volview-sample-id";
-var ee = "urn:cast:worklist-sample-id";
-var he = "urn:cast:ohif-mode";
-var te = "urn:cast:open-mode";
-var K = "dicomweb";
+var ne = "http://fhircast.hl7.org/StructureDefinition/fhircast-imaging-study-open";
+var re = "urn:dicom:uid";
+var Xe = "urn:cast:nifti-url";
+var Ze = "urn:cast:nifti-filename";
+var he = "urn:cast:volview-sample-id";
+var H = "urn:cast:worklist-sample-id";
+var me = "urn:cast:ohif-mode";
+var G = "urn:cast:open-mode";
+var X = "dicomweb";
 var pe = "dicom-url";
-var F = "files";
-var me = "idc";
+var M = "files";
 var ye = "idc";
-var ge = "idc-source-bucket";
-var Ze = "urn:cast:dicomweb-root";
-function k(e) {
+var ge = "local-dicom";
+var Se = "idc";
+var Ce = "idc-source-bucket";
+var Qe = "urn:cast:dicomweb-root";
+function _(e) {
   return typeof e != "string" ? "" : e.trim().replace(/^urn:oid:/i, "");
 }
-function yt(e) {
+function gt(e) {
   return typeof e == "string" ? e.trim().toLowerCase() : "";
 }
-function M(e, t) {
+function q(e, t) {
   if (!Array.isArray(e))
     return null;
   const n = String(t || "").trim().toLowerCase(), r = e.find(
@@ -10876,28 +10877,28 @@ function M(e, t) {
   );
   return !(r != null && r.resource) || typeof r.resource != "object" ? null : r.resource;
 }
-function _(e, t) {
-  const n = M(e, "study");
+function k(e, t) {
+  const n = q(e, "study");
   if (!n)
     return "";
-  const r = Array.isArray(n.identifier) ? n.identifier : [], i = yt(t), s = r.find(
-    (c) => yt(c == null ? void 0 : c.system) === i
+  const r = Array.isArray(n.identifier) ? n.identifier : [], i = gt(t), s = r.find(
+    (o) => gt(o == null ? void 0 : o.system) === i
   );
   return typeof (s == null ? void 0 : s.value) == "string" ? s.value.trim() : "";
 }
-function H(e) {
-  const t = M(e, "study");
-  return t ? k(t.uid) || k(_(e, de)) : "";
+function F(e) {
+  const t = q(e, "study");
+  return t ? _(t.uid) || _(k(e, re)) : "";
 }
-function z(e) {
-  const t = M(e, "series");
+function D(e) {
+  const t = q(e, "series");
   if (t)
-    return k(t.uid);
-  const n = M(e, "study"), i = (Array.isArray(n == null ? void 0 : n.series) ? n.series : [])[0];
-  return !i || typeof i != "object" ? "" : k(i.uid);
+    return _(t.uid);
+  const n = q(e, "study"), i = (Array.isArray(n == null ? void 0 : n.series) ? n.series : [])[0];
+  return !i || typeof i != "object" ? "" : _(i.uid);
 }
-function $e(e) {
-  const t = _(e, Ze);
+function Oe(e) {
+  const t = k(e, Qe);
   if (!t)
     return "";
   try {
@@ -10909,8 +10910,8 @@ function $e(e) {
   }
   return "";
 }
-function Y(e) {
-  const t = _(e, Ye);
+function Z(e) {
+  const t = k(e, Xe);
   if (!t)
     return "";
   try {
@@ -10922,36 +10923,36 @@ function Y(e) {
   }
   return "";
 }
-function Qe(e) {
-  return _(e, Xe);
-}
-function jt(e) {
-  return _(e, he);
+function et(e) {
+  return k(e, Ze);
 }
 function qt(e) {
-  return _(e, be) || _(e, ee);
+  return k(e, me);
 }
-function nr(e) {
-  return typeof e.url == "string" ? e.url.trim() : typeof e.uri == "string" ? e.uri.trim() : "";
+function zt(e) {
+  return k(e, he) || k(e, H);
 }
 function rr(e) {
+  return typeof e.url == "string" ? e.url.trim() : typeof e.uri == "string" ? e.uri.trim() : "";
+}
+function ir(e) {
   return typeof e.fileName == "string" ? e.fileName.trim() : typeof e.filename == "string" ? e.filename.trim() : "";
 }
-var ir = /* @__PURE__ */ new Set(["http:", "https:", "s3:", "gs:"]);
-function Se(e) {
+var sr = /* @__PURE__ */ new Set(["http:", "https:", "s3:", "gs:"]);
+function we(e) {
   if (!e || typeof e != "object")
     return null;
-  const t = nr(e);
+  const t = rr(e);
   if (!t)
     return null;
   try {
-    const c = new URL(t);
-    if (!ir.has(c.protocol))
+    const o = new URL(t);
+    if (!sr.has(o.protocol))
       return null;
   } catch {
     return null;
   }
-  const n = rr(e), r = typeof e.mimeType == "string" ? e.mimeType.trim() : "", i = typeof e.role == "string" ? e.role.trim() : "", s = typeof e.label == "string" ? e.label.trim() : "";
+  const n = ir(e), r = typeof e.mimeType == "string" ? e.mimeType.trim() : "", i = typeof e.role == "string" ? e.role.trim() : "", s = typeof e.label == "string" ? e.label.trim() : "";
   return {
     url: t,
     fileName: n,
@@ -10960,111 +10961,111 @@ function Se(e) {
     label: s
   };
 }
-function D(e) {
-  const t = M(e, "files"), r = (Array.isArray(t == null ? void 0 : t.files) ? t.files : []).map((s) => Se(s)).filter((s) => s !== null);
+function j(e) {
+  const t = q(e, "files"), r = (Array.isArray(t == null ? void 0 : t.files) ? t.files : []).map((s) => we(s)).filter((s) => s !== null);
   if (r.length > 0)
     return r;
-  const i = Y(e);
+  const i = Z(e);
   return i ? [
     {
       url: i,
-      fileName: Qe(e),
+      fileName: et(e),
       mimeType: "",
       role: "",
       label: ""
     }
   ] : [];
 }
-function Re(e) {
-  return k(_(e, ye));
+function Pe(e) {
+  return _(k(e, Se));
 }
-function Oe(e) {
-  return _(
+function xe(e) {
+  return k(
     e,
-    ge
+    Ce
   ).toLowerCase() === "gcs" ? "gcs" : "aws";
 }
-function zt(e) {
-  const t = _(e, te);
-  return t === K || t === pe || t === F || t === me ? t : D(e).length > 0 || Y(e) ? F : H(e) && !Y(e) ? K : "";
+function Ht(e) {
+  const t = k(e, G);
+  return t === X || t === pe || t === M || t === ye || t === ge ? t : j(e).length > 0 || Z(e) ? M : F(e) && !Z(e) ? X : "";
 }
-function Ht({
+function Gt({
   id: e,
   files: t,
   patientReference: n,
   openMode: r,
   includeLegacyNiftiIdentifiers: i = false
 }) {
-  const s = String(e || "").trim() || "study", c = (Array.isArray(t) ? t : []).map((o) => Se(o)).filter((o) => o !== null), a = [
-    { system: te, value: r },
+  const s = String(e || "").trim() || "study", o = (Array.isArray(t) ? t : []).map((c) => we(c)).filter((c) => c !== null), a = [
+    { system: G, value: r },
     {
-      system: ee,
+      system: H,
       value: s
     },
     {
-      system: be,
+      system: he,
       value: s
     }
   ];
-  if (i && c.length === 1) {
-    const [o] = c;
+  if (i && o.length === 1) {
+    const [c] = o;
     a.push({
-      system: Ye,
-      value: o.url
-    }), o.fileName && a.push({
       system: Xe,
-      value: o.fileName
+      value: c.url
+    }), c.fileName && a.push({
+      system: Ze,
+      value: c.fileName
     });
   }
-  const d = {
+  const f = {
     resourceType: "ImagingStudy",
     id: s,
     meta: {
-      profile: [fe]
+      profile: [ne]
     },
     identifier: a,
     status: "available"
   };
-  n && (d.subject = { reference: String(n).trim() });
-  const f = [
+  n && (f.subject = { reference: String(n).trim() });
+  const d = [
     {
       key: "study",
-      resource: d
+      resource: f
     }
   ];
-  return c.length > 0 && f.push({
+  return o.length > 0 && d.push({
     key: "files",
     resource: {
-      files: c.map((o) => ({
-        url: o.url,
-        fileName: o.fileName || void 0,
-        mimeType: o.mimeType || void 0,
-        role: o.role || void 0,
-        label: o.label || void 0
+      files: o.map((c) => ({
+        url: c.url,
+        fileName: c.fileName || void 0,
+        mimeType: c.mimeType || void 0,
+        role: c.role || void 0,
+        label: c.label || void 0
       }))
     }
-  }), f;
+  }), d;
 }
-function Gt({
+function Wt({
   id: e,
   files: t,
   patientReference: n,
   includeLegacyNiftiIdentifiers: r = true
 }) {
-  return Ht({
+  return Gt({
     id: e,
     files: t,
     patientReference: n,
-    openMode: F,
+    openMode: M,
     includeLegacyNiftiIdentifiers: r
   });
 }
-function sr({
+function or({
   id: e,
   files: t,
   patientReference: n
 }) {
-  return Ht({
+  return Gt({
     id: e,
     files: t,
     patientReference: n,
@@ -11072,44 +11073,44 @@ function sr({
     includeLegacyNiftiIdentifiers: false
   });
 }
-function or({
+function cr({
   id: e,
   studyInstanceUID: t,
   seriesInstanceUID: n,
   dicomwebRoot: r,
   patientReference: i,
   ohifMode: s,
-  files: c,
+  files: o,
   sourceBucket: a
 }) {
-  const d = String(e || "").trim() || "study", f = k(t), o = k(n), b = String(r || "").trim().replace(/\/$/, ""), u = [
-    { system: te, value: K },
-    { system: de, value: f },
+  const f = String(e || "").trim() || "study", d = _(t), c = _(n), b = String(r || "").trim().replace(/\/$/, ""), u = [
+    { system: G, value: X },
+    { system: re, value: d },
     {
-      system: ee,
-      value: d
+      system: H,
+      value: f
     }
   ];
-  b && u.push({ system: Ze, value: b });
+  b && u.push({ system: Qe, value: b });
   const l = String(s || "").trim();
   l && u.push({
-    system: he,
+    system: me,
     value: l
   });
-  const p = (Array.isArray(c) ? c : []).map((C) => Se(C)).filter((C) => C !== null);
-  if (p.length > 0) {
+  const m = (Array.isArray(o) ? o : []).map((C) => we(C)).filter((C) => C !== null);
+  if (m.length > 0) {
     const C = String(a || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws";
     u.push({
-      system: ge,
+      system: Ce,
       value: C
-    }), o && u.push({ system: ye, value: o });
+    }), c && u.push({ system: Se, value: c });
   }
   const h = {
     resourceType: "ImagingStudy",
-    id: d,
-    uid: f,
+    id: f,
+    uid: d,
     meta: {
-      profile: [fe]
+      profile: [ne]
     },
     identifier: u,
     status: "available"
@@ -11121,16 +11122,16 @@ function or({
       resource: h
     }
   ];
-  return o && g.push({
+  return c && g.push({
     key: "series",
     resource: {
       resourceType: "ImagingStudy",
-      uid: o
+      uid: c
     }
-  }), p.length > 0 && g.push({
+  }), m.length > 0 && g.push({
     key: "files",
     resource: {
-      files: p.map((C) => ({
+      files: m.map((C) => ({
         url: C.url,
         fileName: C.fileName || void 0,
         mimeType: C.mimeType || void 0,
@@ -11140,56 +11141,94 @@ function or({
     }
   }), g;
 }
-function cr({
+function ar({
+  id: e,
+  studyInstanceUID: t,
+  seriesInstanceUID: n,
+  patientReference: r
+}) {
+  const i = String(e || "").trim() || "study", s = _(t), o = _(n), f = {
+    resourceType: "ImagingStudy",
+    id: i,
+    uid: s,
+    meta: {
+      profile: [ne]
+    },
+    identifier: [
+      { system: G, value: ge },
+      { system: re, value: s },
+      {
+        system: H,
+        value: i
+      }
+    ],
+    status: "available"
+  };
+  r && (f.subject = { reference: String(r).trim() });
+  const d = [
+    {
+      key: "study",
+      resource: f
+    }
+  ];
+  return o && d.push({
+    key: "series",
+    resource: {
+      resourceType: "ImagingStudy",
+      uid: o
+    }
+  }), d;
+}
+function ur({
   id: e,
   studyInstanceUID: t,
   seriesInstanceUID: n,
   sourceBucket: r,
   files: i,
   patientReference: s,
-  ohifMode: c
+  ohifMode: o
 }) {
-  const a = String(e || "").trim() || "study", d = k(t), f = k(n), o = String(r || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws", b = (Array.isArray(i) ? i : []).map((g) => Se(g)).filter((g) => g !== null), u = [
-    { system: te, value: me },
-    { system: de, value: d },
+  const a = String(e || "").trim() || "study", f = _(t), d = _(n), c = String(r || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws", b = (Array.isArray(i) ? i : []).map((g) => we(g)).filter((g) => g !== null), u = [
+    { system: G, value: ye },
+    { system: re, value: f },
     {
-      system: ee,
+      system: H,
       value: a
     },
     {
-      system: be,
+      system: he,
       value: a
     },
-    { system: ge, value: o }
+    { system: Ce, value: c }
   ];
-  f && u.push({ system: ye, value: f });
-  const l = String(c || "").trim();
+  d && u.push({ system: Se, value: d });
+  const l = String(o || "").trim();
   l && u.push({
-    system: he,
+    system: me,
     value: l
   });
-  const p = {
+  const m = {
     resourceType: "ImagingStudy",
     id: a,
-    uid: d,
+    uid: f,
     meta: {
-      profile: [fe]
+      profile: [ne]
     },
     identifier: u,
     status: "available"
   };
-  s && (p.subject = { reference: String(s).trim() });
+  s && (m.subject = { reference: String(s).trim() });
   const h = [
     {
       key: "study",
-      resource: p
+      resource: m
     }
   ];
-  return f && h.push({
+  return d && h.push({
     key: "series",
     resource: {
       resourceType: "ImagingStudy",
-      uid: f
+      uid: d
     }
   }), b.length > 0 && h.push({
     key: "files",
@@ -11204,123 +11243,133 @@ function cr({
     }
   }), h;
 }
-function ar({
+function lr({
   id: e,
   url: t,
   filename: n,
   patientReference: r
 }) {
-  return Gt({
+  return Wt({
     id: e,
     files: [{ url: t, fileName: n }],
     patientReference: r,
     includeLegacyNiftiIdentifiers: true
   });
 }
-function et(e) {
+function tt(e) {
   if (Array.isArray(e) || !e || typeof e != "object")
     return e;
   const t = Object.entries(e).reduce((n, [r, i]) => (i && typeof i == "object" && !Array.isArray(i) && n.push({ key: r, resource: i }), n), []);
   return t.length ? t : e;
 }
-function gt(e, t, n) {
-  const r = et(e), i = D(r);
+function St(e, t, n) {
+  const r = tt(e), i = j(r);
   return i.length === 0 ? null : { mode: "files", studyId: t, files: i, ohifMode: n };
 }
-function ur(e) {
-  const t = et(e), n = qt(t) || "study", r = zt(t), i = jt(t) || void 0;
-  if (r === K) {
-    const d = H(t);
-    if (!d)
+function fr(e) {
+  const t = tt(e), n = zt(t) || "study", r = Ht(t), i = qt(t) || void 0;
+  if (r === X) {
+    const f = F(t);
+    if (!f)
       return null;
-    const f = {
+    const d = {
       mode: "dicomweb",
       studyId: n,
-      studyInstanceUID: d,
-      seriesInstanceUID: z(t) || void 0,
-      dicomwebRoot: $e(t) || void 0,
+      studyInstanceUID: f,
+      seriesInstanceUID: D(t) || void 0,
+      dicomwebRoot: Oe(t) || void 0,
       ohifMode: i
-    }, o = D(t);
-    return o.length > 0 && (f.idcFallback = {
-      studyInstanceUID: d,
-      seriesInstanceUID: Re(t) || z(t) || void 0,
-      sourceBucket: Oe(t),
-      files: o
-    }), f;
+    }, c = j(t);
+    return c.length > 0 && (d.idcFallback = {
+      studyInstanceUID: f,
+      seriesInstanceUID: Pe(t) || D(t) || void 0,
+      sourceBucket: xe(t),
+      files: c
+    }), d;
   }
-  if (r === F) {
-    const d = gt(t, n, i);
-    if (d)
-      return d;
+  if (r === M) {
+    const f = St(t, n, i);
+    if (f)
+      return f;
   }
   if (r === pe) {
-    const d = D(t);
-    return d.length ? { mode: "dicom-url", studyId: n, files: d, ohifMode: i } : null;
+    const f = j(t);
+    return f.length ? { mode: "dicom-url", studyId: n, files: f, ohifMode: i } : null;
   }
-  if (r === me) {
-    const d = H(t);
-    if (!d)
+  if (r === ye) {
+    const f = F(t);
+    if (!f)
       return null;
-    const f = D(t);
-    return f.length ? {
+    const d = j(t);
+    return d.length ? {
       mode: "idc",
       studyId: n,
-      studyInstanceUID: d,
-      seriesInstanceUID: Re(t) || z(t) || void 0,
-      sourceBucket: Oe(t),
-      files: f,
+      studyInstanceUID: f,
+      seriesInstanceUID: Pe(t) || D(t) || void 0,
+      sourceBucket: xe(t),
+      files: d,
       ohifMode: i
     } : null;
   }
-  const s = gt(t, n, i);
+  if (r === ge) {
+    const f = F(t);
+    return f ? {
+      mode: "local-dicom",
+      studyId: n,
+      studyInstanceUID: f,
+      seriesInstanceUID: D(t) || void 0,
+      ohifMode: i
+    } : null;
+  }
+  const s = St(t, n, i);
   if (s)
     return s;
-  const c = Y(t);
-  if (c) {
-    const d = Qe(t);
+  const o = Z(t);
+  if (o) {
+    const f = et(t);
     return {
       mode: "files",
       studyId: n,
-      files: [{ url: c, fileName: d || "volume.nii.gz", label: n }],
+      files: [{ url: o, fileName: f || "volume.nii.gz", label: n }],
       ohifMode: i
     };
   }
-  const a = H(t);
+  const a = F(t);
   return a ? {
     mode: "dicomweb",
     studyId: n,
     studyInstanceUID: a,
-    seriesInstanceUID: z(t) || void 0,
-    dicomwebRoot: $e(t) || void 0,
+    seriesInstanceUID: D(t) || void 0,
+    dicomwebRoot: Oe(t) || void 0,
     ohifMode: i
   } : null;
 }
-function xe(e) {
+function Be(e) {
   return typeof e != "string" ? "" : e.trim().replace(/^urn:oid:/i, "");
 }
-function lr(e) {
+function dr(e) {
   if (!e || typeof e != "object")
     return "";
-  const t = xe(e.uid);
+  const t = Be(e.uid);
   if (t)
     return t;
   const r = (Array.isArray(e.identifier) ? e.identifier : []).find(
     (i) => typeof (i == null ? void 0 : i.system) == "string" && i.system.toLowerCase() === "urn:dicom:uid"
   );
-  return xe(r == null ? void 0 : r.value);
+  return Be(r == null ? void 0 : r.value);
 }
-function ne(e) {
+function ie(e) {
   const t = e == null ? void 0 : e["hub.event"];
   return typeof t == "string" ? t.trim().toLowerCase() : "";
 }
-function Wt(e) {
+function Vt(e) {
   return typeof e == "string" ? e.trim().toUpperCase() : !e || typeof e != "object" ? "" : (typeof e.keyword == "string" && e.keyword || typeof e.id == "string" && e.id || typeof e.key == "string" && e.key || "").trim().toUpperCase();
 }
-function fr(e) {
+function br(e) {
   const t = e == null ? void 0 : e["target.actor"];
-  return t == null ? "" : Wt(t);
+  return t == null ? "" : Vt(t);
 }
-function dr(e) {
+function hr(e) {
   if (!Array.isArray(e))
     return [];
   try {
@@ -11333,19 +11382,19 @@ function dr(e) {
     }
   }
 }
-function br(e) {
+function mr(e) {
   const t = e == null ? void 0 : e.event;
   return t && typeof t == "object" && Array.isArray(t.context) ? t.context : [];
 }
-function hr(e) {
+function pr(e) {
   return String(
     (e == null ? void 0 : e["subscriber.name"]) || (e == null ? void 0 : e.subscriber) || ""
   ).trim() || null;
 }
-function pr(e) {
+function yr(e) {
   return String((e == null ? void 0 : e["subscriber.product.name"]) || "").trim();
 }
-function mr(e) {
+function gr(e) {
   const t = String((e == null ? void 0 : e["subscriber.actor"]) || "").trim();
   if (t)
     return t;
@@ -11358,104 +11407,104 @@ function mr(e) {
     }
   return "";
 }
-function yr(e) {
+function Sr(e) {
   const t = e == null ? void 0 : e.event;
-  if (ne(t) !== "status-update")
+  if (ie(t) !== "status-update")
     return null;
   const n = t != null && t.context && typeof t.context == "object" && !Array.isArray(t.context) ? t.context : {};
   return { message: String(n.message ?? "").trim(), level: String(n.level ?? "info") };
 }
-function gr(e) {
+function Cr(e) {
   const t = atob(e), n = new Uint8Array(t.length);
   for (let r = 0; r < t.length; r += 1)
     n[r] = t.charCodeAt(r);
   return n;
 }
-function Vt(e) {
+function Jt(e) {
   try {
-    const t = gr(e), n = new ArrayBuffer(t.byteLength);
+    const t = Cr(e), n = new ArrayBuffer(t.byteLength);
     return new Uint8Array(n).set(t), n;
   } catch {
     return null;
   }
 }
-function Jt(e) {
+function Kt(e) {
   const t = e == null ? void 0 : e.context;
   if (!t || typeof t != "object" || Array.isArray(t))
     return [];
   const n = t.files;
   return Array.isArray(n) ? n.filter((r) => !!(r && typeof r == "object")) : [];
 }
-function Sr(e) {
+function wr(e) {
   const t = e == null ? void 0 : e.context;
   return Array.isArray(t) ? t : t != null ? [t] : [];
 }
-function St(e, t, n) {
+function Ct(e, t, n) {
   return e instanceof ArrayBuffer ? { arrayBuffer: e, fileName: t, mimeType: n } : typeof e == "string" && e ? { fileName: t, data: e, mimeType: n } : null;
 }
-function Kt(e) {
+function Yt(e) {
   return e === "nifti-send" ? "application/vnd.unknown.nifti-1" : "application/dicom";
 }
-function Cr(e, t) {
+function Er(e, t) {
   return e === "nifti-send" ? `cast-nifti-send-${t + 1}.nii.gz` : `cast-dicom-send-${t + 1}.dcm`;
 }
-function wr(e, t) {
+function Tr(e, t) {
   return e === "nifti-send" ? `cast-nifti-send-${t + 1}.nii.gz` : "dicom-sr.dcm";
 }
-function Er(e, t) {
-  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : Kt(t);
-}
-function Tr(e, t) {
-  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : typeof e.contentType == "string" && e.contentType.trim() ? e.contentType.trim() : Kt(t);
-}
 function Nr(e, t) {
+  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : Yt(t);
+}
+function Ar(e, t) {
+  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : typeof e.contentType == "string" && e.contentType.trim() ? e.contentType.trim() : Yt(t);
+}
+function vr(e, t) {
   const n = e == null ? void 0 : e.event;
-  if (ne(n) !== t.toLowerCase())
+  if (ie(n) !== t.toLowerCase())
     return [];
-  const r = Jt(n);
+  const r = Kt(n);
   if (r.length) {
-    const s = r.map((c, a) => {
-      const d = Er(c, t), f = typeof c.fileName == "string" && c.fileName.trim() ? c.fileName.trim() : Cr(t, a);
-      return St(c.data, f, d);
+    const s = r.map((o, a) => {
+      const f = Nr(o, t), d = typeof o.fileName == "string" && o.fileName.trim() ? o.fileName.trim() : Er(t, a);
+      return Ct(o.data, d, f);
     }).filter(Boolean);
     if (s.length)
       return s;
   }
-  return Sr(n).map((s, c) => {
+  return wr(n).map((s, o) => {
     if (!s || typeof s != "object")
       return null;
     const a = s.resource;
     if (!a || typeof a != "object")
       return null;
-    const d = Tr(a, t), f = typeof a.fileName == "string" && a.fileName.trim() ? a.fileName.trim() : wr(t, c);
-    return St(a.data, f, d);
+    const f = Ar(a, t), d = typeof a.fileName == "string" && a.fileName.trim() ? a.fileName.trim() : Tr(t, o);
+    return Ct(a.data, d, f);
   }).filter(Boolean);
 }
-function Yt(e) {
-  return (e == null ? void 0 : e.arrayBuffer) instanceof ArrayBuffer ? e.arrayBuffer : typeof (e == null ? void 0 : e.data) == "string" ? Vt(e.data) : null;
+function Xt(e) {
+  return (e == null ? void 0 : e.arrayBuffer) instanceof ArrayBuffer ? e.arrayBuffer : typeof (e == null ? void 0 : e.data) == "string" ? Jt(e.data) : null;
 }
-function Ar(e, t, n) {
-  const r = Yt(e);
+function Ir(e, t, n) {
+  const r = Xt(e);
   if (!r)
     return null;
   const i = (e == null ? void 0 : e.fileName) || t, s = (e == null ? void 0 : e.mimeType) || n;
   return new File([r], i, { type: s });
 }
-var Ct = 4e3;
-var vr = 480;
-var oe = "[binary/redacted]";
-function ce(e, t) {
-  return t > 8 ? "[max-depth]" : e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? oe : typeof e == "string" ? e.length > vr ? `${e.slice(0, 160)}\u2026 (${e.length} chars)` : e : Array.isArray(e) ? e.map((n) => ce(n, t + 1)) : e && typeof e == "object" ? Object.entries(e).reduce((n, [r, i]) => (r.toLowerCase() === "data" && typeof i == "string" && i.length > 200 ? n[r] = oe : n[r] = ce(i, t + 1), n), {}) : e;
+var wt = 4e3;
+var Lr = 480;
+var ae = "[binary/redacted]";
+function ue(e, t) {
+  return t > 8 ? "[max-depth]" : e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? ae : typeof e == "string" ? e.length > Lr ? `${e.slice(0, 160)}\u2026 (${e.length} chars)` : e : Array.isArray(e) ? e.map((n) => ue(n, t + 1)) : e && typeof e == "object" ? Object.entries(e).reduce((n, [r, i]) => (r.toLowerCase() === "data" && typeof i == "string" && i.length > 200 ? n[r] = ae : n[r] = ue(i, t + 1), n), {}) : e;
 }
-function Pe(e) {
+function De(e) {
   try {
-    const t = JSON.stringify(ce(e, 0));
-    return t.length > Ct ? `${t.slice(0, Ct)}\u2026` : t;
+    const t = JSON.stringify(ue(e, 0));
+    return t.length > wt ? `${t.slice(0, wt)}\u2026` : t;
   } catch {
     return "[unserializable]";
   }
 }
-function tt(e) {
+function nt(e) {
   if (!e)
     return 0;
   const { context: t } = e;
@@ -11467,7 +11516,7 @@ function tt(e) {
   }
   return 0;
 }
-function Xt(e, t) {
+function Zt(e, t) {
   if (!e)
     return t === 1 ? "1 object" : `${t} objects`;
   if (t === 0)
@@ -11475,50 +11524,50 @@ function Xt(e, t) {
   const n = e === "dicom-send" || e === "nifti-send" ? "image" : "object", r = t === 1 ? n : `${n}s`;
   return `${e} (${t} ${r})`;
 }
-function Lr(e) {
-  const t = e != null && e.event && typeof e.event == "object" ? e.event : void 0, r = ne(t) || "publish", i = tt(t);
-  return { label: Xt(r, i), detail: "" };
-}
-function Ir(e) {
-  if (!e || typeof e != "object")
-    return { label: "raw", detail: Pe(e) };
-  const t = e.event, r = ne(t) || (typeof (t == null ? void 0 : t.event) == "string" ? String(t.event) : "message"), i = tt(t);
-  return { label: Xt(r, i), detail: Pe(e) };
-}
 function _r(e) {
-  return ce(e, 0);
+  const t = e != null && e.event && typeof e.event == "object" ? e.event : void 0, r = ie(t) || "publish", i = nt(t);
+  return { label: Zt(r, i), detail: "" };
+}
+function kr(e) {
+  if (!e || typeof e != "object")
+    return { label: "raw", detail: De(e) };
+  const t = e.event, r = ie(t) || (typeof (t == null ? void 0 : t.event) == "string" ? String(t.event) : "message"), i = nt(t);
+  return { label: Zt(r, i), detail: De(e) };
+}
+function Ur(e) {
+  return ue(e, 0);
 }
 var R = "*";
-var Ce = "ID";
-var kr = {
+var Ee = "ID";
+var $r = {
   subscriberName: R,
-  subscriberActor: Ce,
+  subscriberActor: Ee,
   targetActor: R,
   targetProductName: R
 };
-function X(e) {
+function Q(e) {
   return String(e ?? "").trim() || R;
 }
-function Ur(e, t) {
+function Rr(e, t) {
   return {
     subscriberName: (e.subscriberName ?? "").trim() || t.subscriberName || R,
-    subscriberActor: (e.subscriberActor ?? "").trim() || Ce,
-    targetActor: X(e.targetActor),
-    targetProductName: X(e.targetProductName)
+    subscriberActor: (e.subscriberActor ?? "").trim() || Ee,
+    targetActor: Q(e.targetActor),
+    targetProductName: Q(e.targetProductName)
   };
 }
-function $r(e, t) {
-  e["subscriber.name"] = t.subscriberName.trim() || R, e["subscriber.actor"] = t.subscriberActor.trim() || Ce, e["target.actor"] = X(t.targetActor), e["target.product.name"] = X(
+function Or(e, t) {
+  e["subscriber.name"] = t.subscriberName.trim() || R, e["subscriber.actor"] = t.subscriberActor.trim() || Ee, e["target.actor"] = Q(t.targetActor), e["target.product.name"] = Q(
     t.targetProductName
   );
 }
-function Zt(e) {
+function Qt(e) {
   const t = e == null ? void 0 : e.event;
-  return !!(t && Ie(t));
+  return !!(t && ke(t));
 }
-async function Rr(e, t) {
+async function Pr(e, t) {
   var i, s;
-  if (!(((i = e == null ? void 0 : e.hasPendingPayload) == null ? void 0 : i.call(e, t)) || Zt(t)))
+  if (!(((i = e == null ? void 0 : e.hasPendingPayload) == null ? void 0 : i.call(e, t)) || Qt(t)))
     return t;
   let r = t;
   if (e != null && e.fetchAllPayloads)
@@ -11528,46 +11577,46 @@ async function Rr(e, t) {
       r = await e.fetchPayload(r);
   return r;
 }
-var Qt = [
+var en = [
   "TOTALSEG",
   "TOTAL_SEGMENTATOR",
   "TOTAL-SEGMENTATOR"
 ];
-var en = [
+var tn = [
   "LUNGSCREENING",
   "LUNG_SCREENING"
 ];
-var tn = [
+var nn = [
   "NEURO_SEG",
   "NEUROSEG",
   "NEURO-SEG"
 ];
-function Be(e) {
+function Fe(e) {
   return String(e || "").trim().toUpperCase().replace(/-/g, "_");
 }
-function nt(e, t) {
-  const n = Be(e);
+function rt(e, t) {
+  const n = Fe(e);
   if (!n)
     return false;
   const r = n.replace(/_/g, "");
   return t.some((i) => {
-    const s = Be(i);
+    const s = Fe(i);
     return s === n || s.replace(/_/g, "") === r;
   });
 }
-function we(e) {
-  return nt(e, Qt);
-}
-function Ee(e) {
-  return nt(e, en);
-}
 function Te(e) {
-  return nt(e, tn);
+  return rt(e, en);
 }
-function Or(e) {
-  return we(e) || Ee(e) || Te(e);
+function Ne(e) {
+  return rt(e, tn);
 }
-function rt(e, t) {
+function Ae(e) {
+  return rt(e, nn);
+}
+function xr(e) {
+  return Te(e) || Ne(e) || Ae(e);
+}
+function it(e, t) {
   if (!Array.isArray(e))
     return;
   const n = String(t).trim().toLowerCase(), r = e.find((s) => !s || typeof s != "object" ? false : String(s.key ?? "").trim().toLowerCase() === n);
@@ -11576,13 +11625,13 @@ function rt(e, t) {
   const i = r.value;
   return typeof i == "string" ? i.trim() : void 0;
 }
-function it(e) {
+function st(e) {
   if (!e || typeof e != "object" || e.source !== "status")
     return false;
-  const t = rt(e.items, "availability");
+  const t = it(e.items, "availability");
   return t ? t.toLowerCase() === "online" : Array.isArray(e.items) && e.items.length > 0;
 }
-function Ne(e) {
+function ve(e) {
   const t = String((e == null ? void 0 : e.productName) ?? "").trim();
   if (t)
     return t;
@@ -11594,80 +11643,78 @@ function Ne(e) {
   }
   return "";
 }
-function st(e, t) {
+function ot(e, t) {
   return Array.isArray(e) ? e.some((n) => {
-    const r = Ne(n);
-    return t(r) && it(n.data);
+    const r = ve(n);
+    return t(r) && st(n.data);
   }) : false;
 }
-function xr(e) {
-  return st(
+function Br(e) {
+  return ot(
     e,
-    we
+    Te
   );
 }
-function Pr(e) {
-  return st(e, Ee);
-}
-function Br(e) {
-  return st(e, Te);
+function Dr(e) {
+  return ot(e, Ne);
 }
 function Fr(e) {
+  return ot(e, Ae);
+}
+function Mr(e) {
   return typeof e != "string" ? false : e.trim().toUpperCase() === "STATUS";
 }
-var Dr = "lung";
-var Mr = "LUNGSCREENING";
-var jr = "Lung Screening";
-var qr = "Toronto, Canada";
-var zr = "CT lung screening (dicom-send / nifti-send). Returns a screening result line.";
-var Hr = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/lung_screening.py";
-var Gr = "dicom-send";
-var Wr = {
-  id: Dr,
-  product: Mr,
-  title: jr,
-  location: qr,
-  summary: zr,
-  githubUrl: Hr,
-  hubEvent: Gr
+var jr = "lung";
+var qr = "LUNGSCREENING";
+var zr = "Lung Screening";
+var Hr = "Toronto, Canada";
+var Gr = "CT lung screening (dicom-send / nifti-send). Returns a screening result line.";
+var Wr = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/lung_screening.py";
+var Vr = "dicom-send";
+var Jr = {
+  id: jr,
+  product: qr,
+  title: zr,
+  location: Hr,
+  summary: Gr,
+  githubUrl: Wr,
+  hubEvent: Vr
 };
-var Vr = "totalseg";
-var Jr = "TOTALSEG";
-var Kr = "Total Segmentator";
-var Yr = "Frankfurt, Germany";
-var Xr = "Whole-body CT/MR multi-organ segmentation (dicom-send / nifti-send jobs). Returns DICOM SEG via dicom-send.";
-var Zr = "https://github.com/wasserth/TotalSegmentator";
-var Qr = "https://totalsegmentator.com/";
-var ei = "https://buymeacoffee.com/totalsegmentator";
-var ti = "dicom-send";
-var ni = {
-  id: Vr,
-  product: Jr,
-  title: Kr,
-  location: Yr,
-  summary: Xr,
-  githubUrl: Zr,
-  websiteUrl: Qr,
-  buyMeACoffeeUrl: ei,
-  hubEvent: ti
+var Kr = "totalseg";
+var Yr = "TOTALSEG";
+var Xr = "Total Segmentator";
+var Zr = "Frankfurt, Germany";
+var Qr = "Whole-body CT/MR multi-organ segmentation (dicom-send / nifti-send jobs). Returns DICOM SEG via dicom-send.";
+var ei = "https://github.com/wasserth/TotalSegmentator";
+var ti = "https://totalsegmentator.com/";
+var ni = "dicom-send";
+var ri = {
+  id: Kr,
+  product: Yr,
+  title: Xr,
+  location: Zr,
+  summary: Qr,
+  githubUrl: ei,
+  websiteUrl: ti,
+  hubEvent: ni
 };
-var ri = "neuro";
-var ii = "NEURO_SEG";
-var si = "Subcortical segmentation";
-var oi = "Montreal, Canada";
-var ci = "Neuro / subcortical segmentation (nifti-send). Prefers a NIfTI volume input.";
-var ai = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/neuro_seg.py";
-var ui = "nifti-send";
-var li = {
-  id: ri,
-  product: ii,
-  title: si,
-  location: oi,
-  summary: ci,
-  githubUrl: ai,
-  hubEvent: ui
+var ii = "neuro";
+var si = "NEURO_SEG";
+var oi = "Subcortical segmentation";
+var ci = "Montreal, Canada";
+var ai = "Neuro / subcortical segmentation (nifti-send). Prefers a NIfTI volume input.";
+var ui = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/neuro_seg.py";
+var li = "nifti-send";
+var fi = {
+  id: ii,
+  product: si,
+  title: oi,
+  location: ci,
+  summary: ai,
+  githubUrl: ui,
+  hubEvent: li
 };
-function Le(e) {
+function _e(e) {
   const t = String(e.summary || e.capabilities || "").trim(), n = e.hubEvent === "nifti-send" ? "nifti-send" : "dicom-send", r = {
     id: String(e.id || "").trim(),
     product: String(e.product || "").trim(),
@@ -11680,38 +11727,38 @@ function Le(e) {
   i && (r.githubUrl = i);
   const s = String(e.websiteUrl || "").trim();
   s && (r.websiteUrl = s);
-  const c = String(e.buyMeACoffeeUrl || "").trim();
-  return c && (r.buyMeACoffeeUrl = c), r;
+  const o = String(e.buyMeACoffeeUrl || "").trim();
+  return o && (r.buyMeACoffeeUrl = o), r;
 }
 var O = Object.freeze([
-  Le(Wr),
-  Le(ni),
-  Le(li)
+  _e(Jr),
+  _e(ri),
+  _e(fi)
 ]);
-function q(e) {
+function W(e) {
   return String(e ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function fi(e) {
+function di(e) {
   if (!e || typeof e != "object") return "";
-  const t = q(e.title), n = q(e.summary || e.capabilities), r = [
+  const t = W(e.title), n = W(e.summary || e.capabilities), r = [
     '<div class="cast-inference-info-card">',
     `<div class="cast-inference-info-title">${t}</div>`
   ];
   n && r.push(`<p class="cast-inference-info-summary">${n}</p>`), r.push('<div class="cast-inference-info-links">');
   const i = String(e.githubUrl || "").trim();
   i && r.push(
-    `<a class="cast-inference-info-link cast-inference-info-github" href="${q(i)}" target="_blank" rel="noopener noreferrer"><svg class="cast-inference-info-github-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>`
+    `<a class="cast-inference-info-link cast-inference-info-github" href="${W(i)}" target="_blank" rel="noopener noreferrer"><svg class="cast-inference-info-github-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>`
   );
   const s = String(e.websiteUrl || "").trim();
   s && r.push(
-    `<a class="cast-inference-info-link" href="${q(s)}" target="_blank" rel="noopener noreferrer">Website</a>`
+    `<a class="cast-inference-info-link" href="${W(s)}" target="_blank" rel="noopener noreferrer">Website</a>`
   );
-  const c = String(e.buyMeACoffeeUrl || "").trim();
-  return c && r.push(
-    `<a class="cast-inference-info-coffee" href="${q(c)}" target="_blank" rel="noopener noreferrer" title="Buy Me a Coffee"><span aria-hidden="true">\u2615</span> Buy me a coffee</a>`
+  const o = String(e.buyMeACoffeeUrl || "").trim();
+  return o && r.push(
+    `<a class="cast-inference-info-coffee" href="${W(o)}" target="_blank" rel="noopener noreferrer" title="Buy Me a Coffee"><span aria-hidden="true">\u2615</span> Buy me a coffee</a>`
   ), r.push("</div></div>"), r.join("");
 }
-function di(e, t) {
+function bi(e, t) {
   if (!e || typeof e != "object")
     return "";
   const n = [
@@ -11724,7 +11771,7 @@ function di(e, t) {
   return r && n.push(r), n.join(`
 `);
 }
-function nn(e) {
+function rn(e) {
   const t = String(e || "").trim().toUpperCase().replace(/-/g, "_");
   if (!t)
     return null;
@@ -11734,10 +11781,10 @@ function nn(e) {
     return i === t || i.replace(/_/g, "") === n;
   }) || null;
 }
-function rn(e) {
+function sn(e) {
   return String(e || "").trim().toUpperCase();
 }
-var sn = Object.freeze({
+var on = Object.freeze({
   ira: (e) => e === "SLICERLIVE-IRA" || e.startsWith("SLICERLIVE-IRA"),
   ohif: (e) => e === "OHIF" || e.startsWith("OHIF"),
   volview: (e) => e === "VOLVIEW" || e.startsWith("VOLVIEW"),
@@ -11747,26 +11794,26 @@ var sn = Object.freeze({
   neuro: (e) => e === "NEURO_SEG" || e.startsWith("NEURO_SEG") || e === "NEUROSEG" || e.startsWith("NEUROSEG"),
   reporting: (e) => e === "CAST-RPT" || e.startsWith("CAST-RPT")
 });
-function bi(e, t) {
-  const n = sn[t];
-  return n ? n(rn(e)) : false;
+function hi(e, t) {
+  const n = on[t];
+  return n ? n(sn(e)) : false;
 }
-function on(e, t, n) {
+function cn(e, t, n) {
   if (!e || typeof e != "object")
     return { online: false, items: [], raw: n, ...t ? { productName: t } : {} };
   const r = (
     /** @type {{ items?: unknown }} */
     e
-  ), i = Array.isArray(r.items) ? r.items : [], s = rt(i, "job");
+  ), i = Array.isArray(r.items) ? r.items : [], s = it(i, "job");
   return {
-    online: it(e),
+    online: st(e),
     items: i,
     ...s ? { job: s } : {},
     raw: n,
     ...t ? { productName: t } : {}
   };
 }
-function cn(e) {
+function an(e) {
   if (!e || typeof e != "object")
     return { online: false, items: [], error: "Empty STATUS result" };
   const t = (
@@ -11780,41 +11827,61 @@ function cn(e) {
       error: `HTTP ${t.status ?? "?"}`,
       raw: t.data
     };
-  const { responses: n } = le(t.data);
+  const { responses: n } = de(t.data);
   for (const r of n) {
     const i = r.data;
     if (!i || typeof i != "object")
       continue;
-    const s = Ne(r) || void 0, c = on(i, s, t.data);
-    if (c.online || Array.isArray(
+    const s = ve(r) || void 0, o = cn(i, s, t.data);
+    if (o.online || Array.isArray(
       /** @type {{ items?: unknown }} */
       i.items
     ))
-      return c;
+      return o;
   }
   return { online: false, items: [], raw: t.data };
 }
-async function ot(e, t) {
+async function ct(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
     return { ok: false, status: 0, data: { error: "No Cast client" } };
   if (!n)
     return { ok: false, status: 0, data: { error: "No subscriber name" } };
-  const r = String((t == null ? void 0 : t.topic) || "").trim(), i = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), c = String((t == null ? void 0 : t.targetActor) || "*").trim() || "*", a = String((t == null ? void 0 : t.targetProductName) || "").trim();
+  const r = String((t == null ? void 0 : t.topic) || "").trim(), i = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), o = String((t == null ? void 0 : t.targetActor) || "*").trim() || "*", a = String((t == null ? void 0 : t.targetProductName) || "").trim();
   return e.request({
     "subscriber.name": n,
     ...i ? { "subscriber.product.name": i } : {},
     ...s ? { "subscriber.actor": s } : {},
-    "target.actor": c,
+    "target.actor": o,
     ...a ? { "target.product.name": a } : {},
     event: {
-      "hub.event": ze("STATUS"),
+      "hub.event": be("STATUS"),
       ...r ? { "hub.topic": r } : {},
       context: { dataType: "STATUS" }
     }
   });
 }
-async function hi(e, t) {
+async function mi(e, t) {
+  const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
+  if (!(e != null && e.request))
+    return { ok: false, status: 0, data: { error: "No Cast client" } };
+  if (!n)
+    return { ok: false, status: 0, data: { error: "No subscriber name" } };
+  const r = String((t == null ? void 0 : t.topic) || "").trim(), i = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), o = String((t == null ? void 0 : t.targetActor) || "ID").trim() || "ID", a = String((t == null ? void 0 : t.targetProductName) || "").trim();
+  return e.request({
+    "subscriber.name": n,
+    ...i ? { "subscriber.product.name": i } : {},
+    ...s ? { "subscriber.actor": s } : {},
+    "target.actor": o,
+    ...a ? { "target.product.name": a } : {},
+    event: {
+      "hub.event": be("LIVESCENE"),
+      ...r ? { "hub.topic": r } : {},
+      context: { dataType: "LIVESCENE" }
+    }
+  });
+}
+async function pi(e, t) {
   const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
     return { online: false, items: [], error: "No Cast client" };
@@ -11823,14 +11890,14 @@ async function hi(e, t) {
   if (!n)
     return { online: false, items: [], error: "No target product" };
   try {
-    const i = await ot(e, {
+    const i = await ct(e, {
       subscriberName: r,
       subscriberProductName: t == null ? void 0 : t.subscriberProductName,
       subscriberActor: t == null ? void 0 : t.subscriberActor,
       topic: t == null ? void 0 : t.topic,
       targetProductName: n
     });
-    return cn(i);
+    return an(i);
   } catch (i) {
     return {
       online: false,
@@ -11839,12 +11906,12 @@ async function hi(e, t) {
     };
   }
 }
-function pi(e, t) {
+function yi(e, t) {
   if (!e) return false;
-  const n = nn(e);
-  return n && n.id === t.id ? true : t.id === "totalseg" ? we(e) : t.id === "lung" ? Ee(e) : t.id === "neuro" ? Te(e) : false;
+  const n = rn(e);
+  return n && n.id === t.id ? true : t.id === "totalseg" ? Te(e) : t.id === "lung" ? Ne(e) : t.id === "neuro" ? Ae(e) : false;
 }
-function an(e) {
+function un(e) {
   if (!e || typeof e != "object")
     return O.map((r) => ({
       server: r,
@@ -11861,16 +11928,16 @@ function an(e) {
       probe: { online: false, items: [], error: r, raw: t.data }
     }));
   }
-  const { responses: n } = le(t.data);
+  const { responses: n } = de(t.data);
   return O.map((r) => {
     for (const i of n) {
-      const s = Ne(i);
-      if (!pi(s, r)) continue;
-      const c = i.data;
+      const s = ve(i);
+      if (!yi(s, r)) continue;
+      const o = i.data;
       return {
         server: r,
-        probe: on(
-          c,
+        probe: cn(
+          o,
           s || r.product,
           t.data
         )
@@ -11882,7 +11949,7 @@ function an(e) {
     };
   });
 }
-async function mi(e, t) {
+async function gi(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request) || !n)
     return O.map((r) => ({
@@ -11894,14 +11961,14 @@ async function mi(e, t) {
       }
     }));
   try {
-    const r = await ot(e, {
+    const r = await ct(e, {
       subscriberName: n,
       subscriberProductName: t == null ? void 0 : t.subscriberProductName,
       subscriberActor: t == null ? void 0 : t.subscriberActor,
       topic: t == null ? void 0 : t.topic,
       targetActor: "*"
     });
-    return an(r);
+    return un(r);
   } catch (r) {
     const i = r instanceof Error ? r.message : String(r);
     return O.map((s) => ({
@@ -11910,8 +11977,8 @@ async function mi(e, t) {
     }));
   }
 }
-async function yi(e, t) {
-  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.hubEvent) || "").trim(), i = String((t == null ? void 0 : t.subscriberName) || "").trim(), s = String((t == null ? void 0 : t.topic) || "").trim(), c = Array.isArray(t == null ? void 0 : t.files) ? t.files : [];
+async function Si(e, t) {
+  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.hubEvent) || "").trim(), i = String((t == null ? void 0 : t.subscriberName) || "").trim(), s = String((t == null ? void 0 : t.topic) || "").trim(), o = Array.isArray(t == null ? void 0 : t.files) ? t.files : [];
   if (!(e != null && e.publish))
     return { ok: false, detail: "No Cast client" };
   if (!i)
@@ -11922,44 +11989,44 @@ async function yi(e, t) {
     return { ok: false, detail: "No target product" };
   if (!r)
     return { ok: false, detail: "No hub.event" };
-  if (!c.length)
+  if (!o.length)
     return { ok: false, detail: "No volume files" };
-  const a = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), d = String((t == null ? void 0 : t.subscriberActor) || "").trim(), f = t != null && t.contextExtras && typeof t.contextExtras == "object" ? t.contextExtras : {};
+  const a = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), f = String((t == null ? void 0 : t.subscriberActor) || "").trim(), d = t != null && t.contextExtras && typeof t.contextExtras == "object" ? t.contextExtras : {};
   try {
-    const o = await e.publish({
+    const c = await e.publish({
       "subscriber.name": i,
       ...a ? { "subscriber.product.name": a } : {},
-      ...d ? { "subscriber.actor": d } : {},
+      ...f ? { "subscriber.actor": f } : {},
       "target.product.name": n,
       event: {
         "hub.topic": s,
         "hub.event": r,
         context: {
-          files: c.map((u) => ({
+          files: o.map((u) => ({
             url: String(u.url || "").trim(),
             fileName: String(u.fileName || "volume").trim() || "volume"
           })),
-          ...f
+          ...d
         }
       }
-    }), b = !!(o && /** @type {{ ok?: boolean }} */
-    o.ok !== false);
+    }), b = !!(c && /** @type {{ ok?: boolean }} */
+    c.ok !== false);
     return {
       ok: b,
       detail: b ? "published" : `publish status ${/** @type {{ status?: number }} */
-      (o == null ? void 0 : o.status) ?? "?"}`,
-      response: o
+      (c == null ? void 0 : c.status) ?? "?"}`,
+      response: c
     };
-  } catch (o) {
+  } catch (c) {
     return {
       ok: false,
-      detail: o instanceof Error ? o.message : String(o)
+      detail: c instanceof Error ? c.message : String(c)
     };
   }
 }
-var gi = 1e4;
-var wt = 5e3;
-var Et = {
+var Ci = 1e4;
+var Et = 5e3;
+var Tt = {
   config: {
     hub: {},
     session: {},
@@ -11976,19 +12043,19 @@ var Et = {
   onMessageCallback: null,
   onConnectionStateChangeCallback: null
 };
-function Si(e, t) {
+function wi(e, t) {
   t.classHierarchy.push("vtkCastClient");
-  function n(o, b) {
-    t.onConnectionStateChangeCallback && t.onConnectionStateChangeCallback(o, b);
+  function n(c, b) {
+    t.onConnectionStateChangeCallback && t.onConnectionStateChangeCallback(c, b);
   }
   function r() {
-    const o = t.session.productName || t.config.productName || Fe;
-    return gn(o);
+    const c = t.session.productName || t.config.productName || Me;
+    return Sn(c);
   }
   function i() {
-    const o = t.hub.authorization_endpoint;
-    if (typeof o == "string" && o.trim())
-      return o.trim();
+    const c = t.hub.authorization_endpoint;
+    if (typeof c == "string" && c.trim())
+      return c.trim();
     try {
       return `${new URL(t.hub.token_endpoint).origin}/oauth/authorize`;
     } catch {
@@ -11998,13 +12065,13 @@ function Si(e, t) {
   function s() {
     console.debug("CastClient: websocket is closed."), t.hub.resubscribeRequested = true, n("disconnected");
   }
-  const c = Wn(() => ({
+  const o = Vn(() => ({
     hubEndpoint: t.hub.hub_endpoint,
     accessToken: t.hub.token
   }));
-  function a(o) {
+  function a(c) {
     try {
-      const b = JSON.parse(o);
+      const b = JSON.parse(c);
       if (b["hub.mode"])
         return;
       const u = b.event;
@@ -12015,65 +12082,65 @@ function Si(e, t) {
       console.warn("CastClient: websocket processing error:", b);
     }
   }
-  async function d() {
+  async function f() {
     t.hub.resubscribeRequested && t.hub.subscribed && t.config.autoReconnect ? (console.debug("CastClient: Try to resubscribe"), t.hub.resubscribeRequested = false, await e.subscribe() !== 202 && (t.hub.resubscribeRequested = true)) : !t.hub.subscribed && t.hub.resubscribeRequested && (t.hub.resubscribeRequested = false);
   }
-  e.onMessage = (o) => {
-    t.onMessageCallback = o;
-  }, e.onConnectionStateChange = (o) => {
-    t.onConnectionStateChangeCallback = o;
-  }, e.delete = mn(() => {
+  e.onMessage = (c) => {
+    t.onMessageCallback = c;
+  }, e.onConnectionStateChange = (c) => {
+    t.onConnectionStateChangeCallback = c;
+  }, e.delete = yn(() => {
     t.reconnectInterval && (clearInterval(t.reconnectInterval), t.reconnectInterval = null), e.unsubscribe();
   }, e.delete), e.getHubConfig = () => {
-    const o = t.hub;
+    const c = t.hub;
     return {
-      name: o.name,
-      friendlyName: o.friendlyName,
-      version: o.version,
-      hub_endpoint: o.hub_endpoint,
-      authorization_endpoint: o.authorization_endpoint,
-      token_endpoint: o.token_endpoint,
-      client_id: o.client_id,
-      client_secret: o.client_secret
+      name: c.name,
+      friendlyName: c.friendlyName,
+      version: c.version,
+      hub_endpoint: c.hub_endpoint,
+      authorization_endpoint: c.authorization_endpoint,
+      token_endpoint: c.token_endpoint,
+      client_id: c.client_id,
+      client_secret: c.client_secret
     };
   }, e.getSessionConfig = () => {
-    const o = t.session;
+    const c = t.session;
     return {
-      subscriberName: o.subscriberName,
-      productName: o.productName,
-      productVersion: o.productVersion,
-      actors: o.actors,
-      topic: o.topic,
-      events: o.events,
-      lease: o.lease,
-      userName: o.userName,
-      defaultTargetActor: o.defaultTargetActor
+      subscriberName: c.subscriberName,
+      productName: c.productName,
+      productVersion: c.productVersion,
+      actors: c.actors,
+      topic: c.topic,
+      events: c.events,
+      lease: c.lease,
+      userName: c.userName,
+      defaultTargetActor: c.defaultTargetActor
     };
   }, e.getConnectionState = () => {
-    const o = t.hub;
+    const c = t.hub;
     return {
-      token: o.token,
-      subscribed: o.subscribed,
-      resubscribeRequested: o.resubscribeRequested,
-      websocket: o.websocket,
-      lastPublishedMessageID: o.lastPublishedMessageID
+      token: c.token,
+      subscribed: c.subscribed,
+      resubscribeRequested: c.resubscribeRequested,
+      websocket: c.websocket,
+      lastPublishedMessageID: c.lastPublishedMessageID
     };
-  }, e.setTopic = (o) => {
-    console.debug("CastClient: setting topic to", o), t.session.topic = o;
-  }, e.setToken = (o) => {
-    t.hub.token = o;
-  }, e.setSubscriberName = (o) => {
-    t.session.subscriberName = o;
-  }, e.setUserName = (o) => {
-    t.session.userName = o || "";
+  }, e.setTopic = (c) => {
+    console.debug("CastClient: setting topic to", c), t.session.topic = c;
+  }, e.setToken = (c) => {
+    t.hub.token = c;
+  }, e.setSubscriberName = (c) => {
+    t.session.subscriberName = c;
+  }, e.setUserName = (c) => {
+    t.session.userName = c || "";
   }, e.authenticate = async () => {
-    const o = i();
-    if (!o)
+    const c = i();
+    if (!c)
       throw new Error(
         "CastClient.authenticate: no authorization_endpoint or token_endpoint configured."
       );
     try {
-      const h = new URL(o);
+      const h = new URL(c);
       console.debug(
         "CastClient: Authorizing at:",
         `${h.origin}${h.pathname}`
@@ -12085,7 +12152,7 @@ function Si(e, t) {
     t.hub.lastIdToken ? u.append("id_token", t.hub.lastIdToken) : t.session.userName && u.append("user_name", t.session.userName), u.append("client_product_name", b), t.session.topic && u.append("topic", t.session.topic);
     let l;
     try {
-      l = await fetch(o, {
+      l = await fetch(c, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: u
@@ -12104,14 +12171,14 @@ function Si(e, t) {
         `CastClient.authenticate failed (HTTP ${l.status})`
       );
     }
-    const p = await l.json();
-    return typeof p.user_name == "string" && p.user_name && (t.session.userName = p.user_name), {
-      user_name: p.user_name || "",
-      code: p.code || "",
-      expires_in: typeof p.expires_in == "number" ? p.expires_in : void 0
+    const m = await l.json();
+    return typeof m.user_name == "string" && m.user_name && (t.session.userName = m.user_name), {
+      user_name: m.user_name || "",
+      code: m.code || "",
+      expires_in: typeof m.expires_in == "number" ? m.expires_in : void 0
     };
-  }, e.getToken = async (o) => {
-    if (typeof o != "string" || !o)
+  }, e.getToken = async (c) => {
+    if (typeof c != "string" || !c)
       return console.error(
         "CastClient.getToken: code is required (call authenticate() first)."
       ), false;
@@ -12125,7 +12192,7 @@ function Si(e, t) {
       console.debug("CastClient: Exchanging code at hub");
     }
     const b = t.session.productName || t.config.productName || "CAST", u = new URLSearchParams();
-    u.append("grant_type", "authorization_code"), u.append("code", o), u.append("client_id", t.hub.client_id || ""), u.append("client_secret", t.hub.client_secret || ""), u.append("client_product_name", b);
+    u.append("grant_type", "authorization_code"), u.append("code", c), u.append("client_id", t.hub.client_id || ""), u.append("client_secret", t.hub.client_secret || ""), u.append("client_product_name", b);
     try {
       const l = await fetch(t.hub.token_endpoint, {
         method: "POST",
@@ -12133,30 +12200,30 @@ function Si(e, t) {
         body: u
       });
       if (l.status === 200) {
-        const p = await l.json();
-        return typeof p.access_token == "string" && p.access_token && (t.hub.token = p.access_token), typeof p.id_token == "string" && p.id_token && (t.hub.lastIdToken = p.id_token), p.topic && typeof p.topic == "string" && (t.config.preserveSessionTopicFromToken || e.setTopic(p.topic), t.config.autoStart && e.subscribe()), !!t.hub.token;
+        const m = await l.json();
+        return typeof m.access_token == "string" && m.access_token && (t.hub.token = m.access_token), typeof m.id_token == "string" && m.id_token && (t.hub.lastIdToken = m.id_token), m.topic && typeof m.topic == "string" && (t.config.preserveSessionTopicFromToken || e.setTopic(m.topic), t.config.autoStart && e.subscribe()), !!t.hub.token;
       }
       return await l.text(), console.error(
         "CastClient: Error getting token. Status:",
         l.status
       ), false;
     } catch (l) {
-      const p = l instanceof Error ? l.message : String(l);
-      return console.error("CastClient: Exception getting token:", p), false;
+      const m = l instanceof Error ? l.message : String(l);
+      return console.error("CastClient: Exception getting token:", m), false;
     }
-  }, e.subscribe = async (o = false) => {
+  }, e.subscribe = async (c = false) => {
     const b = t.session.topic && t.session.topic.trim();
     if (!b)
       return console.warn(
         "CastClient: Error. subscription not sent. No topic defined."
       ), "error: topic not defined";
-    if ((!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = De(
+    if ((!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = je(
       t.session.productName || t.config.productName || "CAST"
     )), !t.hub.token)
       return console.warn(
         "CastClient: Error. subscription not sent. No token available."
       ), "error: no token";
-    const u = dt(t.config.callbackUrl), l = bt(
+    const u = bt(t.config.callbackUrl), l = ht(
       "subscribe",
       {
         ...t.session,
@@ -12165,18 +12232,18 @@ function Si(e, t) {
       },
       u,
       t.config.productVersion
-    ), p = {
+    ), m = {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Authorization: `Bearer ${t.hub.token}`
       },
       body: l,
-      signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(wt) : void 0
+      signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(Et) : void 0
     };
     try {
       n("connecting");
-      const h = await fetch(t.hub.hub_endpoint, p);
+      const h = await fetch(t.hub.hub_endpoint, m);
       if (h.status === 202) {
         t.hub.resubscribeRequested = false;
         let g;
@@ -12184,10 +12251,10 @@ function Si(e, t) {
           g = await h.json();
         } catch (w) {
           t.hub.subscribed = false;
-          const L = w instanceof Error ? w.message : String(w);
+          const I2 = w instanceof Error ? w.message : String(w);
           return console.error(
             "CastClient: Subscribe 202 body was not valid JSON:",
-            L
+            I2
           ), n("error"), 0;
         }
         const C = g["hub.channel.endpoint"];
@@ -12197,9 +12264,9 @@ function Si(e, t) {
           ), n("error"), 0;
         let y = C;
         try {
-          const w = new URL(t.hub.hub_endpoint), L = new URL(C), U = w.protocol === "https:" ? "wss:" : "ws:";
+          const w = new URL(t.hub.hub_endpoint), I2 = new URL(C), U = w.protocol === "https:" ? "wss:" : "ws:";
           y = C.replace(
-            L.origin,
+            I2.origin,
             `${U}//${w.host}`
           );
         } catch {
@@ -12216,10 +12283,10 @@ function Si(e, t) {
           E = new WebSocket(y);
         } catch (w) {
           t.hub.subscribed = false;
-          const L = w instanceof Error ? w.message : String(w);
+          const I2 = w instanceof Error ? w.message : String(w);
           return console.error(
             "CastClient: Failed to open WebSocket after subscribe:",
-            L
+            I2
           ), n("error"), 0;
         }
         return t.hub.subscribed = true, t.hub.websocket = E, t.hub.websocket.onopen = function() {
@@ -12237,7 +12304,7 @@ function Si(e, t) {
       if (h.status === 401) {
         if (console.warn(
           "CastClient: Subscription response 401 - Token refresh needed."
-        ), o)
+        ), c)
           return h.status;
         try {
           const { code: g } = await e.authenticate();
@@ -12263,10 +12330,10 @@ function Si(e, t) {
     }
   }, e.unsubscribe = async () => {
     t.hub.subscribed = false, t.hub.resubscribeRequested = false;
-    const o = dt(t.config.callbackUrl), b = bt(
+    const c = bt(t.config.callbackUrl), b = ht(
       "unsubscribe",
       t.session,
-      o,
+      c,
       t.config.productVersion
     );
     try {
@@ -12277,7 +12344,7 @@ function Si(e, t) {
           Authorization: `Bearer ${t.hub.token}`
         },
         body: b,
-        signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(wt) : void 0
+        signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(Et) : void 0
       })).status === 202 && console.debug(
         "CastClient: Unsubscribe successfully from hub",
         t.hub.name
@@ -12288,42 +12355,42 @@ function Si(e, t) {
     }
     t.hub.websocket && (t.hub.websocket.close(), t.hub.websocket = null), n("disconnected");
   };
-  function f(o, b = t.hub) {
-    const u = { ...o, timestamp: (/* @__PURE__ */ new Date()).toJSON() };
-    u.id = ie(r()), b.lastPublishedMessageID = u.id;
-    const l = t.session.subscriberName && t.session.subscriberName.trim(), p = t.session.productName && t.session.productName.trim();
-    if (l && u["subscriber.name"] === void 0 && (u["subscriber.name"] = l), p && u["subscriber.product.name"] === void 0 && (u["subscriber.product.name"] = p), u.event && !u.event["hub.topic"] && (u.event["hub.topic"] = t.session.topic), u["target.actor"] === void 0 && t.session.defaultTargetActor && !String(
+  function d(c, b = t.hub) {
+    const u = { ...c, timestamp: (/* @__PURE__ */ new Date()).toJSON() };
+    u.id = oe(r()), b.lastPublishedMessageID = u.id;
+    const l = t.session.subscriberName && t.session.subscriberName.trim(), m = t.session.productName && t.session.productName.trim();
+    if (l && u["subscriber.name"] === void 0 && (u["subscriber.name"] = l), m && u["subscriber.product.name"] === void 0 && (u["subscriber.product.name"] = m), u.event && !u.event["hub.topic"] && (u.event["hub.topic"] = t.session.topic), u["target.actor"] === void 0 && t.session.defaultTargetActor && !String(
       u["target.subscriber.name"] || ""
     ).trim()) {
-      const g = se(
+      const g = ce(
         t.session.defaultTargetActor
       );
       g && (u["target.actor"] = g);
     }
     return u;
   }
-  e.fetchPayload = (o) => c.fetchPayload(o), e.fetchAllPayloads = (o) => c.fetchAllPayloads(o), e.hasPendingPayload = (o) => c.hasPendingPayload(o), e.publishMultipart = async (o, b, u = t.hub) => {
-    let l = f(o, u);
-    const p = await ae(b);
-    l = Ae(l);
-    let h = await ft(l);
+  e.fetchPayload = (c) => o.fetchPayload(c), e.fetchAllPayloads = (c) => o.fetchAllPayloads(c), e.hasPendingPayload = (c) => o.hasPendingPayload(c), e.publishMultipart = async (c, b, u = t.hub) => {
+    let l = d(c, u);
+    const m = await le(b);
+    l = Ie(l);
+    let h = await dt(l);
     if (!h.length) {
       const C = (l.event && typeof l.event["hub.event"] == "string" ? l.event["hub.event"] : "") === "dicom-send" ? "dicom-send.dcm" : "nifti-send.nii.gz";
       l.event.context = {
         files: [
           {
-            data: p,
-            fileName: wn(l, C),
+            data: m,
+            fileName: En(l, C),
             mimeType: "application/octet-stream",
-            byteLength: p.byteLength
+            byteLength: m.byteLength
           }
         ]
-      }, h = [p];
+      }, h = [m];
     }
     return e.publishBinaryBatch(l, h, u);
-  }, e.publishBinaryBatch = async (o, b, u = t.hub) => {
-    const l = Ae(
-      f(o, u)
+  }, e.publishBinaryBatch = async (c, b, u = t.hub) => {
+    const l = Ie(
+      d(c, u)
     );
     return Ln({
       msg: l,
@@ -12331,10 +12398,10 @@ function Si(e, t) {
       hub: u,
       messageIdPrefix: r
     });
-  }, e.publish = async (o, b = t.hub) => {
-    let u = f(o, b);
-    if (u = Ae(u), Tn(u)) {
-      const l = await ft(u);
+  }, e.publish = async (c, b = t.hub) => {
+    let u = d(c, b);
+    if (u = Ie(u), Nn(u)) {
+      const l = await dt(u);
       if (l.length)
         return e.publishBinaryBatch(u, l, b);
     }
@@ -12348,11 +12415,11 @@ function Si(e, t) {
         body: JSON.stringify(u)
       });
     } catch (l) {
-      const p = l instanceof Error ? l.message : String(l);
-      return console.debug("CastClient:", p), null;
+      const m = l instanceof Error ? l.message : String(l);
+      return console.debug("CastClient:", m), null;
     }
-  }, e.publishNiftiMultipart = async (o, b, u) => e.publishBinaryBatch(o, [b], u), e.request = async (o = {}) => {
-    const b = String(o["subscriber.name"] || "").trim();
+  }, e.publishNiftiMultipart = async (c, b, u) => e.publishBinaryBatch(c, [b], u), e.request = async (c = {}) => {
+    const b = String(c["subscriber.name"] || "").trim();
     if (!b)
       throw new Error('CastClient.request: "subscriber.name" is required.');
     const u = t.hub, l = u.token && u.token.trim();
@@ -12360,18 +12427,18 @@ function Si(e, t) {
       throw new Error(
         "CastClient.request: token is required (call authenticate() then getToken(code) first)."
       );
-    const p = `${(u.hub_endpoint || "").replace(
+    const m = `${(u.hub_endpoint || "").replace(
       /\/+$/,
       ""
     )}/request`, h = {
       "subscriber.name": b,
-      id: o.id && String(o.id).trim() || ie(r()),
-      timestamp: o.timestamp && String(o.timestamp).trim() || (/* @__PURE__ */ new Date()).toJSON()
+      id: c.id && String(c.id).trim() || oe(r()),
+      timestamp: c.timestamp && String(c.timestamp).trim() || (/* @__PURE__ */ new Date()).toJSON()
     };
-    if (o.event && typeof o.event == "object") {
-      h.event = { ...o.event };
-      const x = t.session.topic && String(t.session.topic).trim();
-      x && !h.event["hub.topic"] && (h.event["hub.topic"] = x);
+    if (c.event && typeof c.event == "object") {
+      h.event = { ...c.event };
+      const P2 = t.session.topic && String(t.session.topic).trim();
+      P2 && !h.event["hub.topic"] && (h.event["hub.topic"] = P2);
     } else
       throw new Error(
         'CastClient.request: "event" with hub.event is required.'
@@ -12381,16 +12448,16 @@ function Si(e, t) {
       throw new Error(
         'CastClient.request: event["hub.event"] must be a *-request event name.'
       );
-    o["subscriber.actor"] && String(o["subscriber.actor"]).trim() && (h["subscriber.actor"] = String(o["subscriber.actor"]).trim());
+    c["subscriber.actor"] && String(c["subscriber.actor"]).trim() && (h["subscriber.actor"] = String(c["subscriber.actor"]).trim());
     const C = Object.prototype.hasOwnProperty.call(
-      o,
+      c,
       "target.actor"
     );
-    let y = C ? se(o["target.actor"]) : void 0;
-    y === void 0 && !C && t.session.defaultTargetActor && (y = se(t.session.defaultTargetActor)), y !== void 0 && (h["target.actor"] = y);
-    const E = o["target.product.name"] !== void 0 ? o["target.product.name"] : o.targetProductName, w = Rt(E);
+    let y = C ? ce(c["target.actor"]) : void 0;
+    y === void 0 && !C && t.session.defaultTargetActor && (y = ce(t.session.defaultTargetActor)), y !== void 0 && (h["target.actor"] = y);
+    const E = c["target.product.name"] !== void 0 ? c["target.product.name"] : c.targetProductName, w = Ot(E);
     w !== void 0 && (h["target.product.name"] = w);
-    const L = await fetch(p, {
+    const I2 = await fetch(m, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -12399,917 +12466,210 @@ function Si(e, t) {
       body: JSON.stringify(h)
     });
     let U;
-    if ((L.headers.get("content-type") || "").includes("application/json"))
+    if ((I2.headers.get("content-type") || "").includes("application/json"))
       try {
-        U = await L.json();
+        U = await I2.json();
       } catch {
         U = "";
       }
     else
-      U = await L.text();
-    return { ok: L.ok, status: L.status, data: U };
-  }, e.sendCastRequestResponse = (o, b, u, l) => {
+      U = await I2.text();
+    return { ok: I2.ok, status: I2.status, data: U };
+  }, e.sendCastRequestResponse = (c, b, u, l) => {
     if (!t.hub.websocket || typeof WebSocket > "u" || t.hub.websocket.readyState !== WebSocket.OPEN)
       return;
-    let p = "";
-    if (typeof b == "string" ? p = b.trim() : b != null && (p = String(b).trim()), !p) {
+    let m = "";
+    if (typeof b == "string" ? m = b.trim() : b != null && (m = String(b).trim()), !m) {
       console.error(
         "CastClient.sendCastRequestResponse requires a non-empty dataType."
       );
       return;
     }
-    const h = It(p), g = {
+    const h = _t(m), g = {
       timestamp: (/* @__PURE__ */ new Date()).toJSON(),
-      id: ie(r()),
+      id: oe(r()),
       "subscriber.name": t.session.subscriberName || void 0,
       "subscriber.product.name": t.session.productName || void 0,
       event: {
         "hub.topic": l || t.session.topic,
         "hub.event": h,
         context: {
-          id: o,
-          dataType: p,
+          id: c,
+          dataType: m,
           data: u
         }
       }
     };
     Array.isArray(t.session.actors) && t.session.actors.length > 0 && (g.actor = t.session.actors[0]), t.hub.websocket.send(JSON.stringify(g));
   }, t.config.autoReconnect && (t.reconnectInterval = setInterval(
-    d,
-    gi
+    f,
+    Ci
   ));
 }
-function un(e, t, n = {}) {
-  Object.assign(t, Et, n), t.config = { ...Et.config, ...n }, t.session = {
-    ...Bn(),
+function ln(e, t, n = {}) {
+  Object.assign(t, Tt, n), t.config = { ...Tt.config, ...n }, t.session = {
+    ...Dn(),
     ...t.config.session || {}
-  }, (!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = De(
+  }, (!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = je(
     t.session.productName || t.config.productName || "CAST"
   )), t.hub = {
-    ...Pn(),
+    ...Bn(),
     ...t.config.hub || {},
     ...Fn()
-  }, hn(e, t), pn(e, t, ["config"]), Si(e, t);
+  }, mn(e, t), pn(e, t, ["config"]), wi(e, t);
 }
-var Ci = yn(un, "vtkCastClient");
-var wi = {
-  newInstance: Ci,
-  extend: un,
-  applyCastPublishEnvelopeFields: $r,
-  batchContextFiles: Jt,
-  BINARY_PLACEHOLDER: oe,
-  buildDicomwebImagingStudyOpenContext: or,
-  buildDicomUrlImagingStudyOpenContext: sr,
-  buildFilesImagingStudyOpenContext: Gt,
-  buildIdcImagingStudyOpenContext: cr,
-  buildNiftiUrlImagingStudyOpenContext: ar,
-  castMessageHasPendingFilePayloads: Zt,
-  buildCastConferenceView: Ke,
-  CAST_CONFERENCE_EXIT_ACK_MS: Ot,
-  CAST_CONFERENCE_POLL_MS: Xn,
-  CAST_CONFERENCE_POPUP_SIZE: Kn,
+var Ei = gn(ln, "vtkCastClient");
+var Ti = {
+  newInstance: Ei,
+  extend: ln,
+  applyCastPublishEnvelopeFields: Or,
+  batchContextFiles: Kt,
+  BINARY_PLACEHOLDER: ae,
+  buildDicomwebImagingStudyOpenContext: cr,
+  buildDicomUrlImagingStudyOpenContext: or,
+  buildFilesImagingStudyOpenContext: Wt,
+  buildIdcImagingStudyOpenContext: ur,
+  buildLocalDicomImagingStudyOpenContext: ar,
+  buildNiftiUrlImagingStudyOpenContext: lr,
+  castMessageHasPendingFilePayloads: Qt,
+  buildCastConferenceView: Ye,
+  CAST_CONFERENCE_EXIT_ACK_MS: Pt,
+  CAST_CONFERENCE_POLL_MS: Zn,
+  CAST_CONFERENCE_POPUP_SIZE: Yn,
   CAST_CONFERENCE_TITLE_PRESETS: xt,
-  CAST_DEFAULT_SUBSCRIBER_ACTOR: Ce,
-  createCastConferenceDialog: Qn,
-  CAST_IMAGE_DISPLAY_ACTOR: Ue,
-  createCastConferenceInviteController: tr,
-  createCastConferenceInviteDialog: Mt,
-  parseConferenceInviteFromMessage: Dt,
-  shouldShowConferenceInvite: er,
-  CAST_DICOMWEB_ROOT: Ze,
+  CAST_DEFAULT_SUBSCRIBER_ACTOR: Ee,
+  createCastConferenceDialog: er,
+  CAST_IMAGE_DISPLAY_ACTOR: Re,
+  createCastConferenceInviteController: nr,
+  createCastConferenceInviteDialog: jt,
+  parseConferenceInviteFromMessage: Mt,
+  shouldShowConferenceInvite: tr,
+  CAST_DICOMWEB_ROOT: Qe,
   CAST_ENVELOPE_ANY: R,
-  CAST_IDENTIFIER_DICOM_UID: de,
-  CAST_IDENTIFIER_IDC: ye,
-  CAST_IDENTIFIER_IDC_SOURCE_BUCKET: ge,
-  CAST_IDENTIFIER_NIFTI_FILENAME: Xe,
-  CAST_IDENTIFIER_NIFTI_URL: Ye,
-  CAST_IDENTIFIER_OHIF_MODE: he,
-  CAST_IDENTIFIER_VOLVIEW_SAMPLE_ID: be,
-  CAST_IDENTIFIER_WORKLIST_SAMPLE_ID: ee,
-  CAST_IMAGING_STUDY_OPEN_PROFILE: fe,
-  CAST_OPEN_MODE: te,
-  CAST_OPEN_MODE_DICOMWEB: K,
+  CAST_IDENTIFIER_DICOM_UID: re,
+  CAST_IDENTIFIER_IDC: Se,
+  CAST_IDENTIFIER_IDC_SOURCE_BUCKET: Ce,
+  CAST_IDENTIFIER_NIFTI_FILENAME: Ze,
+  CAST_IDENTIFIER_NIFTI_URL: Xe,
+  CAST_IDENTIFIER_OHIF_MODE: me,
+  CAST_IDENTIFIER_VOLVIEW_SAMPLE_ID: he,
+  CAST_IDENTIFIER_WORKLIST_SAMPLE_ID: H,
+  CAST_IMAGING_STUDY_OPEN_PROFILE: ne,
+  CAST_OPEN_MODE: G,
+  CAST_OPEN_MODE_DICOMWEB: X,
   CAST_OPEN_MODE_DICOM_URL: pe,
-  CAST_OPEN_MODE_FILES: F,
-  CAST_OPEN_MODE_IDC: me,
-  CAST_RADIO_ICON_CLASS: _t,
-  CAST_RADIO_ICON_SVG: kt,
-  CAST_RADIO_SLASH_CLASS: $t,
-  CAST_RADIO_STATUS_ICON_CLASS: Ut,
-  castRadioStatusMarkup: On,
+  CAST_OPEN_MODE_FILES: M,
+  CAST_OPEN_MODE_IDC: ye,
+  CAST_OPEN_MODE_LOCAL_DICOM: ge,
+  CAST_RADIO_ICON_CLASS: kt,
+  CAST_RADIO_ICON_SVG: Ut,
+  CAST_RADIO_SLASH_CLASS: Rt,
+  CAST_RADIO_STATUS_ICON_CLASS: $t,
+  castRadioStatusMarkup: Pn,
   castRadioStatusVisual: xn,
-  collatedResponsesFromRequestResult: In,
-  conferenceHostTopic: Q,
-  countEventContextObjects: tt,
-  createCastConference: Bt,
-  dataTypeFromEventName: $n,
-  decodeBase64ToArrayBuffer: Vt,
-  DEFAULT_CAST_PUBLISH_ENVELOPE_FIELDS: kr,
-  deleteCastConference: Je,
-  ensureCastSubscribeEvents: Rn,
-  extractDicomSeriesUid: z,
-  extractDicomStudyUid: H,
-  extractDicomwebRoot: $e,
-  extractFilePayloadsForEvent: Nr,
-  extractIdcSeriesUid: Re,
-  extractIdcSourceBucket: Oe,
-  extractIdentifierValue: _,
-  extractImagingStudyFiles: D,
-  extractNiftiDownloadUrl: Y,
-  extractNiftiFilename: Qe,
-  extractOhifMode: jt,
-  extractOpenMode: zt,
-  extractStudyContextItem: M,
-  extractStudyUIDFromResource: lr,
-  extractVolviewSampleId: qt,
-  fetchCastConferences: J,
-  fetchCastConferenceTopics: Pt,
-  filePayloadToArrayBuffer: Yt,
-  filePayloadToFile: Ar,
-  findActiveCastConference: V,
-  generateSubscriberName: De,
-  getActorKeyword: Wt,
-  getHubEventLower: ne,
-  getInboundTargetActorKeyword: fr,
-  httpUrlFromHubEndpoint: Z,
-  isCastConferenceHost: We,
-  isCastConferenceParticipant: Ve,
+  collatedResponsesFromRequestResult: _n,
+  conferenceHostTopic: te,
+  countEventContextObjects: nt,
+  createCastConference: Dt,
+  dataTypeFromEventName: Rn,
+  decodeBase64ToArrayBuffer: Jt,
+  DEFAULT_CAST_PUBLISH_ENVELOPE_FIELDS: $r,
+  deleteCastConference: Ke,
+  ensureCastSubscribeEvents: On,
+  extractDicomSeriesUid: D,
+  extractDicomStudyUid: F,
+  extractDicomwebRoot: Oe,
+  extractFilePayloadsForEvent: vr,
+  extractIdcSeriesUid: Pe,
+  extractIdcSourceBucket: xe,
+  extractIdentifierValue: k,
+  extractImagingStudyFiles: j,
+  extractNiftiDownloadUrl: Z,
+  extractNiftiFilename: et,
+  extractOhifMode: qt,
+  extractOpenMode: Ht,
+  extractStudyContextItem: q,
+  extractStudyUIDFromResource: dr,
+  extractVolviewSampleId: zt,
+  fetchCastConferences: Y,
+  fetchCastConferenceTopics: Bt,
+  filePayloadToArrayBuffer: Xt,
+  filePayloadToFile: Ir,
+  findActiveCastConference: K,
+  generateSubscriberName: je,
+  getActorKeyword: Vt,
+  getHubEventLower: ie,
+  getInboundTargetActorKeyword: br,
+  httpUrlFromHubEndpoint: ee,
+  isCastConferenceHost: Ve,
+  isCastConferenceParticipant: Je,
   isHubEndpointInCloud: Lt,
-  isRequestEvent: kn,
-  isResponseEvent: Un,
-  isRunningInCloud: vt,
-  isStatusPayloadOnline: it,
-  isStatusRequestDataType: Fr,
-  isTotalSegmentatorProduct: we,
-  isLungScreeningProduct: Ee,
-  isNeuroSegProduct: Te,
-  isInferenceProduct: Or,
-  lungScreeningAvailableFromStatusResponses: Pr,
-  neuroSegAvailableFromStatusResponses: Br,
-  normalizeProductToken: Be,
+  isRequestEvent: Un,
+  isResponseEvent: $n,
+  isRunningInCloud: It,
+  isStatusPayloadOnline: st,
+  isStatusRequestDataType: Mr,
+  isTotalSegmentatorProduct: Te,
+  isLungScreeningProduct: Ne,
+  isNeuroSegProduct: Ae,
+  isInferenceProduct: xr,
+  lungScreeningAvailableFromStatusResponses: Dr,
+  neuroSegAvailableFromStatusResponses: Fr,
+  normalizeProductToken: Fe,
   CAST_INFERENCE_SERVERS: O,
-  findInferenceServerByProduct: nn,
-  inferenceServerInfoText: di,
-  renderInferenceServerInfoCardHtml: fi,
-  CAST_PRODUCT_MATCHERS: sn,
-  matchesCastProduct: bi,
-  normalizeCastProductName: rn,
-  parseProductStatusProbe: cn,
-  publishCastUrlSend: yi,
-  requestCastProductStatus: hi,
-  requestCastStatus: ot,
-  mapInferenceServersFromStatusResult: an,
-  probeCastInferenceServers: mi,
-  cloneContextArray: dr,
-  messageEventContext: br,
-  messageSubscriberName: hr,
-  messageProductName: pr,
-  messageActor: mr,
-  parseStatusUpdateMessage: yr,
-  normalizeConferenceParticipants: Ge,
-  normalizeDataType: qe,
-  normalizeImagingStudyContext: et,
-  normalizeOptionalEnvelopeField: X,
-  normalizeStudyUID: xe,
-  openCastHubPopup: Yn,
-  parseCollatedRequestResult: le,
-  productNameFromStatusResponseItem: Ne,
-  REQUEST_SUFFIX: G,
-  requestEventFor: ze,
-  resolveCastConferenceClientUrl: Jn,
-  resolveCastConferenceState: Zn,
+  findInferenceServerByProduct: rn,
+  inferenceServerInfoText: bi,
+  renderInferenceServerInfoCardHtml: di,
+  CAST_PRODUCT_MATCHERS: on,
+  matchesCastProduct: hi,
+  normalizeCastProductName: sn,
+  parseProductStatusProbe: an,
+  publishCastUrlSend: Si,
+  requestCastLiveScene: mi,
+  requestCastProductStatus: pi,
+  requestCastStatus: ct,
+  mapInferenceServersFromStatusResult: un,
+  probeCastInferenceServers: gi,
+  cloneContextArray: hr,
+  messageEventContext: mr,
+  messageSubscriberName: pr,
+  messageProductName: yr,
+  messageActor: gr,
+  parseStatusUpdateMessage: Sr,
+  normalizeConferenceParticipants: We,
+  normalizeDataType: He,
+  normalizeImagingStudyContext: tt,
+  normalizeOptionalEnvelopeField: Q,
+  normalizeStudyUID: Be,
+  openCastHubPopup: Xn,
+  parseCollatedRequestResult: de,
+  productNameFromStatusResponseItem: ve,
+  REQUEST_SUFFIX: V,
+  requestEventFor: be,
+  resolveCastConferenceClientUrl: Kn,
+  resolveCastConferenceState: Qn,
   resolveCastConferenceView: Ft,
-  resolveCastFileMessage: Rr,
-  resolveCastHubAdminUrl: Vn,
-  resolveCastPublishEnvelopeFields: Ur,
-  resolveImagingStudyOpenPlan: ur,
-  resolveTargetActorForWire: se,
-  resolveTargetProductNameForWire: Rt,
-  responseEventFor: It,
-  RESPONSE_SUFFIX: W,
-  sanitizeCastMessageForDisplay: _r,
-  selectFirstMatchingHubKey: _n,
-  statusItemValue: rt,
-  stringifyForLog: Pe,
-  summarizeInboundCastMessage: Ir,
-  summarizeOutboundCastPublish: Lr,
-  TOTAL_SEGMENTATOR_PRODUCT_ALIASES: Qt,
-  LUNG_SCREENING_PRODUCT_ALIASES: en,
-  NEURO_SEG_PRODUCT_ALIASES: tn,
-  totalSegmentatorAvailableFromStatusResponses: xr
+  resolveCastFileMessage: Pr,
+  resolveCastHubAdminUrl: Jn,
+  resolveCastPublishEnvelopeFields: Rr,
+  resolveImagingStudyOpenPlan: fr,
+  resolveTargetActorForWire: ce,
+  resolveTargetProductNameForWire: Ot,
+  responseEventFor: _t,
+  RESPONSE_SUFFIX: J,
+  sanitizeCastMessageForDisplay: Ur,
+  selectFirstMatchingHubKey: kn,
+  statusItemValue: it,
+  stringifyForLog: De,
+  summarizeInboundCastMessage: kr,
+  summarizeOutboundCastPublish: _r,
+  TOTAL_SEGMENTATOR_PRODUCT_ALIASES: en,
+  LUNG_SCREENING_PRODUCT_ALIASES: tn,
+  NEURO_SEG_PRODUCT_ALIASES: nn,
+  totalSegmentatorAvailableFromStatusResponses: Br
 };
 
-// render/demos/ira/ira-cast.ts
-var LOG = "[ira-cast]";
-var HUB_CREDENTIALS = {
-  client_id: "client_id_3d_Slicer",
-  client_secret: "client_secret_3d_Slicer"
-};
-var LOCAL_HUB = {
-  name: "local",
-  version: "1.0",
-  hub_endpoint: "http://127.0.0.1:2018/api/hub",
-  authorization_endpoint: "http://127.0.0.1:2018/oauth/authorize",
-  token_endpoint: "http://127.0.0.1:2018/oauth/token",
-  ...HUB_CREDENTIALS
-};
-function isHostedOnCastHub(location2 = globalThis.location) {
-  return String(location2?.pathname || "").startsWith("/slicerlive");
-}
-function shouldUseSameOriginHub(location2 = globalThis.location) {
-  return isHostedOnCastHub(location2) || vt(location2);
-}
-function resolveHubConfig(location2 = globalThis.location) {
-  if (!shouldUseSameOriginHub(location2)) {
-    return LOCAL_HUB;
-  }
-  const origin = location2.origin;
-  return {
-    name: "hub",
-    version: "1.0",
-    hub_endpoint: `${origin}/api/hub`,
-    authorization_endpoint: `${origin}/oauth/authorize`,
-    token_endpoint: `${origin}/oauth/token`,
-    ...HUB_CREDENTIALS
-  };
-}
-var EMPTY_CAST_CONTEXT = { "context.type": "", context: [] };
-var ID_ACTOR = "ID";
-var WORKLIST_ACTOR = "WORKLIST_CLIENT";
-var SS_TOPIC = "ira.cast.topic";
-var SS_TOKEN = "ira.cast.token";
-var STUDY_URL_KEYS = [
-  "series",
-  "bucket",
-  "seg",
-  "segBucket",
-  "patient",
-  "modality",
-  "collection",
-  "scene",
-  "StudyInstanceUIDs",
-  "SeriesInstanceUIDs",
-  "studyUID",
-  "seriesUID",
-  "requestType"
-];
-var client = null;
-var topic = "";
-var subscriberName = "";
-var userName = "";
-var connection = "idle";
-var connectionDetail = "Not connected";
-var conference = null;
-var conferenceFollowHost = false;
-var lastImagingStudyOpenContext = [];
-var lastLiveScene = null;
-var statusRequestState = "idle";
-var onStatus = null;
-var onImagingStudyOpen = null;
-var onImagingStudyClose = null;
-var onLiveSceneChange = null;
-function setIraCastStatusListener(fn) {
-  onStatus = fn;
-}
-function setIraImagingStudyOpenHandler(fn) {
-  onImagingStudyOpen = fn;
-}
-function setIraImagingStudyCloseHandler(fn) {
-  onImagingStudyClose = fn;
-}
-function persistCastCredentials(nextTopic, token) {
-  try {
-    if (nextTopic) sessionStorage.setItem(SS_TOPIC, nextTopic);
-    if (token) sessionStorage.setItem(SS_TOKEN, token);
-  } catch {
-  }
-}
-function readPersistedCredentials() {
-  try {
-    return {
-      topic: sessionStorage.getItem(SS_TOPIC)?.trim() || "",
-      token: sessionStorage.getItem(SS_TOKEN)?.trim() || ""
-    };
-  } catch {
-    return { topic: "", token: "" };
-  }
-}
-function iraUrlHasStudyParams() {
-  const p = new URLSearchParams(globalThis.location.search);
-  return Boolean(
-    p.get("series") || p.get("StudyInstanceUIDs") || p.get("studyUID") || p.get("scene")
-  );
-}
-function syncIraStudyUrl(studyParams = {}) {
-  if (!globalThis.history?.replaceState) return;
-  const url = new URL(globalThis.location.href);
-  for (const key of STUDY_URL_KEYS) url.searchParams.delete(key);
-  const persisted = readPersistedCredentials();
-  const nextTopic = topic || persisted.topic;
-  const nextToken = persisted.token || String(client?.getHubConfig?.()?.token || "").trim();
-  if (nextTopic) url.searchParams.set("topic", nextTopic);
-  if (nextToken) url.searchParams.set("id-token", nextToken);
-  for (const [key, value] of Object.entries(studyParams)) {
-    const v2 = String(value || "").trim();
-    if (v2) url.searchParams.set(key, v2);
-  }
-  globalThis.history.replaceState(null, "", url.toString());
-}
-function getIraCastSessionInfo() {
-  return {
-    topic,
-    subscriberName: subscriberName || client?.getSessionConfig?.()?.subscriberName || "",
-    userName: userName || client?.getSessionConfig?.()?.userName || "",
-    connection,
-    connectionDetail,
-    hubEndpoint: client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint,
-    conference
-  };
-}
-function setIraConferenceView(view) {
-  conference = view;
-  if (!view) {
-    conferenceFollowHost = false;
-  }
-  onStatus?.(connection, connectionDetail);
-}
-function setIraConferenceFollowHost(followHost) {
-  conferenceFollowHost = Boolean(followHost);
-}
-var conferenceHubHandler = null;
-function setIraConferenceHubHandler(fn) {
-  conferenceHubHandler = fn;
-}
-async function syncIraConferenceView() {
-  if (connection !== "connected") {
-    setIraConferenceView(null);
-    return;
-  }
-  try {
-    const hubEndpoint = client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
-    const view = await Ft(
-      hubEndpoint,
-      topic,
-      subscriberName,
-      userName
-    );
-    setIraConferenceView(view);
-  } catch {
-  }
-}
-function handleConferenceHubEvent(message) {
-  if (conferenceHubHandler?.(message)) {
-    return true;
-  }
-  const event = message?.event;
-  const hubEvent = ne(event);
-  if (hubEvent === "conference-start") {
-    void syncIraConferenceView();
-    return true;
-  }
-  if (hubEvent === "conference-end") {
-    const context = event?.context && typeof event.context === "object" ? event.context : {};
-    const leaveTopic = String(context.leaveTopic ?? "").trim();
-    if (!leaveTopic || leaveTopic === topic) {
-      setIraConferenceView(null);
-    } else {
-      void syncIraConferenceView();
-    }
-    return true;
-  }
-  return false;
-}
-function getIraHubAdminUrl() {
-  const endpoint = client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
-  return Vn(endpoint) || endpoint;
-}
-function setIraImagingStudyContext(context) {
-  lastImagingStudyOpenContext = Array.isArray(context) ? context : [];
-}
-function getIraImagingStudyOpenContext() {
-  return dr(lastImagingStudyOpenContext);
-}
-var suppressInboundImagingStudy = 0;
-function beginSuppressInboundImagingStudy(ms = 1500) {
-  suppressInboundImagingStudy += 1;
-  globalThis.setTimeout(() => {
-    suppressInboundImagingStudy = Math.max(0, suppressInboundImagingStudy - 1);
-  }, ms);
-}
-function buildIraPublishPayload(hubEvent, context) {
-  return {
-    event: {
-      "hub.topic": topic,
-      "hub.event": hubEvent,
-      context
-    },
-    actor: ID_ACTOR,
-    "target.actor": "*",
-    "target.product.name": "*"
-  };
-}
-async function publishIraImagingStudyTransition(nextContext) {
-  const next = Array.isArray(nextContext) ? dr(nextContext) : [];
-  const previous = dr(lastImagingStudyOpenContext);
-  if (!client || connection !== "connected" || !topic) {
-    lastImagingStudyOpenContext = next;
-    lastLiveScene = null;
-    onLiveSceneChange?.();
-    console.warn(`${LOG} ImagingStudy transition local-only (not connected)`);
-    return { closed: false, opened: false };
-  }
-  beginSuppressInboundImagingStudy();
-  let closed = false;
-  let opened = false;
-  try {
-    if (previous.length) {
-      try {
-        const res = await client.publish(
-          buildIraPublishPayload("ImagingStudy-close", previous)
-        );
-        closed = Boolean(res?.ok);
-        if (!closed) {
-          console.warn(
-            `${LOG} ImagingStudy-close failed`,
-            res ? `HTTP ${res.status}` : "No response"
-          );
-        } else {
-          console.info(`${LOG} published ImagingStudy-close`);
-        }
-      } catch (err) {
-        console.error(`${LOG} ImagingStudy-close exception`, err);
-      }
-    }
-    try {
-      const res = await client.publish(
-        buildIraPublishPayload("ImagingStudy-open", next)
-      );
-      opened = Boolean(res?.ok);
-      if (!opened) {
-        console.warn(
-          `${LOG} ImagingStudy-open failed`,
-          res ? `HTTP ${res.status}` : "No response"
-        );
-      } else {
-        console.info(`${LOG} published ImagingStudy-open`);
-      }
-    } catch (err) {
-      console.error(`${LOG} ImagingStudy-open exception`, err);
-    }
-  } finally {
-    lastImagingStudyOpenContext = next;
-    lastLiveScene = null;
-    onLiveSceneChange?.();
-  }
-  return { closed, opened };
-}
-function getIraCastClient() {
-  return client;
-}
-var onStatusUpdate = null;
-function setIraStatusUpdateHandler(fn) {
-  onStatusUpdate = fn;
-}
-var onNiftiSend = null;
-function setIraNiftiSendHandler(fn) {
-  onNiftiSend = fn;
-}
-var onDicomSend = null;
-function setIraDicomSendHandler(fn) {
-  onDicomSend = fn;
-}
-async function publishInferenceJob(opts) {
-  if (!client || connection !== "connected") {
-    return { ok: false, detail: "Not connected" };
-  }
-  const subscriber = subscriberName || client.getSessionConfig()?.subscriberName?.trim() || "";
-  if (!subscriber) return { ok: false, detail: "No subscriber name" };
-  if (!topic) return { ok: false, detail: "No Cast topic" };
-  if (!opts.files.length) return { ok: false, detail: "No volume files" };
-  return yi(client, {
-    targetProductName: opts.product,
-    hubEvent: opts.hubEvent,
-    files: opts.files,
-    subscriberName: subscriber,
-    subscriberProductName: "SLICERLIVE-IRA",
-    subscriberActor: ID_ACTOR,
-    topic,
-    contextExtras: opts.contextExtras
-  });
-}
-function getIraLiveScene() {
-  return lastLiveScene;
-}
-function setIraLiveScene(scene) {
-  lastLiveScene = scene;
-  onLiveSceneChange?.();
-}
-function setIraLiveSceneChangeListener(fn) {
-  onLiveSceneChange = fn;
-}
-function buildStatusResponseData() {
-  const context = dr(lastImagingStudyOpenContext);
-  if (lastLiveScene) {
-    const withoutScene = context.filter((item) => {
-      if (!item || typeof item !== "object") return true;
-      return item.key !== "scene";
-    });
-    withoutScene.push({ key: "scene", resource: lastLiveScene });
-    return { "context.type": "ImagingStudy", context: withoutScene };
-  }
-  if (context.length) {
-    return { "context.type": "ImagingStudy", context };
-  }
-  return EMPTY_CAST_CONTEXT;
-}
-function setConnection(next, detail) {
-  const wasConnected = connection === "connected";
-  connection = next;
-  connectionDetail = detail;
-  if (wasConnected && next !== "connected") {
-    conference = null;
-  }
-  onStatus?.(next, detail);
-  if (next === "connected") {
-    void syncIraConferenceView();
-  }
-}
-function stripCastParamsFromUrl() {
-  if (!globalThis.history?.replaceState) return;
-  const url = new URL(globalThis.location.href);
-  if (!url.searchParams.has("topic") && !url.searchParams.has("id-token")) {
-    return;
-  }
-  url.searchParams.delete("topic");
-  url.searchParams.delete("id-token");
-  globalThis.history.replaceState(null, "", url.toString());
-}
-function extractActorKeywords(actor) {
-  if (actor == null) return [];
-  if (typeof actor === "string") {
-    const keyword2 = actor.trim();
-    return keyword2 ? [keyword2] : [];
-  }
-  if (Array.isArray(actor)) {
-    return actor.flatMap((entry) => extractActorKeywords(entry));
-  }
-  if (typeof actor === "object") {
-    const obj = actor;
-    const candidate = obj.id || obj.key || obj.name;
-    if (candidate == null) return [];
-    const keyword2 = String(candidate).trim();
-    return keyword2 ? [keyword2] : [];
-  }
-  const keyword = String(actor).trim();
-  return keyword ? [keyword] : [];
-}
-function handleStatusRequest(message) {
-  const event = message?.event;
-  if (!event || !kn(ne(event))) return false;
-  const context = event.context && typeof event.context === "object" ? event.context : {};
-  const correlationId = context.id;
-  if (typeof correlationId !== "string" || !correlationId) return false;
-  const requestedTargets = extractActorKeywords(message["target.actor"]);
-  if (requestedTargets.length > 0 && !requestedTargets.includes("*") && !requestedTargets.includes(ID_ACTOR)) {
-    return false;
-  }
-  if (context.dataType !== "STATUS") return false;
-  const responseData = buildStatusResponseData();
-  client?.sendCastRequestResponse(
-    correlationId,
-    "STATUS",
-    responseData,
-    event["hub.topic"]
-  );
-  return true;
-}
-function handleStatusUpdate(message) {
-  const update = yr(message);
-  if (!update) return false;
-  if (update.message) onStatusUpdate?.(update.message, update.level);
-  return true;
-}
-function isNiftiSendMessage(message) {
-  const event = message?.event;
-  return ne(event) === "nifti-send";
-}
-function isDicomSendMessage(message) {
-  const event = message?.event;
-  return ne(event) === "dicom-send";
-}
-async function handleResolvedFileSend(message, kind, handler) {
-  if (!client || !handler) return;
-  try {
-    const resolved = await Rr(client, message);
-    const event = resolved?.event ?? message.event;
-    if (!event || typeof event !== "object") {
-      console.warn(`${LOG} ${kind}: missing event after resolve`);
-      return;
-    }
-    const files = Jt(event);
-    const withData = files.filter((f) => {
-      const data = f.data;
-      return data instanceof ArrayBuffer || data instanceof Uint8Array || typeof data === "string";
-    });
-    if (!withData.length) {
-      console.warn(`${LOG} ${kind}: no file payloads after resolve`);
-      return;
-    }
-    console.info(
-      `${LOG} ${kind}: ${withData.length} file(s) ready`,
-      withData.map((f) => f.fileName || "?")
-    );
-    await handler(event);
-  } catch (err) {
-    console.error(`${LOG} ${kind} handler failed`, err);
-  }
-}
-async function handleNiftiSendMessage(message) {
-  await handleResolvedFileSend(message, "nifti-send", onNiftiSend);
-}
-async function handleDicomSendMessage(message) {
-  await handleResolvedFileSend(message, "dicom-send", onDicomSend);
-}
-function handleImagingStudyMessage(message) {
-  const event = message?.event;
-  const name = ne(event);
-  if (name === "imagingstudy-close") {
-    if (suppressInboundImagingStudy > 0) {
-      console.info(`${LOG} ImagingStudy-close ignored (local publish echo)`);
-      return true;
-    }
-    lastImagingStudyOpenContext = [];
-    lastLiveScene = null;
-    onLiveSceneChange?.();
-    console.info(`${LOG} ImagingStudy-close`);
-    void Promise.resolve(onImagingStudyClose?.()).catch(
-      (err) => console.error(`${LOG} ImagingStudy-close handler failed`, err)
-    );
-    return true;
-  }
-  if (name !== "imagingstudy-open") return false;
-  if (suppressInboundImagingStudy > 0) {
-    const context2 = br(message);
-    lastImagingStudyOpenContext = dr(context2);
-    console.info(`${LOG} ImagingStudy-open ignored (local publish echo)`);
-    return true;
-  }
-  if (conference && !conferenceFollowHost) {
-    console.info(`${LOG} ImagingStudy-open ignored (not following host)`);
-    return true;
-  }
-  const context = br(message);
-  lastImagingStudyOpenContext = dr(context);
-  console.info(`${LOG} ImagingStudy-open context items=`, context.length);
-  void Promise.resolve(onImagingStudyOpen?.(lastImagingStudyOpenContext)).catch(
-    (err) => console.error(`${LOG} ImagingStudy-open handler failed`, err)
-  );
-  return true;
-}
-async function requestStatusFromWorklist(opts) {
-  if (!client) {
-    console.warn(`${LOG} STATUS skip: no client`);
-    return;
-  }
-  const forceApply = Boolean(opts?.forceApply);
-  const requestTopic = String(opts?.topic || topic || "").trim();
-  if (!forceApply && statusRequestState !== "idle") return;
-  const skipApplyStudy = !forceApply && (iraUrlHasStudyParams() || lastImagingStudyOpenContext.length > 0);
-  if (skipApplyStudy) {
-    console.warn(
-      `${LOG} STATUS presence only (already have study URL or context)`
-    );
-  }
-  const subscriber = subscriberName || client.getSessionConfig()?.subscriberName?.trim() || "";
-  if (!subscriber) {
-    console.warn(`${LOG} STATUS skip: no subscriber name yet`);
-    return;
-  }
-  if (!forceApply) statusRequestState = "pending";
-  const statusDataType = "STATUS";
-  try {
-    const message = {
-      "subscriber.name": subscriber,
-      "subscriber.product.name": "SLICERLIVE-IRA",
-      "subscriber.actor": ID_ACTOR,
-      "target.actor": WORKLIST_ACTOR,
-      event: {
-        "hub.event": ze(statusDataType),
-        ...requestTopic ? { "hub.topic": requestTopic } : {},
-        context: { dataType: statusDataType }
-      }
-    };
-    console.warn(`${LOG} STATUS request \u2192 ${WORKLIST_ACTOR}`, {
-      subscriber,
-      topic: requestTopic,
-      presenceOnly: skipApplyStudy,
-      forceApply
-    });
-    const result = await client.request(message);
-    console.warn(`${LOG} STATUS response`, {
-      httpOk: result.ok,
-      status: result.status,
-      data: result.data
-    });
-    if (!result.ok) {
-      if (!forceApply) statusRequestState = "idle";
-      return;
-    }
-    if (!forceApply && (skipApplyStudy || lastImagingStudyOpenContext.length || iraUrlHasStudyParams())) {
-      statusRequestState = "done";
-      return;
-    }
-    const envelope = result.data && typeof result.data === "object" ? result.data : {};
-    const responses = Array.isArray(envelope.responses) ? envelope.responses : [];
-    let chosen;
-    for (const item of responses) {
-      const itemData = item?.data;
-      if (!itemData || typeof itemData !== "object" || itemData["context.type"] !== "ImagingStudy") {
-        continue;
-      }
-      const actor = String(item?.actor ?? "").trim().toUpperCase();
-      if (actor === WORKLIST_ACTOR || chosen === void 0) {
-        chosen = itemData;
-        if (actor === WORKLIST_ACTOR) break;
-      }
-    }
-    if (!chosen) {
-      console.warn(
-        `${LOG} STATUS: no ImagingStudy in ${responses.length} response(s)`
-      );
-      if (!forceApply) statusRequestState = "idle";
-      return;
-    }
-    if (!forceApply && (lastImagingStudyOpenContext.length || iraUrlHasStudyParams())) {
-      statusRequestState = "done";
-      return;
-    }
-    const context = dr(chosen.context);
-    if (!context.length) {
-      console.warn(`${LOG} STATUS: ImagingStudy context empty`);
-      if (!forceApply) statusRequestState = "idle";
-      return;
-    }
-    lastImagingStudyOpenContext = context;
-    if (!forceApply) statusRequestState = "done";
-    console.warn(
-      `${LOG} ImagingStudy from STATUS context items=`,
-      context.length,
-      forceApply ? "(follow host)" : ""
-    );
-    void Promise.resolve(onImagingStudyOpen?.(lastImagingStudyOpenContext)).catch(
-      (err) => console.error(`${LOG} STATUS ImagingStudy-open handler failed`, err)
-    );
-  } catch (err) {
-    if (!forceApply) statusRequestState = "idle";
-    console.error(`${LOG} failed to request STATUS`, err);
-  }
-}
-async function requestIraStatusFromHostWorklist(hostTopic) {
-  const topicOverride = String(hostTopic || "").trim();
-  if (!topicOverride) {
-    console.warn(`${LOG} host STATUS skip: no host topic`);
-    return;
-  }
-  await requestStatusFromWorklist({ topic: topicOverride, forceApply: true });
-}
-function scheduleStatusRequestFromWorklist(delayMs) {
-  globalThis.setTimeout(() => {
-    void requestStatusFromWorklist();
-  }, delayMs);
-}
-function applyIraCastRadioVisual(statusEl) {
-  const visual = xn(connection, {
-    conferenceActive: Boolean(conference)
-  });
-  statusEl.classList.remove(
-    "ira-cast-idle",
-    "ira-cast-connecting",
-    "ira-cast-connected",
-    "ira-cast-disconnected",
-    "ira-cast-error",
-    "ira-cast-pulse",
-    "ira-cast-conference-pulse"
-  );
-  statusEl.classList.add(`ira-cast-${visual.tone}`);
-  statusEl.classList.toggle("ira-cast-pulse", visual.pulse);
-  statusEl.classList.toggle("ira-cast-conference-pulse", visual.conferencePulse);
-  statusEl.title = conference?.title ? `${connectionDetail} \xB7 ${conference.title}` : connectionDetail;
-  const slash = statusEl.querySelector(".cast-radio-slash");
-  if (slash) slash.hidden = !visual.showSlash;
-}
-async function connectIraCast() {
-  const params = new URLSearchParams(globalThis.location.search);
-  topic = params.get("topic")?.trim() || "";
-  let urlToken = params.get("id-token")?.trim() || "";
-  if (!topic && !urlToken) {
-    setConnection("idle", "Not connected");
-    return;
-  }
-  stripCastParamsFromUrl();
-  setConnection("connecting", "Connecting to Cast hub\u2026");
-  subscriberName = De("IRA");
-  const hub = resolveHubConfig();
-  client = wi.newInstance({
-    hub,
-    session: {
-      subscriberName,
-      productName: "SLICERLIVE-IRA",
-      productVersion: "0.1",
-      actors: [ID_ACTOR],
-      topic: topic || void 0,
-      events: [
-        "imagingstudy-open",
-        "imagingstudy-close",
-        "status-request",
-        "subscription-removed",
-        "status-update",
-        "conference-start",
-        "conference-end",
-        "dicom-send",
-        "nifti-send"
-      ],
-      lease: 7200,
-      defaultTargetActor: "*"
-    },
-    callbackUrl: `${globalThis.location.origin}/castCallback`,
-    preserveSessionTopicFromToken: Boolean(topic),
-    autoReconnect: true
-  });
-  client.onMessage((message) => {
-    if (handleStatusRequest(message)) return;
-    if (handleConferenceHubEvent(message)) return;
-    if (handleStatusUpdate(message)) return;
-    if (isDicomSendMessage(message)) {
-      void handleDicomSendMessage(message);
-      return;
-    }
-    if (isNiftiSendMessage(message)) {
-      void handleNiftiSendMessage(message);
-      return;
-    }
-    handleImagingStudyMessage(message);
-  });
-  client.onConnectionStateChange((wsState) => {
-    console.warn(`${LOG} ws state=`, wsState);
-    if (wsState === "connecting") {
-      setConnection("connecting", "Websocket connecting");
-    } else if (wsState === "connected") {
-      setConnection("connected", "Websocket connected");
-      scheduleStatusRequestFromWorklist(150);
-    } else if (wsState === "error") {
-      statusRequestState = "idle";
-      setConnection("error", "Websocket error");
-    } else {
-      statusRequestState = "idle";
-      setConnection("disconnected", "Websocket disconnected");
-    }
-  });
-  try {
-    if (urlToken) {
-      client.setToken(urlToken);
-    } else {
-      const { code: code2 } = await client.authenticate();
-      if (!code2 || !await client.getToken(code2)) {
-        setConnection("error", "Token failed");
-        return;
-      }
-    }
-    if (topic) client.setTopic(topic);
-    const hubTokenEarly = String(
-      client.getHubConfig?.()?.token || urlToken || ""
-    ).trim();
-    if (hubTokenEarly) urlToken = hubTokenEarly;
-    persistCastCredentials(topic, urlToken);
-    const status2 = await client.subscribe();
-    const session = client.getSessionConfig();
-    if (session.subscriberName) subscriberName = session.subscriberName;
-    if (session.topic) topic = session.topic;
-    userName = String(session.userName || "").trim() || topic;
-    const hubToken = String(client.getHubConfig?.()?.token || urlToken || "").trim();
-    if (hubToken) urlToken = hubToken;
-    persistCastCredentials(topic, urlToken);
-    if (status2 === 202) {
-      console.warn(
-        `${LOG} subscribed topic=`,
-        topic,
-        "subscriber=",
-        subscriberName
-      );
-      scheduleStatusRequestFromWorklist(400);
-    } else {
-      setConnection("disconnected", `Subscribe failed (${String(status2)})`);
-    }
-  } catch (err) {
-    console.error(`${LOG} connect failed`, err);
-    setConnection(
-      "error",
-      err instanceof Error ? err.message : String(err)
-    );
-  }
-}
-
-// logic/readers/nifti.ts
+// ../../../logic/readers/nifti.ts
 var DT = {
   2: { ctor: Uint8Array, bytes: 1, zarr: "|u1" },
   4: { ctor: Int16Array, bytes: 2, zarr: "<i2" },
@@ -13326,6 +12686,12 @@ function isGzip(bytes) {
 async function gunzip(bytes) {
   const ds = new DecompressionStream("gzip");
   return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer());
+}
+function isNifti(bytes) {
+  if (bytes.length < 348) return false;
+  const m1 = String.fromCharCode(bytes[344], bytes[345], bytes[346]);
+  const m2 = String.fromCharCode(bytes[4], bytes[5], bytes[6]);
+  return m1 === "n+1" || m1 === "ni1" || m2 === "n+2" || m2 === "ni2";
 }
 function quaternToMat(b, c, d, qfac, dx, dy, dz) {
   let a = 1 - (b * b + c * c + d * d);
@@ -13421,7 +12787,1886 @@ async function parseNifti(input, name) {
   return { dims: [nx, ny, nz], ijkToRAS: M2, data, dtype: dt2.zarr, name, meta };
 }
 
-// render/demos/ira/ira-nifti-seg.ts
+// ../../nrrd.ts
+var TYPE_BYTES = {
+  "signed char": 1,
+  "int8": 1,
+  "int8_t": 1,
+  "uchar": 1,
+  "unsigned char": 1,
+  "uint8": 1,
+  "uint8_t": 1,
+  "short": 2,
+  "short int": 2,
+  "signed short": 2,
+  "signed short int": 2,
+  "int16": 2,
+  "int16_t": 2,
+  "ushort": 2,
+  "unsigned short": 2,
+  "unsigned short int": 2,
+  "uint16": 2,
+  "uint16_t": 2,
+  "int": 4,
+  "signed int": 4,
+  "int32": 4,
+  "int32_t": 4,
+  "uint": 4,
+  "unsigned int": 4,
+  "uint32": 4,
+  "uint32_t": 4,
+  "float": 4,
+  "double": 8
+};
+async function parseNrrd(buf) {
+  let end = -1;
+  for (let i = 0; i + 1 < buf.length; i++) {
+    if (buf[i] === 10 && buf[i + 1] === 10) {
+      end = i + 2;
+      break;
+    }
+  }
+  if (end < 0) throw new Error("NRRD: no header terminator");
+  const header = new TextDecoder("latin1").decode(buf.subarray(0, end));
+  const lines = header.split("\n");
+  if (!lines[0].startsWith("NRRD")) throw new Error("NRRD: bad magic");
+  const f = {};
+  for (const ln2 of lines.slice(1)) {
+    if (!ln2 || ln2.startsWith("#")) continue;
+    const m = ln2.match(/^([^:]+):[=]?\s*(.*)$/);
+    if (m) f[m[1].trim().toLowerCase()] = m[2].trim();
+  }
+  const type = (f["type"] ?? "").toLowerCase();
+  const bpp = TYPE_BYTES[type];
+  if (!bpp) throw new Error(`NRRD: unsupported type "${type}"`);
+  const sizes = (f["sizes"] ?? "").split(/\s+/).map(Number);
+  if (sizes.length !== 3) throw new Error(`NRRD: need dimension 3, got sizes [${sizes}]`);
+  const [nx, ny, nz] = sizes;
+  const nvox = nx * ny * nz;
+  const encoding = (f["encoding"] ?? "raw").toLowerCase();
+  const little = (f["endian"] ?? "little").toLowerCase() !== "big";
+  let raw = buf.subarray(end);
+  if (encoding === "gzip" || encoding === "gz") {
+    raw = new Uint8Array(await new Response(new Response(raw).body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+  } else if (encoding !== "raw") {
+    throw new Error(`NRRD: unsupported encoding "${encoding}" (raw/gzip only)`);
+  }
+  if (raw.length < nvox * bpp) throw new Error(`NRRD: short data (${raw.length} < ${nvox * bpp})`);
+  const out = new Float32Array(nvox);
+  const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+  let lo = Infinity, hi2 = -Infinity;
+  const read = type.includes("uchar") || type.includes("uint8") || type === "unsigned char" ? (i) => raw[i] : type.includes("char") || type === "int8" ? (i) => raw[i] << 24 >> 24 : type.includes("ushort") || type.includes("uint16") || type === "unsigned short" || type === "unsigned short int" ? (i) => dv.getUint16(i, little) : type.includes("short") ? (i) => dv.getInt16(i, little) : type.includes("uint") ? (i) => dv.getUint32(i, little) : type === "float" ? (i) => dv.getFloat32(i, little) : type === "double" ? (i) => dv.getFloat64(i, little) : (i) => dv.getInt32(i, little);
+  for (let i = 0; i < nvox; i++) {
+    const v2 = read(i * bpp);
+    out[i] = v2;
+    if (v2 < lo) lo = v2;
+    if (v2 > hi2) hi2 = v2;
+  }
+  const dir = parseVectors(f["space directions"]);
+  const org = parseVectors(f["space origin"] ?? "(0,0,0)")[0] ?? [0, 0, 0];
+  const space = (f["space"] ?? "left-posterior-superior").toLowerCase();
+  const toRAS = space.startsWith("right") ? [1, 1, 1] : [-1, -1, 1];
+  const c = dir.length === 3 ? dir : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const ijkToRAS = [
+    toRAS[0] * c[0][0],
+    toRAS[0] * c[1][0],
+    toRAS[0] * c[2][0],
+    toRAS[0] * org[0],
+    toRAS[1] * c[0][1],
+    toRAS[1] * c[1][1],
+    toRAS[1] * c[2][1],
+    toRAS[1] * org[1],
+    toRAS[2] * c[0][2],
+    toRAS[2] * c[1][2],
+    toRAS[2] * c[2][2],
+    toRAS[2] * org[2],
+    0,
+    0,
+    0,
+    1
+  ];
+  return { data: out, dims: [nx, ny, nz], ijkToRAS, range: [lo, hi2] };
+}
+function parseVectors(s) {
+  if (!s) return [];
+  const out = [];
+  const re2 = /\(([^)]*)\)/g;
+  let m;
+  while (m = re2.exec(s)) out.push(m[1].split(",").map(Number));
+  return out;
+}
+
+// ../../../logic/readers/registry.ts
+function sniff(bytes, fileName = "") {
+  const lower = fileName.toLowerCase();
+  if (bytes.length >= 4 && String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) === "NRRD") return "nrrd";
+  if (bytes.length >= 132 && String.fromCharCode(bytes[128], bytes[129], bytes[130], bytes[131]) === "DICM") return "dicom";
+  if (isNifti(bytes)) return "nifti";
+  if (isGzip(bytes)) return lower.endsWith(".nii.gz") ? "nifti" : lower.endsWith(".nrrd.gz") ? "nrrd" : "unknown";
+  if (lower.endsWith(".nii")) return "nifti";
+  if (lower.endsWith(".nrrd") || lower.endsWith(".nhdr")) return "nrrd";
+  if (lower.endsWith(".dcm")) return "dicom";
+  return "unknown";
+}
+async function readVolume(bytes, fileName = "") {
+  const fmt = sniff(bytes, fileName);
+  if (fmt === "nifti") return parseNifti(bytes, fileName.replace(/\.nii(\.gz)?$/i, ""));
+  if (fmt === "nrrd") {
+    const raw = isGzip(bytes) && !fileName.toLowerCase().endsWith(".nrrd") ? await gunzip(bytes) : bytes;
+    const n = await parseNrrd(raw);
+    return { dims: n.dims, ijkToRAS: n.ijkToRAS, data: n.data, dtype: zarrDtype(n.data), name: fileName.replace(/\.nrrd$/i, "") };
+  }
+  throw new Error(fmt === "dicom" ? "DICOM: load the series through the DICOM browser" : `unrecognised volume format: ${fileName || "(bytes)"}`);
+}
+function zarrDtype(a) {
+  if (a instanceof Int16Array) return "<i2";
+  if (a instanceof Uint16Array) return "<u2";
+  if (a instanceof Uint8Array) return "|u1";
+  if (a instanceof Int8Array) return "|i1";
+  if (a instanceof Int32Array) return "<i4";
+  if (a instanceof Uint32Array) return "<u4";
+  if (a instanceof Float32Array) return "<f4";
+  if (a instanceof Float64Array) return "<f8";
+  return "<f4";
+}
+
+// ../../../logic/window-level.ts
+var isIntType = (a) => !(a instanceof Float32Array || a instanceof Float64Array);
+function histogramPercentiles(data, loP = 1e-3, hiP = 0.999) {
+  const n = data.length;
+  if (n === 0) return [0, 1];
+  const step = n > 4e6 ? Math.floor(n / 4e6) : 1;
+  let mn2 = Infinity, mx = -Infinity;
+  for (let i = 0; i < n; i += step) {
+    const v2 = data[i];
+    if (v2 < mn2) mn2 = v2;
+    if (v2 > mx) mx = v2;
+  }
+  if (mx <= mn2) return [mn2, mn2];
+  const intType = isIntType(data);
+  const bins = intType ? Math.min(mx - mn2 + 1, 1 << 16) : 1e3;
+  const scale2 = (bins - 1) / (mx - mn2);
+  const hist = new Float64Array(bins);
+  let total = 0;
+  for (let i = 0; i < n; i += step) {
+    hist[Math.round((data[i] - mn2) * scale2)]++;
+    total++;
+  }
+  const binValue = (b) => mn2 + b / scale2;
+  const at = (frac) => {
+    const target = frac * total;
+    let c = 0;
+    for (let b = 0; b < bins; b++) {
+      c += hist[b];
+      if (c >= target) return binValue(b);
+    }
+    return mx;
+  };
+  return [at(loP), at(hiP)];
+}
+function autoWindowLevel(data) {
+  const [lo, hi2] = histogramPercentiles(data, 1e-3, 0.999);
+  return { window: Math.max(1e-6, hi2 - lo), level: (lo + hi2) / 2 };
+}
+
+// ira-scene.ts
+var LIVESCENE_MIME = "application/vnd.slicerlive.scene+json";
+var EMBEDDED_SCENE_PARAM = "embedded";
+var EMBEDDED_SCENE_STORAGE_KEY = "ira.embeddedLiveScene";
+function looksLikeSceneJson(f) {
+  const role = String(f.role || "").toLowerCase();
+  if (role === "scene") return true;
+  const name = String(f.fileName || "").toLowerCase();
+  const url = String(f.url || "").toLowerCase();
+  if (name.endsWith(".json")) return true;
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return path.endsWith(".json");
+  } catch {
+    return url.includes(".json");
+  }
+}
+function isLiveSceneDoc(value) {
+  if (!value || typeof value !== "object") return false;
+  const doc = value;
+  const nodes = doc.nodes;
+  const blobBase = String(doc.blobBase || "").trim();
+  return Boolean(nodes && typeof nodes === "object" && blobBase);
+}
+function sceneDocFromOpenContext(context) {
+  if (context && typeof context === "object" && !Array.isArray(context)) {
+    const scene = context.scene;
+    if (isLiveSceneDoc(scene)) {
+      return { ...scene };
+    }
+  }
+  if (!Array.isArray(context)) return null;
+  for (const item of context) {
+    if (!item || typeof item !== "object") continue;
+    const row = item;
+    if (String(row.key || "").toLowerCase() !== "scene") continue;
+    if (isLiveSceneDoc(row.resource)) {
+      return { ...row.resource };
+    }
+  }
+  return null;
+}
+function contextItemsFromOpenContext(context) {
+  if (Array.isArray(context)) return context;
+  if (!context || typeof context !== "object") return [];
+  const out = [];
+  for (const [key, resource] of Object.entries(
+    context
+  )) {
+    if (key === "files") continue;
+    if (resource && typeof resource === "object") {
+      out.push({ key, resource });
+    }
+  }
+  return out;
+}
+function materializeLiveSceneBlobUrls(sceneDoc, files) {
+  const hashToUrl = /* @__PURE__ */ new Map();
+  for (const entry of files) {
+    const name = String(entry.fileName || "").trim();
+    if (!name) continue;
+    const data = entry.data;
+    let bytes = null;
+    if (data instanceof ArrayBuffer) bytes = data;
+    else if (data instanceof Uint8Array) bytes = data;
+    else if (typeof data === "string" && data) {
+      continue;
+    }
+    if (!bytes) continue;
+    hashToUrl.set(name, URL.createObjectURL(new Blob([bytes])));
+  }
+  if (!hashToUrl.size) return { ...sceneDoc };
+  const nodesIn = sceneDoc.nodes;
+  if (!nodesIn || typeof nodesIn !== "object") {
+    return { ...sceneDoc, blobBase: "" };
+  }
+  const nodes = {};
+  for (const [id, node] of Object.entries(nodesIn)) {
+    if (!node || typeof node !== "object") {
+      nodes[id] = node;
+      continue;
+    }
+    const n = { ...node };
+    const zarr = n.zarr && typeof n.zarr === "object" ? { ...n.zarr } : null;
+    const attrs = n.attrs && typeof n.attrs === "object" ? { ...n.attrs } : null;
+    const attrsZarr = attrs && attrs.zarr && typeof attrs.zarr === "object" ? { ...attrs.zarr } : null;
+    const rewriteHashes = (z2) => {
+      const hashes = z2.chunkHashes;
+      if (!hashes || typeof hashes !== "object") return z2;
+      const next = {};
+      for (const [coord, hash] of Object.entries(
+        hashes
+      )) {
+        const h = String(hash || "").trim();
+        next[coord] = hashToUrl.get(h) || h;
+      }
+      return { ...z2, chunkHashes: next };
+    };
+    if (zarr) n.zarr = rewriteHashes(zarr);
+    if (attrsZarr && attrs) {
+      attrs.zarr = rewriteHashes(attrsZarr);
+      n.attrs = attrs;
+    }
+    nodes[id] = n;
+  }
+  return { ...sceneDoc, blobBase: "", nodes };
+}
+function sceneUrlFromOpenContext(context) {
+  const plan = fr(context);
+  if (!plan || plan.mode !== "files") return null;
+  const files = Array.isArray(plan.files) ? plan.files : [];
+  const sceneFile = files.find((f) => String(f.role || "").toLowerCase() === "scene") || files.find(looksLikeSceneJson) || files[0];
+  const url = String(sceneFile?.url || "").trim();
+  if (!url) return null;
+  if (!looksLikeSceneJson(sceneFile || {})) return null;
+  return url;
+}
+function studyParamsFromSceneUrl(sceneUrl) {
+  return { scene: String(sceneUrl || "").trim() };
+}
+function studyParamsFromSceneDoc(doc) {
+  const url = String(doc.url || "").trim();
+  if (url) return { scene: url };
+  try {
+    globalThis.sessionStorage?.setItem(
+      EMBEDDED_SCENE_STORAGE_KEY,
+      JSON.stringify(doc)
+    );
+  } catch (err) {
+    console.warn("[ira] failed to stash embedded LiveScene", err);
+  }
+  return { scene: EMBEDDED_SCENE_PARAM };
+}
+function takeEmbeddedSceneFromStorage() {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(EMBEDDED_SCENE_STORAGE_KEY);
+    if (!raw) return null;
+    globalThis.sessionStorage?.removeItem(EMBEDDED_SCENE_STORAGE_KEY);
+    const data = JSON.parse(raw);
+    return isLiveSceneDoc(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+function imagingStudyContextFromSceneUrl(sceneUrl) {
+  const url = String(sceneUrl || "").trim();
+  if (!url) return [];
+  let fileName = "scene.json";
+  try {
+    const path = new URL(url).pathname;
+    const base = path.split("/").pop();
+    if (base) fileName = base;
+  } catch {
+  }
+  return Wt({
+    id: `scene-${fileName.replace(/\.[^.]+$/, "") || "livescene"}`,
+    files: [
+      {
+        url,
+        fileName,
+        role: "scene",
+        label: "LiveScene",
+        mimeType: LIVESCENE_MIME
+      }
+    ]
+  });
+}
+function imagingStudyContextFromSceneDoc(doc, idHint) {
+  const url = String(doc.url || "").trim();
+  const filesCtx = url ? imagingStudyContextFromSceneUrl(url) : Wt({
+    id: String(idHint || "livescene").trim() || "livescene",
+    files: []
+  });
+  const withoutScene = filesCtx.filter((item) => {
+    if (!item || typeof item !== "object") return true;
+    return item.key !== "scene";
+  });
+  withoutScene.push({ key: "scene", resource: { ...doc } });
+  return withoutScene;
+}
+async function fetchLiveSceneDoc(sceneUrl) {
+  const url = String(sceneUrl || "").trim();
+  if (!url) return null;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch LiveScene (${res.status})`);
+  }
+  const data = await res.json();
+  const nodes = data.nodes && typeof data.nodes === "object" ? data.nodes : void 0;
+  const doc = {
+    ...data,
+    url
+  };
+  if (typeof data.blobBase === "string") doc.blobBase = data.blobBase;
+  if (typeof data.mrson === "string") doc.mrson = data.mrson;
+  if (nodes) doc.nodes = nodes;
+  return doc;
+}
+function imagingStudyContextFromLocalStudy(opts) {
+  const studyUid = String(opts.studyInstanceUID || "").trim();
+  const seriesUid = String(opts.seriesInstanceUID || "").trim();
+  const id = String(opts.id || "").trim() || studyUid || seriesUid || `local-${Date.now()}`;
+  const context = Wt({
+    id,
+    files: []
+  });
+  for (const item of context) {
+    if (!item || typeof item !== "object") continue;
+    if (item.key !== "study") continue;
+    const resource = item.resource;
+    if (!resource || typeof resource !== "object") continue;
+    resource.description = String(opts.label || "").trim() || "Local study";
+    const modality = String(opts.modality || "").trim().toUpperCase();
+    if (modality) {
+      resource.modality = [{ coding: [{ system: "http://dicom.nema.org/resources/ontology/DCM", code: modality }] }];
+    }
+    if (studyUid) {
+      const identifiers = Array.isArray(resource.identifier) ? [...resource.identifier] : [];
+      identifiers.push({
+        system: "urn:dicom:uid",
+        value: `urn:oid:${studyUid}`
+      });
+      resource.identifier = identifiers;
+    }
+    if (opts.anonymized) {
+      resource.meta = {
+        ...typeof resource.meta === "object" && resource.meta ? resource.meta : {},
+        security: [
+          {
+            system: "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            code: "ANONYED",
+            display: "anonymized"
+          }
+        ]
+      };
+    }
+  }
+  return context;
+}
+function modalityFromSceneName(name) {
+  const n = String(name || "").toUpperCase();
+  if (/\bMR\b/.test(n) || n.includes("MRHEAD") || n.startsWith("MR")) return "MR";
+  return "CT";
+}
+function iraVolumeFromSceneVolume(sv) {
+  return {
+    vol: sv.voxels,
+    dims: sv.dims,
+    ijkToRAS: sv.ijkToRAS,
+    win: sv.win,
+    lev: sv.lev,
+    dtype: "float32",
+    modality: modalityFromSceneName(sv.name)
+  };
+}
+function iraVolumeFromLocalVolume(vol) {
+  const meta = vol.meta || {};
+  const winMeta = Number(meta.windowWidth);
+  const levMeta = Number(meta.windowCenter);
+  let win;
+  let lev;
+  if (Number.isFinite(winMeta) && Number.isFinite(levMeta) && winMeta > 0) {
+    win = winMeta;
+    lev = levMeta;
+  } else {
+    const wl = autoWindowLevel(vol.data);
+    win = wl.window;
+    lev = wl.level;
+  }
+  const data = new Float32Array(vol.data.length);
+  data.set(vol.data);
+  let modality = String(meta.modality || "CT").trim().toUpperCase();
+  if (modality === "PET") modality = "PT";
+  if (modality !== "CT" && modality !== "MR" && modality !== "PT") modality = "CT";
+  return {
+    vol: data,
+    dims: vol.dims,
+    ijkToRAS: vol.ijkToRAS.slice(),
+    win,
+    lev,
+    dtype: "float32",
+    modality
+  };
+}
+function looksLikeVolumeFile(f) {
+  if (looksLikeSceneJson(f)) return false;
+  const name = String(f.fileName || "").toLowerCase();
+  const url = String(f.url || "").toLowerCase();
+  let path = url;
+  try {
+    path = new URL(url).pathname.toLowerCase();
+  } catch {
+  }
+  const tip = name || path;
+  return tip.endsWith(".nii") || tip.endsWith(".nii.gz") || tip.endsWith(".nrrd") || tip.endsWith(".nrrd.gz") || tip.endsWith(".nhdr");
+}
+function volumeFileFromOpenContext(context) {
+  const plan = fr(context);
+  if (!plan || plan.mode !== "files") return null;
+  const files = Array.isArray(plan.files) ? plan.files : [];
+  const volFile = files.find((f) => looksLikeVolumeFile(f)) || files.find((f) => {
+    const url2 = String(f?.url || "").trim();
+    return url2 && !looksLikeSceneJson(f || {});
+  });
+  const url = String(volFile?.url || "").trim();
+  if (!url || !volFile || looksLikeSceneJson(volFile)) return null;
+  if (!looksLikeVolumeFile(volFile)) return null;
+  let fileName = String(volFile.fileName || "").trim();
+  if (!fileName) {
+    try {
+      fileName = new URL(url).pathname.split("/").pop() || "volume.nii.gz";
+    } catch {
+      fileName = "volume.nii.gz";
+    }
+  }
+  const label = String(volFile.label || "").trim() || void 0;
+  return { url, fileName, label };
+}
+async function fetchBytesDirect(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
+async function fetchBytesViaHubProxy(hubOrigin, url) {
+  const proxy = new URL("/api/hub/proxy-download", hubOrigin);
+  proxy.searchParams.set("url", url);
+  const r = await fetch(proxy.toString());
+  if (!r.ok) {
+    const detail = await r.text().catch(() => "");
+    throw new Error(
+      `hub proxy-download HTTP ${r.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`
+    );
+  }
+  return new Uint8Array(await r.arrayBuffer());
+}
+async function fetchRemoteVolumeBytes(url, hubOrigin) {
+  try {
+    return await fetchBytesDirect(url);
+  } catch (directErr) {
+    const origin = String(hubOrigin || "").trim();
+    if (!origin) throw directErr;
+    try {
+      return await fetchBytesViaHubProxy(origin, url);
+    } catch (proxyErr) {
+      const d = directErr?.message ?? String(directErr);
+      const p = proxyErr?.message ?? String(proxyErr);
+      throw new Error(`volume download failed (direct: ${d}; proxy: ${p})`);
+    }
+  }
+}
+async function loadVolumeFromRemoteFile(file, hubOrigin) {
+  const bytes = await fetchRemoteVolumeBytes(file.url, hubOrigin);
+  const vol = await readVolume(bytes, file.fileName);
+  const localVolume = iraVolumeFromLocalVolume(vol);
+  const stem = file.fileName.replace(/\.(nii(\.gz)?|nrrd(\.gz)?|nhdr)$/i, "");
+  const label = String(file.label || "").trim() || String(vol.name || "").trim() || stem || "Volume";
+  return { localVolume, label };
+}
+function vrPresetFromSceneVolume(sv) {
+  if (!sv.vr) return null;
+  return {
+    lut: sv.vr.lut,
+    clim: [sv.vr.clim[0], sv.vr.clim[1]],
+    shade: [
+      sv.vr.shade[0],
+      sv.vr.shade[1],
+      sv.vr.shade[2],
+      sv.vr.shade[3]
+    ]
+  };
+}
+
+// ira-seg-catalog.ts
+var EMPTY_SEG_CATALOG = { segmentations: [] };
+function voxelVolumeMm3(ijkToRAS) {
+  const a = Number(ijkToRAS[0]);
+  const b = Number(ijkToRAS[1]);
+  const c = Number(ijkToRAS[2]);
+  const d = Number(ijkToRAS[4]);
+  const e = Number(ijkToRAS[5]);
+  const f = Number(ijkToRAS[6]);
+  const g = Number(ijkToRAS[8]);
+  const h = Number(ijkToRAS[9]);
+  const i = Number(ijkToRAS[10]);
+  const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  return Number.isFinite(det) ? Math.abs(det) : 0;
+}
+function coded(c) {
+  if (!c) return null;
+  return {
+    scheme: String(c.scheme || ""),
+    value: String(c.value || ""),
+    meaning: String(c.meaning || "")
+  };
+}
+function termFor(terminology) {
+  if (!terminology) return void 0;
+  return {
+    category: coded(terminology.category),
+    type: coded(terminology.type),
+    typeModifier: coded(terminology.typeModifier),
+    region: coded(terminology.region)
+  };
+}
+function countSegmentVoxels(lab) {
+  const counts = /* @__PURE__ */ new Map();
+  for (let i = 0; i < lab.length; i++) {
+    const v2 = lab[i];
+    if (!v2) continue;
+    counts.set(v2, (counts.get(v2) || 0) + 1);
+  }
+  return counts;
+}
+function buildSegCatalog(labmap, ijkToRAS, meta) {
+  if (!labmap?.lab?.length) return { segmentations: [] };
+  const voxVol = ijkToRAS && ijkToRAS.length >= 12 ? voxelVolumeMm3(ijkToRAS) : 0;
+  const counts = countSegmentVoxels(labmap.lab);
+  const numbers = [
+    .../* @__PURE__ */ new Set([
+      ...labmap.colors.map(([n]) => n),
+      ...Object.keys(labmap.names).map(Number),
+      ...counts.keys()
+    ])
+  ].filter((n) => n > 0).sort((a, b) => a - b);
+  const segments = [];
+  for (const num2 of numbers) {
+    const voxelCount = counts.get(num2) || 0;
+    const fromColors = labmap.colors.find(([n]) => n === num2);
+    const color = fromColors ? [fromColors[1], fromColors[2], fromColors[3]] : [1, 1, 1];
+    segments.push({
+      number: num2,
+      label: labmap.names[num2] || `Segment ${num2}`,
+      color,
+      terminology: termFor(labmap.terminology?.[num2]),
+      voxelCount,
+      volumeMm3: voxelCount * voxVol
+    });
+  }
+  if (!segments.length) return { segmentations: [] };
+  const instance = {
+    sopInstanceUID: String(meta?.sopInstanceUID || labmap.sopInstanceUID || ""),
+    seriesInstanceUID: String(
+      meta?.seriesInstanceUID || labmap.seriesInstanceUID || ""
+    ),
+    sourceSeriesInstanceUID: String(
+      meta?.sourceSeriesInstanceUID || labmap.sourceSeriesInstanceUID || ""
+    ),
+    fileName: String(meta?.fileName || labmap.fileName || ""),
+    modality: String(meta?.modality || labmap.modality || "SEG"),
+    segments
+  };
+  return { segmentations: [instance] };
+}
+
+// ira-cast.ts
+var LOG = "[ira-cast]";
+var HUB_CREDENTIALS = {
+  client_id: "client_id_3d_Slicer",
+  client_secret: "client_secret_3d_Slicer"
+};
+var LOCAL_HUB = {
+  name: "local",
+  version: "1.0",
+  hub_endpoint: "http://127.0.0.1:2018/api/hub",
+  authorization_endpoint: "http://127.0.0.1:2018/oauth/authorize",
+  token_endpoint: "http://127.0.0.1:2018/oauth/token",
+  ...HUB_CREDENTIALS
+};
+function isHostedOnCastHub(location2 = globalThis.location) {
+  return String(location2?.pathname || "").startsWith("/slicerlive");
+}
+function shouldUseSameOriginHub(location2 = globalThis.location) {
+  return isHostedOnCastHub(location2) || It(location2);
+}
+function resolveHubConfig(location2 = globalThis.location) {
+  if (!shouldUseSameOriginHub(location2)) {
+    return LOCAL_HUB;
+  }
+  const origin = location2.origin;
+  return {
+    name: "hub",
+    version: "1.0",
+    hub_endpoint: `${origin}/api/hub`,
+    authorization_endpoint: `${origin}/oauth/authorize`,
+    token_endpoint: `${origin}/oauth/token`,
+    ...HUB_CREDENTIALS
+  };
+}
+var ID_ACTOR = "ID";
+var WORKLIST_ACTOR = "WORKLIST_CLIENT";
+var REPORTING_ACTOR = "REPORTING_CLIENT";
+var SS_TOPIC = "ira.cast.topic";
+var SS_TOKEN = "ira.cast.token";
+var STUDY_URL_KEYS = [
+  "series",
+  "bucket",
+  "seg",
+  "segBucket",
+  "patient",
+  "modality",
+  "collection",
+  "scene",
+  "StudyInstanceUIDs",
+  "SeriesInstanceUIDs",
+  "studyUID",
+  "seriesUID",
+  "requestType"
+];
+var client = null;
+var topic = "";
+var subscriberName = "";
+var userName = "";
+var connection = "idle";
+var connectionDetail = "Not connected";
+var conference = null;
+var conferenceFollowHost = false;
+var lastImagingStudyOpenContext = [];
+var lastLiveScene = null;
+var lastSegCatalog = EMPTY_SEG_CATALOG;
+var statusRequestState = "idle";
+var onStatus = null;
+var onImagingStudyOpen = null;
+var onImagingStudyClose = null;
+var onLiveSceneChange = null;
+var reportingConnectedApps = /* @__PURE__ */ new Map();
+function setIraCastStatusListener(fn) {
+  onStatus = fn;
+}
+function setIraImagingStudyOpenHandler(fn) {
+  onImagingStudyOpen = fn;
+}
+function setIraImagingStudyCloseHandler(fn) {
+  onImagingStudyClose = fn;
+}
+function persistCastCredentials(nextTopic, token) {
+  try {
+    if (nextTopic) sessionStorage.setItem(SS_TOPIC, nextTopic);
+    if (token) sessionStorage.setItem(SS_TOKEN, token);
+  } catch {
+  }
+}
+function readPersistedCredentials() {
+  try {
+    return {
+      topic: sessionStorage.getItem(SS_TOPIC)?.trim() || "",
+      token: sessionStorage.getItem(SS_TOKEN)?.trim() || ""
+    };
+  } catch {
+    return { topic: "", token: "" };
+  }
+}
+function iraUrlHasStudyParams() {
+  const p = new URLSearchParams(globalThis.location.search);
+  return Boolean(
+    p.get("series") || p.get("StudyInstanceUIDs") || p.get("studyUID") || p.get("scene")
+  );
+}
+function syncIraStudyUrl(studyParams = {}) {
+  if (!globalThis.history?.replaceState) return;
+  const url = new URL(globalThis.location.href);
+  for (const key of STUDY_URL_KEYS) url.searchParams.delete(key);
+  const persisted = readPersistedCredentials();
+  const nextTopic = topic || persisted.topic;
+  const nextToken = persisted.token || String(client?.getHubConfig?.()?.token || "").trim();
+  if (nextTopic) url.searchParams.set("topic", nextTopic);
+  if (nextToken) url.searchParams.set("id-token", nextToken);
+  for (const [key, value] of Object.entries(studyParams)) {
+    const v2 = String(value || "").trim();
+    if (v2) url.searchParams.set(key, v2);
+  }
+  globalThis.history.replaceState(null, "", url.toString());
+}
+function getIraCastSessionInfo() {
+  return {
+    topic,
+    subscriberName: subscriberName || client?.getSessionConfig?.()?.subscriberName || "",
+    userName: userName || client?.getSessionConfig?.()?.userName || "",
+    connection,
+    connectionDetail,
+    hubEndpoint: client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint,
+    conference
+  };
+}
+function setIraConferenceView(view) {
+  conference = view;
+  if (!view) {
+    conferenceFollowHost = false;
+  }
+  onStatus?.(connection, connectionDetail);
+}
+function setIraConferenceFollowHost(followHost) {
+  conferenceFollowHost = Boolean(followHost);
+}
+var conferenceHubHandler = null;
+function setIraConferenceHubHandler(fn) {
+  conferenceHubHandler = fn;
+}
+async function syncIraConferenceView() {
+  if (connection !== "connected") {
+    setIraConferenceView(null);
+    return;
+  }
+  try {
+    const hubEndpoint = client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
+    const view = await Ft(
+      hubEndpoint,
+      topic,
+      subscriberName,
+      userName
+    );
+    setIraConferenceView(view);
+  } catch {
+  }
+}
+function handleConferenceHubEvent(message) {
+  if (conferenceHubHandler?.(message)) {
+    return true;
+  }
+  const event = message?.event;
+  const hubEvent = ie(event);
+  if (hubEvent === "conference-start") {
+    void syncIraConferenceView();
+    return true;
+  }
+  if (hubEvent === "conference-end") {
+    const context = event?.context && typeof event.context === "object" ? event.context : {};
+    const leaveTopic = String(context.leaveTopic ?? "").trim();
+    if (!leaveTopic || leaveTopic === topic) {
+      setIraConferenceView(null);
+    } else {
+      void syncIraConferenceView();
+    }
+    return true;
+  }
+  return false;
+}
+function getIraHubAdminUrl() {
+  const endpoint = client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
+  return Jn(endpoint) || endpoint;
+}
+function resolveIraReportingClientUrl(location2 = globalThis.location) {
+  if (shouldUseSameOriginHub(location2)) {
+    return `${location2.origin}/reporting-client/`;
+  }
+  return "http://localhost:8150/";
+}
+var REPORTING_WINDOW_NAME = "castViewer-reporting";
+var worklistClientWindow = null;
+var reportingWindow = null;
+function parseClientWindow(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw;
+  const left = Number(obj.left);
+  const top = Number(obj.top);
+  const width = Number(obj.width);
+  const height = Number(obj.height);
+  if (![left, top, width, height].every((n) => Number.isFinite(n)) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return {
+    left: Math.floor(left),
+    top: Math.floor(top),
+    width: Math.floor(width),
+    height: Math.floor(height)
+  };
+}
+function adoptWorklistClientWindowFromStatusResponses(responses) {
+  for (const item of responses) {
+    const actor = String(item?.actor ?? "").trim().toUpperCase();
+    if (actor && actor !== WORKLIST_ACTOR) continue;
+    const next = parseClientWindow(
+      item?.data && typeof item.data === "object" ? item.data.clientWindow : null
+    );
+    if (!next) continue;
+    worklistClientWindow = next;
+    console.warn(`${LOG} worklist clientWindow from STATUS`, next);
+    return;
+  }
+}
+function reportingPopupPlacementFromWorklist() {
+  const width = 540;
+  const height = 394;
+  const availLeft = Number(globalThis.screen?.availLeft) || 0;
+  const availTop = Number(globalThis.screen?.availTop) || 0;
+  const availW = globalThis.screen?.availWidth || globalThis.screen?.width || 1200;
+  const availH = globalThis.screen?.availHeight || globalThis.screen?.height || 800;
+  const opener = worklistClientWindow;
+  const openerLeft = opener?.left ?? 0;
+  const openerTop = opener?.top ?? 0;
+  const openerW = opener?.width || availW;
+  const openerH = opener?.height || availH;
+  let left = opener ? openerLeft + (openerW - width) / 2 : Math.max(0, (availW - width) / 2);
+  let top = opener ? openerTop + (openerH - height) / 2 : Math.max(0, (availH - height) / 2);
+  left = Math.max(availLeft, Math.min(left, availLeft + availW - width));
+  top = Math.max(availTop, Math.min(top, availTop + availH - height));
+  return {
+    width,
+    height,
+    left: Math.floor(left),
+    top: Math.floor(top)
+  };
+}
+function focusExistingReportingWindow() {
+  if (!reportingWindow || reportingWindow.closed) {
+    reportingWindow = null;
+    return false;
+  }
+  try {
+    reportingWindow.focus();
+  } catch {
+  }
+  return true;
+}
+function focusReportingWindowAfterSegGrowth() {
+  if (focusExistingReportingWindow()) return;
+  if (reportingConnectedApps.size === 0) return;
+  let existing = null;
+  try {
+    existing = globalThis.open("", REPORTING_WINDOW_NAME);
+  } catch {
+    return;
+  }
+  if (!existing || existing.closed) return;
+  try {
+    const href = String(existing.location?.href || "");
+    if (!href || href === "about:blank") {
+      try {
+        existing.close();
+      } catch {
+      }
+      return;
+    }
+  } catch {
+  }
+  try {
+    existing.focus();
+  } catch {
+  }
+  reportingWindow = existing;
+}
+function openIraReportingClient() {
+  if (focusExistingReportingWindow()) {
+    return reportingWindow;
+  }
+  const url = new URL(resolveIraReportingClientUrl());
+  const persisted = readPersistedCredentials();
+  const nextTopic = topic || persisted.topic;
+  const nextToken = String(client?.getConnectionState?.()?.token || "").trim() || persisted.token || String(client?.getHubConfig?.()?.token || "").trim();
+  if (nextTopic) url.searchParams.set("topic", nextTopic);
+  if (nextToken) url.searchParams.set("id-token", nextToken);
+  const href = url.toString();
+  const place = reportingPopupPlacementFromWorklist();
+  const features = [
+    "popup",
+    `width=${place.width}`,
+    `height=${place.height}`,
+    `left=${place.left}`,
+    `top=${place.top}`
+  ].join(",");
+  const win = globalThis.open(href, REPORTING_WINDOW_NAME, features);
+  if (!win) {
+    return globalThis.open(href, REPORTING_WINDOW_NAME);
+  }
+  reportingWindow = win;
+  try {
+    win.resizeTo(place.width, place.height);
+    win.moveTo(place.left, place.top);
+    win.focus();
+  } catch {
+  }
+  return win;
+}
+function setIraImagingStudyContext(context) {
+  lastImagingStudyOpenContext = Array.isArray(context) ? context : [];
+}
+function getIraImagingStudyOpenContext() {
+  return hr(lastImagingStudyOpenContext);
+}
+var suppressInboundImagingStudy = 0;
+function beginSuppressInboundImagingStudy(ms = 1500) {
+  suppressInboundImagingStudy += 1;
+  globalThis.setTimeout(() => {
+    suppressInboundImagingStudy = Math.max(0, suppressInboundImagingStudy - 1);
+  }, ms);
+}
+function buildIraPublishPayload(hubEvent, context) {
+  return {
+    event: {
+      "hub.topic": topic,
+      "hub.event": hubEvent,
+      context
+    },
+    actor: ID_ACTOR,
+    "target.actor": "*",
+    "target.product.name": "*"
+  };
+}
+async function publishIraImagingStudyTransition(nextContext) {
+  const next = Array.isArray(nextContext) ? hr(nextContext) : [];
+  const previous = hr(lastImagingStudyOpenContext);
+  if (!client || connection !== "connected" || !topic) {
+    lastImagingStudyOpenContext = next;
+    lastLiveScene = null;
+    onLiveSceneChange?.();
+    console.warn(`${LOG} ImagingStudy transition local-only (not connected)`);
+    return { closed: false, opened: false };
+  }
+  beginSuppressInboundImagingStudy();
+  let closed = false;
+  let opened = false;
+  try {
+    if (previous.length) {
+      try {
+        const res = await client.publish(
+          buildIraPublishPayload("ImagingStudy-close", previous)
+        );
+        closed = Boolean(res?.ok);
+        if (!closed) {
+          console.warn(
+            `${LOG} ImagingStudy-close failed`,
+            res ? `HTTP ${res.status}` : "No response"
+          );
+        } else {
+          console.info(`${LOG} published ImagingStudy-close`);
+        }
+      } catch (err) {
+        console.error(`${LOG} ImagingStudy-close exception`, err);
+      }
+    }
+    try {
+      const res = await client.publish(
+        buildIraPublishPayload("ImagingStudy-open", next)
+      );
+      opened = Boolean(res?.ok);
+      if (!opened) {
+        console.warn(
+          `${LOG} ImagingStudy-open failed`,
+          res ? `HTTP ${res.status}` : "No response"
+        );
+      } else {
+        console.info(`${LOG} published ImagingStudy-open`);
+      }
+    } catch (err) {
+      console.error(`${LOG} ImagingStudy-open exception`, err);
+    }
+  } finally {
+    lastImagingStudyOpenContext = next;
+    lastLiveScene = null;
+    onLiveSceneChange?.();
+  }
+  return { closed, opened };
+}
+function getIraCastClient() {
+  return client;
+}
+var onStatusUpdate = null;
+function setIraStatusUpdateHandler(fn) {
+  onStatusUpdate = fn;
+}
+var onNiftiSend = null;
+function setIraNiftiSendHandler(fn) {
+  onNiftiSend = fn;
+}
+var onDicomSend = null;
+function setIraDicomSendHandler(fn) {
+  onDicomSend = fn;
+}
+var onSceneUpdate = null;
+function setIraSceneUpdateHandler(fn) {
+  onSceneUpdate = fn;
+}
+function handleSceneUpdateMessage(message) {
+  const event = message?.event;
+  if (ie(event) !== "scene-update") return false;
+  const context = mr(message);
+  const items = Array.isArray(context) ? context : [];
+  void Promise.resolve(onSceneUpdate?.(items)).catch(
+    (err) => console.error(`${LOG} scene-update handler failed`, err)
+  );
+  return true;
+}
+async function publishInferenceJob(opts) {
+  if (!client || connection !== "connected") {
+    return { ok: false, detail: "Not connected" };
+  }
+  const subscriber = subscriberName || client.getSessionConfig()?.subscriberName?.trim() || "";
+  if (!subscriber) return { ok: false, detail: "No subscriber name" };
+  if (!topic) return { ok: false, detail: "No Cast topic" };
+  if (!opts.files.length) return { ok: false, detail: "No volume files" };
+  return Si(client, {
+    targetProductName: opts.product,
+    hubEvent: opts.hubEvent,
+    files: opts.files,
+    subscriberName: subscriber,
+    subscriberProductName: "SLICERLIVE-IRA",
+    subscriberActor: ID_ACTOR,
+    topic,
+    contextExtras: opts.contextExtras
+  });
+}
+function getIraLiveScene() {
+  return lastLiveScene;
+}
+function setIraLiveScene(scene) {
+  lastLiveScene = scene;
+  onLiveSceneChange?.();
+}
+function setIraLiveSceneChangeListener(fn) {
+  onLiveSceneChange = fn;
+}
+var lastPublishedSegCount = 0;
+async function publishIraStructureReportUpdate() {
+  if (!client || connection !== "connected" || !topic) {
+    return false;
+  }
+  const context = [{ key: "segmentation", resource: lastSegCatalog }];
+  try {
+    const res = await client.publish(
+      buildIraPublishPayload("StructureReport-update", context)
+    );
+    const ok = Boolean(res?.ok);
+    if (!ok) {
+      console.warn(
+        `${LOG} StructureReport-update failed`,
+        res ? `HTTP ${res.status}` : "No response"
+      );
+    } else {
+      const n = lastSegCatalog.segmentations.reduce(
+        (acc, s) => acc + (s.segments?.length || 0),
+        0
+      );
+      console.info(`${LOG} published StructureReport-update segments=`, n);
+      if (n > lastPublishedSegCount) {
+        focusReportingWindowAfterSegGrowth();
+      }
+      lastPublishedSegCount = n;
+    }
+    return ok;
+  } catch (err) {
+    console.error(`${LOG} StructureReport-update exception`, err);
+    return false;
+  }
+}
+function setIraSegCatalog(catalog) {
+  lastSegCatalog = catalog && Array.isArray(catalog.segmentations) ? { segmentations: catalog.segmentations } : EMPTY_SEG_CATALOG;
+  void publishIraStructureReportUpdate();
+}
+function withSegmentationContext(context) {
+  const withoutSeg = context.filter((item) => {
+    if (!item || typeof item !== "object") return true;
+    return item.key !== "segmentation";
+  });
+  withoutSeg.push({ key: "segmentation", resource: lastSegCatalog });
+  return withoutSeg;
+}
+function buildStatusResponseData() {
+  let context = hr(lastImagingStudyOpenContext);
+  if (lastLiveScene) {
+    context = context.filter((item) => {
+      if (!item || typeof item !== "object") return true;
+      return item.key !== "scene";
+    });
+    context.push({ key: "scene", resource: lastLiveScene });
+  }
+  context = withSegmentationContext(context);
+  if (lastImagingStudyOpenContext.length || lastLiveScene) {
+    return { "context.type": "ImagingStudy", context };
+  }
+  return { "context.type": "", context };
+}
+function setConnection(next, detail) {
+  const wasConnected = connection === "connected";
+  connection = next;
+  connectionDetail = detail;
+  if (wasConnected && next !== "connected") {
+    conference = null;
+    clearReportingConnectedApps();
+    worklistClientWindow = null;
+  }
+  onStatus?.(next, detail);
+  if (next === "connected") {
+    void syncIraConferenceView();
+  }
+}
+function updateIraReportingButton() {
+  const btn = document.getElementById("iraReportingBtn");
+  if (!btn) return;
+  btn.classList.toggle("ira-btn-connected", reportingConnectedApps.size > 0);
+}
+function clearReportingConnectedApps() {
+  if (reportingConnectedApps.size === 0) {
+    updateIraReportingButton();
+    return;
+  }
+  reportingConnectedApps.clear();
+  updateIraReportingButton();
+}
+function isReportingPresencePeer(productName, actor) {
+  const actorKey = actor.trim().toUpperCase();
+  if (actorKey === REPORTING_ACTOR) return true;
+  return hi(productName, "reporting");
+}
+function markReportingConnectedApp(message) {
+  const subscriber = pr(message);
+  if (!subscriber) return;
+  const productName = yr(message);
+  const actor = gr(message);
+  if (!isReportingPresencePeer(productName, actor)) return;
+  const productKey = productName.trim().toUpperCase();
+  if (productKey) {
+    for (const [name, existing] of reportingConnectedApps) {
+      if (name !== subscriber && existing.productName.trim().toUpperCase() === productKey) {
+        reportingConnectedApps.delete(name);
+      }
+    }
+  }
+  reportingConnectedApps.set(subscriber, {
+    productName: productName.trim(),
+    actor: actor.trim()
+  });
+  updateIraReportingButton();
+}
+function handleSubscriptionRemoved(message) {
+  const event = message?.event;
+  if (!event || ie(event) !== "subscription-removed") {
+    return false;
+  }
+  const subscriber = pr(message);
+  if (!subscriber || !reportingConnectedApps.has(subscriber)) return false;
+  reportingConnectedApps.delete(subscriber);
+  updateIraReportingButton();
+  return true;
+}
+function stripCastParamsFromUrl() {
+  if (!globalThis.history?.replaceState) return;
+  const url = new URL(globalThis.location.href);
+  if (!url.searchParams.has("topic") && !url.searchParams.has("id-token")) {
+    return;
+  }
+  url.searchParams.delete("topic");
+  url.searchParams.delete("id-token");
+  globalThis.history.replaceState(null, "", url.toString());
+}
+function extractActorKeywords(actor) {
+  if (actor == null) return [];
+  if (typeof actor === "string") {
+    const keyword2 = actor.trim();
+    return keyword2 ? [keyword2] : [];
+  }
+  if (Array.isArray(actor)) {
+    return actor.flatMap((entry) => extractActorKeywords(entry));
+  }
+  if (typeof actor === "object") {
+    const obj = actor;
+    const candidate = obj.id || obj.key || obj.name;
+    if (candidate == null) return [];
+    const keyword2 = String(candidate).trim();
+    return keyword2 ? [keyword2] : [];
+  }
+  const keyword = String(actor).trim();
+  return keyword ? [keyword] : [];
+}
+function handleStatusRequest(message) {
+  const event = message?.event;
+  if (!event || !Un(ie(event))) return false;
+  const context = event.context && typeof event.context === "object" ? event.context : {};
+  const correlationId = context.id;
+  if (typeof correlationId !== "string" || !correlationId) return false;
+  const requestedTargets = extractActorKeywords(message["target.actor"]);
+  if (requestedTargets.length > 0 && !requestedTargets.includes("*") && !requestedTargets.includes(ID_ACTOR)) {
+    return false;
+  }
+  if (context.dataType !== "STATUS") return false;
+  markReportingConnectedApp(message);
+  const responseData = buildStatusResponseData();
+  client?.sendCastRequestResponse(
+    correlationId,
+    "STATUS",
+    responseData,
+    event["hub.topic"]
+  );
+  return true;
+}
+function handleStatusUpdate(message) {
+  const update = Sr(message);
+  if (!update) return false;
+  if (update.message) onStatusUpdate?.(update.message, update.level);
+  return true;
+}
+function isNiftiSendMessage(message) {
+  const event = message?.event;
+  return ie(event) === "nifti-send";
+}
+function isDicomSendMessage(message) {
+  const event = message?.event;
+  return ie(event) === "dicom-send";
+}
+async function handleResolvedFileSend(message, kind, handler) {
+  if (!client || !handler) return;
+  try {
+    const resolved = await Pr(client, message);
+    const event = resolved?.event ?? message.event;
+    if (!event || typeof event !== "object") {
+      console.warn(`${LOG} ${kind}: missing event after resolve`);
+      return;
+    }
+    const files = Kt(event);
+    const withData = files.filter((f) => {
+      const data = f.data;
+      return data instanceof ArrayBuffer || data instanceof Uint8Array || typeof data === "string";
+    });
+    if (!withData.length) {
+      console.warn(`${LOG} ${kind}: no file payloads after resolve`);
+      return;
+    }
+    console.info(
+      `${LOG} ${kind}: ${withData.length} file(s) ready`,
+      withData.map((f) => f.fileName || "?")
+    );
+    await handler(event);
+  } catch (err) {
+    console.error(`${LOG} ${kind} handler failed`, err);
+  }
+}
+async function handleNiftiSendMessage(message) {
+  await handleResolvedFileSend(message, "nifti-send", onNiftiSend);
+}
+async function handleDicomSendMessage(message) {
+  await handleResolvedFileSend(message, "dicom-send", onDicomSend);
+}
+function handleImagingStudyMessage(message) {
+  const event = message?.event;
+  const name = ie(event);
+  if (name === "imagingstudy-close") {
+    if (suppressInboundImagingStudy > 0) {
+      console.info(`${LOG} ImagingStudy-close ignored (local publish echo)`);
+      return true;
+    }
+    lastImagingStudyOpenContext = [];
+    lastLiveScene = null;
+    lastSegCatalog = EMPTY_SEG_CATALOG;
+    onLiveSceneChange?.();
+    console.info(`${LOG} ImagingStudy-close`);
+    void Promise.resolve(onImagingStudyClose?.()).catch(
+      (err) => console.error(`${LOG} ImagingStudy-close handler failed`, err)
+    );
+    return true;
+  }
+  if (name !== "imagingstudy-open") return false;
+  if (suppressInboundImagingStudy > 0) {
+    const context = imagingStudyContextItems(message);
+    lastImagingStudyOpenContext = hr(context);
+    console.info(`${LOG} ImagingStudy-open ignored (local publish echo)`);
+    return true;
+  }
+  if (conference && !conferenceFollowHost) {
+    console.info(`${LOG} ImagingStudy-open ignored (not following host)`);
+    return true;
+  }
+  void resolveAndApplyImagingStudyOpen(message);
+  return true;
+}
+function imagingStudyContextItems(message) {
+  const event = message?.event;
+  const ctx = event?.context;
+  if (Array.isArray(ctx)) return ctx;
+  if (ctx && typeof ctx === "object") {
+    return contextItemsFromOpenContext(ctx);
+  }
+  return mr(message);
+}
+async function resolveAndApplyImagingStudyOpen(message) {
+  if (!client) return;
+  try {
+    const resolved = await Pr(client, message);
+    const event = resolved?.event ?? message.event;
+    const ctx = event?.context;
+    let items = imagingStudyContextItems(resolved);
+    let sceneDoc = sceneDocFromOpenContext(
+      Array.isArray(ctx) ? ctx : ctx || items
+    );
+    if (sceneDoc) {
+      const files = Kt(event);
+      sceneDoc = materializeLiveSceneBlobUrls(
+        sceneDoc,
+        files
+      );
+      items = items.filter((item) => {
+        if (!item || typeof item !== "object") return true;
+        return item.key !== "scene";
+      });
+      items.push({ key: "scene", resource: sceneDoc });
+    }
+    lastImagingStudyOpenContext = hr(items);
+    console.info(
+      `${LOG} ImagingStudy-open context items=`,
+      items.length,
+      sceneDoc ? "(LiveScene)" : ""
+    );
+    await Promise.resolve(onImagingStudyOpen?.(lastImagingStudyOpenContext));
+  } catch (err) {
+    console.error(`${LOG} ImagingStudy-open resolve/apply failed`, err);
+  }
+}
+async function requestStatusFromWorklist(opts) {
+  if (!client) {
+    console.warn(`${LOG} STATUS skip: no client`);
+    return;
+  }
+  const forceApply = Boolean(opts?.forceApply);
+  const requestTopic = String(opts?.topic || topic || "").trim();
+  if (!forceApply && statusRequestState !== "idle") return;
+  const skipApplyStudy = !forceApply && (iraUrlHasStudyParams() || lastImagingStudyOpenContext.length > 0);
+  if (skipApplyStudy) {
+    console.warn(
+      `${LOG} STATUS presence only (already have study URL or context)`
+    );
+  }
+  const subscriber = subscriberName || client.getSessionConfig()?.subscriberName?.trim() || "";
+  if (!subscriber) {
+    console.warn(`${LOG} STATUS skip: no subscriber name yet`);
+    return;
+  }
+  if (!forceApply) statusRequestState = "pending";
+  const statusDataType = "STATUS";
+  try {
+    const message = {
+      "subscriber.name": subscriber,
+      "subscriber.product.name": "SLICERLIVE-IRA",
+      "subscriber.actor": ID_ACTOR,
+      "target.actor": WORKLIST_ACTOR,
+      event: {
+        "hub.event": be(statusDataType),
+        ...requestTopic ? { "hub.topic": requestTopic } : {},
+        context: { dataType: statusDataType }
+      }
+    };
+    console.warn(`${LOG} STATUS request \u2192 ${WORKLIST_ACTOR}`, {
+      subscriber,
+      topic: requestTopic,
+      presenceOnly: skipApplyStudy,
+      forceApply
+    });
+    const result = await client.request(message);
+    console.warn(`${LOG} STATUS response`, {
+      httpOk: result.ok,
+      status: result.status,
+      data: result.data
+    });
+    if (!result.ok) {
+      if (!forceApply) statusRequestState = "idle";
+      return;
+    }
+    const envelope = result.data && typeof result.data === "object" ? result.data : {};
+    const responses = Array.isArray(envelope.responses) ? envelope.responses : [];
+    adoptWorklistClientWindowFromStatusResponses(responses);
+    if (!forceApply && (skipApplyStudy || lastImagingStudyOpenContext.length || iraUrlHasStudyParams())) {
+      statusRequestState = "done";
+      return;
+    }
+    let chosen;
+    for (const item of responses) {
+      const itemData = item?.data;
+      if (!itemData || typeof itemData !== "object" || itemData["context.type"] !== "ImagingStudy") {
+        continue;
+      }
+      const actor = String(item?.actor ?? "").trim().toUpperCase();
+      if (actor === WORKLIST_ACTOR || chosen === void 0) {
+        chosen = itemData;
+        if (actor === WORKLIST_ACTOR) break;
+      }
+    }
+    if (!chosen) {
+      console.warn(
+        `${LOG} STATUS: no ImagingStudy in ${responses.length} response(s)`
+      );
+      if (!forceApply) statusRequestState = "idle";
+      return;
+    }
+    if (!forceApply && (lastImagingStudyOpenContext.length || iraUrlHasStudyParams())) {
+      statusRequestState = "done";
+      return;
+    }
+    const context = hr(chosen.context);
+    if (!context.length) {
+      console.warn(`${LOG} STATUS: ImagingStudy context empty`);
+      if (!forceApply) statusRequestState = "idle";
+      return;
+    }
+    lastImagingStudyOpenContext = context;
+    if (!forceApply) statusRequestState = "done";
+    console.warn(
+      `${LOG} ImagingStudy from STATUS context items=`,
+      context.length,
+      forceApply ? "(follow host)" : ""
+    );
+    void Promise.resolve(onImagingStudyOpen?.(lastImagingStudyOpenContext)).catch(
+      (err) => console.error(`${LOG} STATUS ImagingStudy-open handler failed`, err)
+    );
+  } catch (err) {
+    if (!forceApply) statusRequestState = "idle";
+    console.error(`${LOG} failed to request STATUS`, err);
+  }
+}
+async function requestIraStatusFromHostWorklist(hostTopic) {
+  const topicOverride = String(hostTopic || "").trim();
+  if (!topicOverride) {
+    console.warn(`${LOG} host STATUS skip: no host topic`);
+    return;
+  }
+  await requestStatusFromWorklist({ topic: topicOverride, forceApply: true });
+}
+function scheduleStatusRequestFromWorklist(delayMs) {
+  globalThis.setTimeout(() => {
+    void requestStatusFromWorklist();
+  }, delayMs);
+}
+function applyIraCastRadioVisual(statusEl) {
+  const visual = xn(connection, {
+    conferenceActive: Boolean(conference)
+  });
+  statusEl.classList.remove(
+    "ira-cast-idle",
+    "ira-cast-connecting",
+    "ira-cast-connected",
+    "ira-cast-disconnected",
+    "ira-cast-error",
+    "ira-cast-pulse",
+    "ira-cast-conference-pulse"
+  );
+  statusEl.classList.add(`ira-cast-${visual.tone}`);
+  statusEl.classList.toggle("ira-cast-pulse", visual.pulse);
+  statusEl.classList.toggle("ira-cast-conference-pulse", visual.conferencePulse);
+  statusEl.title = conference?.title ? `${connectionDetail} \xB7 ${conference.title}` : connectionDetail;
+  const slash = statusEl.querySelector(".cast-radio-slash");
+  if (slash) slash.hidden = !visual.showSlash;
+}
+async function connectIraCast() {
+  const params = new URLSearchParams(globalThis.location.search);
+  topic = params.get("topic")?.trim() || "";
+  let urlToken = params.get("id-token")?.trim() || "";
+  if (!topic && !urlToken) {
+    setConnection("idle", "Not connected");
+    return;
+  }
+  stripCastParamsFromUrl();
+  setConnection("connecting", "Connecting to Cast hub\u2026");
+  subscriberName = je("IRA");
+  const hub = resolveHubConfig();
+  client = Ti.newInstance({
+    hub,
+    session: {
+      subscriberName,
+      productName: "SLICERLIVE-IRA",
+      productVersion: "0.1",
+      actors: [ID_ACTOR],
+      topic: topic || void 0,
+      events: [
+        "imagingstudy-open",
+        "imagingstudy-close",
+        "status-request",
+        "subscription-removed",
+        "status-update",
+        "conference-start",
+        "conference-end",
+        "dicom-send",
+        "nifti-send",
+        "scene-update"
+      ],
+      lease: 7200,
+      defaultTargetActor: "*"
+    },
+    callbackUrl: `${globalThis.location.origin}/castCallback`,
+    preserveSessionTopicFromToken: Boolean(topic),
+    autoReconnect: true
+  });
+  client.onMessage((message) => {
+    if (handleSubscriptionRemoved(message)) return;
+    if (handleStatusRequest(message)) return;
+    if (handleConferenceHubEvent(message)) return;
+    if (handleStatusUpdate(message)) return;
+    if (handleSceneUpdateMessage(message)) return;
+    if (isDicomSendMessage(message)) {
+      void handleDicomSendMessage(message);
+      return;
+    }
+    if (isNiftiSendMessage(message)) {
+      void handleNiftiSendMessage(message);
+      return;
+    }
+    handleImagingStudyMessage(message);
+  });
+  client.onConnectionStateChange((wsState) => {
+    console.warn(`${LOG} ws state=`, wsState);
+    if (wsState === "connecting") {
+      setConnection("connecting", "Websocket connecting");
+    } else if (wsState === "connected") {
+      setConnection("connected", "Websocket connected");
+      scheduleStatusRequestFromWorklist(150);
+    } else if (wsState === "error") {
+      statusRequestState = "idle";
+      setConnection("error", "Websocket error");
+    } else {
+      statusRequestState = "idle";
+      setConnection("disconnected", "Websocket disconnected");
+    }
+  });
+  try {
+    if (urlToken) {
+      client.setToken(urlToken);
+    } else {
+      const { code: code2 } = await client.authenticate();
+      if (!code2 || !await client.getToken(code2)) {
+        setConnection("error", "Token failed");
+        return;
+      }
+    }
+    if (topic) client.setTopic(topic);
+    const hubTokenEarly = String(
+      client.getHubConfig?.()?.token || urlToken || ""
+    ).trim();
+    if (hubTokenEarly) urlToken = hubTokenEarly;
+    persistCastCredentials(topic, urlToken);
+    const status2 = await client.subscribe();
+    const session = client.getSessionConfig();
+    if (session.subscriberName) subscriberName = session.subscriberName;
+    if (session.topic) topic = session.topic;
+    userName = String(session.userName || "").trim() || topic;
+    const hubToken = String(client.getHubConfig?.()?.token || urlToken || "").trim();
+    if (hubToken) urlToken = hubToken;
+    persistCastCredentials(topic, urlToken);
+    if (status2 === 202) {
+      console.warn(
+        `${LOG} subscribed topic=`,
+        topic,
+        "subscriber=",
+        subscriberName
+      );
+      scheduleStatusRequestFromWorklist(400);
+    } else {
+      setConnection("disconnected", `Subscribe failed (${String(status2)})`);
+    }
+  } catch (err) {
+    console.error(`${LOG} connect failed`, err);
+    setConnection(
+      "error",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+}
+
+// ../../liveops.ts
+function pointerKeys(path) {
+  return path.replace(/^#/, "").split("/").filter((k2) => k2.length > 0);
+}
+function setByPointer(obj, path, value) {
+  const keys = pointerKeys(path);
+  if (keys.length === 0) return false;
+  let cur = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const k2 = keys[i];
+    if (cur == null || typeof cur !== "object") return false;
+    const container = cur;
+    let next = container[k2];
+    if (next == null || typeof next !== "object") {
+      next = /^\d+$/.test(keys[i + 1]) ? [] : {};
+      container[k2] = next;
+    }
+    cur = next;
+  }
+  if (cur == null || typeof cur !== "object") return false;
+  cur[keys[keys.length - 1]] = value;
+  return true;
+}
+var CMDS = {
+  // move one markup control point (SlicerLive drag). World (RAS) coords, latest-wins.
+  setControlPoint(node, args) {
+    const i = Number(args.index ?? 0);
+    const pos = args.position;
+    const cps = node.controlPoints;
+    if (!cps || !cps[i] || !Array.isArray(pos)) return false;
+    cps[i].position = [Number(pos[0]), Number(pos[1]), Number(pos[2])];
+    return true;
+  },
+  setCameraPose(node, args) {
+    let did = false;
+    for (const k2 of ["position", "focalPoint", "viewUp"]) {
+      if (Array.isArray(args[k2])) {
+        node[k2] = [...args[k2]];
+        did = true;
+      }
+    }
+    return did;
+  },
+  setRoi(node, args) {
+    let did = false;
+    for (const k2 of ["center", "size"]) {
+      if (Array.isArray(args[k2])) {
+        node[k2] = [...args[k2]];
+        did = true;
+      }
+    }
+    return did;
+  }
+};
+function applyOp(nodes, op) {
+  const id = op.id;
+  switch (op.op) {
+    case "put": {
+      if (!op.node || typeof op.node !== "object") return { changed: false, id, kind: "noop" };
+      nodes.set(id, { ...op.node, id });
+      return { changed: true, id, kind: "put" };
+    }
+    case "del": {
+      return { changed: nodes.delete(id), id, kind: "del" };
+    }
+    case "patch": {
+      const node = nodes.get(id);
+      if (!node) return { changed: false, id, kind: "noop", path: op.path };
+      const ok = setByPointer(node, op.path, op.value);
+      return { changed: ok, id, kind: ok ? "patch" : "noop", path: op.path };
+    }
+    case "cmd": {
+      const node = nodes.get(id);
+      const handler = CMDS[op.cmd];
+      if (!node || !handler) return { changed: false, id, kind: "noop" };
+      const ok = handler(node, op.args ?? {});
+      return { changed: ok, id, kind: ok ? "cmd" : "noop" };
+    }
+    default:
+      return { changed: false, id, kind: "noop" };
+  }
+}
+
+// ira-live-scene-bridge.ts
+var IRA_VOL_NODE_ID = "vol1";
+var IRA_SEG_NODE_ID = "seg1";
+function cloneNodes(nodes) {
+  const out = {};
+  if (!nodes || typeof nodes !== "object") return out;
+  for (const [id, node] of Object.entries(nodes)) {
+    if (!node || typeof node !== "object") continue;
+    out[id] = structuredClone(node);
+  }
+  return out;
+}
+function buildIraLiveSceneDoc(input) {
+  const nodes = cloneNodes(input.base?.nodes);
+  const volName = String(input.volumeName || input.modality || "Volume").trim() || "Volume";
+  const prevVol = nodes[IRA_VOL_NODE_ID];
+  nodes[IRA_VOL_NODE_ID] = {
+    ...prevVol || {},
+    type: "volume",
+    id: IRA_VOL_NODE_ID,
+    name: String(prevVol?.name || volName),
+    dims: [...input.dims],
+    ijkToRAS: [...input.ijkToRAS],
+    modality: input.modality || "CT"
+  };
+  if (input.hasSeg && input.segments.length) {
+    const segments = input.segments.map((s) => ({
+      id: `Segment_${s.num}`,
+      name: s.name,
+      labelValue: s.num,
+      color: [s.color[0], s.color[1], s.color[2], 1],
+      visible: s.visible !== false
+    }));
+    const prev = nodes[IRA_SEG_NODE_ID];
+    nodes[IRA_SEG_NODE_ID] = {
+      ...prev || {},
+      type: "segmentation",
+      id: IRA_SEG_NODE_ID,
+      name: String(prev?.name || "SEG"),
+      frame: "RAS",
+      dims: [...input.dims],
+      ijkToRAS: [...input.ijkToRAS],
+      refs: { source: [IRA_VOL_NODE_ID] },
+      visible: true,
+      opacity: typeof prev?.opacity === "number" ? prev.opacity : 1,
+      labelsVisible: input.labelsVisible,
+      fill2D: prev?.fill2D || { visible: true, opacity: 0.5 },
+      outline2D: prev?.outline2D || { visible: true, opacity: 1 },
+      segments
+    };
+  } else {
+    delete nodes[IRA_SEG_NODE_ID];
+  }
+  return {
+    ...input.base || {},
+    blobBase: String(input.base?.blobBase || "").trim() || "ira://local/",
+    nodes
+  };
+}
+function applySceneUpdateOps(doc, ops) {
+  const nodes = cloneNodes(doc.nodes);
+  const map = new Map(Object.entries(nodes));
+  let changed = false;
+  const segmentVisibility = /* @__PURE__ */ new Map();
+  let labelsVisible;
+  let opacity;
+  for (const op of ops) {
+    if (!op || typeof op !== "object" || !op.op || !op.id) continue;
+    const before = map.get(op.id);
+    const res = applyOp(map, op);
+    if (res.changed) changed = true;
+    const after = map.get(op.id);
+    if (!after || after.type !== "segmentation") continue;
+    if (typeof after.labelsVisible === "boolean") {
+      labelsVisible = after.labelsVisible;
+    }
+    const opVal = Number(after.opacity);
+    if (Number.isFinite(opVal)) {
+      opacity = Math.max(0, Math.min(1, opVal));
+    }
+    const segs = after.segments;
+    if (Array.isArray(segs)) {
+      for (const s of segs) {
+        const lv = Number(s.labelValue);
+        if (!Number.isFinite(lv)) continue;
+        segmentVisibility.set(lv, s.visible !== false);
+      }
+    }
+    if (op.op === "patch" && typeof op.path === "string" && /#\/segments\/\d+\/visible/.test(op.path)) {
+      const m = op.path.match(/#\/segments\/(\d+)\/visible/);
+      if (m && Array.isArray(segs)) {
+        const idx = Number(m[1]);
+        const s = segs[idx];
+        if (s) segmentVisibility.set(Number(s.labelValue), Boolean(op.value));
+      }
+    }
+  }
+  const nextNodes = {};
+  for (const [id, n] of map) nextNodes[id] = n;
+  return {
+    doc: { ...doc, nodes: nextNodes },
+    result: { labelsVisible, segmentVisibility, opacity, changed }
+  };
+}
+function opsFromSceneUpdateContext(context) {
+  if (!Array.isArray(context)) return [];
+  const ops = [];
+  for (const item of context) {
+    if (!item || typeof item !== "object") continue;
+    const row = item;
+    const key = String(row.key || "").toLowerCase();
+    if (key !== "scene" && key !== "sceneupdate") continue;
+    const resource = row.resource;
+    if (!resource || typeof resource !== "object") continue;
+    const res = resource;
+    if (Array.isArray(res.ops)) {
+      for (const op of res.ops) {
+        if (op && typeof op === "object" && typeof op.op === "string") {
+          ops.push(op);
+        }
+      }
+    }
+    const evName = String(res.event || "").trim();
+    if (evName === "SegmentationDisplayModified" && res.display && typeof res.display === "object") {
+      const sourceId = String(res.sourceId || IRA_SEG_NODE_ID).trim() || IRA_SEG_NODE_ID;
+      const disp = res.display;
+      if ("labelsVisible" in disp) {
+        ops.push({
+          op: "patch",
+          id: sourceId,
+          path: "#/labelsVisible",
+          value: Boolean(disp.labelsVisible)
+        });
+      }
+      if (Array.isArray(disp.segments)) {
+        ops.push({
+          op: "patch",
+          id: sourceId,
+          path: "#/segments",
+          value: disp.segments
+        });
+      }
+      if ("visible" in disp) {
+        ops.push({
+          op: "patch",
+          id: sourceId,
+          path: "#/visible",
+          value: Boolean(disp.visible)
+        });
+      }
+      if ("opacity" in disp) {
+        ops.push({
+          op: "patch",
+          id: sourceId,
+          path: "#/opacity",
+          value: disp.opacity
+        });
+      }
+    }
+  }
+  return ops;
+}
+
+// ira-nifti-seg.ts
 function fileBytes(entry) {
   const data = entry.data;
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
@@ -13603,14 +14848,20 @@ function mergeSegLabelmaps(existing, incoming) {
       lab,
       colors,
       names,
-      terminology: Object.keys(terminology).length ? terminology : void 0
+      terminology: Object.keys(terminology).length ? terminology : void 0,
+      // Prefer existing DICOM identity when merging Cast overlays onto it.
+      sopInstanceUID: existing.sopInstanceUID || incoming.sopInstanceUID,
+      seriesInstanceUID: existing.seriesInstanceUID || incoming.seriesInstanceUID,
+      sourceSeriesInstanceUID: existing.sourceSeriesInstanceUID || incoming.sourceSeriesInstanceUID,
+      fileName: incoming.fileName || existing.fileName,
+      modality: existing.modality || incoming.modality || "SEG"
     },
     added: remap.size,
     skipped
   };
 }
 async function segLabelmapFromNiftiSendEvent(event, ctDims, ctIjkToRas) {
-  const files = Jt(event);
+  const files = Kt(event);
   let chosen = null;
   let bytes = null;
   for (const entry of files) {
@@ -13684,11 +14935,11 @@ async function segLabelmapFromNiftiSendEvent(event, ctDims, ctIjkToRas) {
     ok: true,
     fileName,
     labelCount: present.size,
-    seg: { lab, colors, names }
+    seg: { lab, colors, names, fileName, modality: "SEG" }
   };
 }
 
-// logic/readers/dicom-series.ts
+// ../../../logic/readers/dicom-series.ts
 var cross2 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 var dot4 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 var sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -13851,7 +15102,7 @@ async function parseInstances(buffers) {
   return out;
 }
 
-// render/demos/ira/ira-dicom-seg.ts
+// ira-dicom-seg.ts
 function fileBytes2(entry) {
   const data = entry.data;
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
@@ -13935,13 +15186,13 @@ function pixelDataBits(ds) {
   }
   throw new Error("DICOM SEG has no PixelData");
 }
-function buildLabelmap(ds, bits, ct, dcmjs) {
-  const [nx, ny, nz] = ct.dims;
+function buildLabelmap(ds, bits, ct2, dcmjs) {
+  const [nx, ny, nz] = ct2.dims;
   const segCols = Number(ds.Columns) || nx;
   const segRows = Number(ds.Rows) || ny;
   const frameBytes = segCols * segRows >> 3;
   const lab = new Uint8Array(nx * ny * nz);
-  const inv = invAffine(ct.ijkToRAS);
+  const inv = invAffine(ct2.ijkToRAS);
   const toIJK = (lps) => {
     const r = lps2ras2(lps);
     return [
@@ -13956,8 +15207,8 @@ function buildLabelmap(ds, bits, ct, dcmjs) {
   const orient0 = orientSeq[0] || {};
   const measuresSeq = asSeq(shared.PixelMeasuresSequence);
   const measures0 = measuresSeq[0] || {};
-  const sIopRaw = orient0.ImageOrientationPatient ?? ct.iop ?? [1, 0, 0, 0, 1, 0];
-  const sPsRaw = measures0.PixelSpacing ?? ct.ps ?? [1, 1];
+  const sIopRaw = orient0.ImageOrientationPatient ?? ct2.iop ?? [1, 0, 0, 0, 1, 0];
+  const sPsRaw = measures0.PixelSpacing ?? ct2.ps ?? [1, 1];
   const sIop = (Array.isArray(sIopRaw) ? sIopRaw : [sIopRaw]).map(Number);
   const sPs = (Array.isArray(sPsRaw) ? sPsRaw : [sPsRaw]).map(Number);
   const colW = sIop.slice(0, 3).map((v2) => v2 * sPs[1]);
@@ -14040,8 +15291,8 @@ function isDicomSeg(ds) {
   const sop = String(ds.SOPClassUID || "");
   return sop.includes("1.2.840.10008.5.1.4.1.1.66.4");
 }
-async function segLabelmapFromDicomSendEvent(event, ct) {
-  const files = Jt(event);
+async function segLabelmapFromDicomSendEvent(event, ct2) {
+  const files = Kt(event);
   let chosen = null;
   let bytes = null;
   for (const entry of files) {
@@ -14056,7 +15307,7 @@ async function segLabelmapFromDicomSendEvent(event, ct) {
     return { ok: false, error: "dicom-send had no downloadable file payloads" };
   }
   const fileName = typeof chosen.fileName === "string" && chosen.fileName.trim() || "segmentations.dcm";
-  if (!ct.ijkToRAS || ct.ijkToRAS.length < 12) {
+  if (!ct2.ijkToRAS || ct2.ijkToRAS.length < 12) {
     return { ok: false, error: "Open volume has no ijkToRAS \u2014 cannot align DICOM SEG" };
   }
   let dcmjs;
@@ -14088,7 +15339,7 @@ async function segLabelmapFromDicomSendEvent(event, ct) {
   }
   let seg;
   try {
-    seg = buildLabelmap(ds, bits, ct, dcmjs);
+    seg = buildLabelmap(ds, bits, ct2, dcmjs);
   } catch (err) {
     return {
       ok: false,
@@ -14100,6 +15351,14 @@ async function segLabelmapFromDicomSendEvent(event, ct) {
   if (!present.size) {
     return { ok: false, error: "DICOM SEG labelmap is empty after resample onto CT" };
   }
+  const referencedSeries = asSeq(ds.ReferencedSeriesSequence)[0];
+  seg.sopInstanceUID = String(ds.SOPInstanceUID || "");
+  seg.seriesInstanceUID = String(ds.SeriesInstanceUID || "");
+  seg.sourceSeriesInstanceUID = String(
+    referencedSeries?.SeriesInstanceUID || ""
+  );
+  seg.fileName = fileName;
+  seg.modality = "SEG";
   return {
     ok: true,
     fileName,
@@ -14108,7 +15367,7 @@ async function segLabelmapFromDicomSendEvent(event, ct) {
   };
 }
 
-// render/demos/ira/totalseg-tasks.ts
+// totalseg-tasks.ts
 var TOTAL_SEG_GROUP_LABELS = {
   "total": "Total body",
   "body": "Body",
@@ -14575,273 +15834,7 @@ var TOTAL_SEG_TASK_OPTIONS = TOTAL_SEG_TASKS.map((t) => ({
   title: taskOptionLabel(t)
 }));
 
-// logic/window-level.ts
-var isIntType = (a) => !(a instanceof Float32Array || a instanceof Float64Array);
-function histogramPercentiles(data, loP = 1e-3, hiP = 0.999) {
-  const n = data.length;
-  if (n === 0) return [0, 1];
-  const step = n > 4e6 ? Math.floor(n / 4e6) : 1;
-  let mn2 = Infinity, mx = -Infinity;
-  for (let i = 0; i < n; i += step) {
-    const v2 = data[i];
-    if (v2 < mn2) mn2 = v2;
-    if (v2 > mx) mx = v2;
-  }
-  if (mx <= mn2) return [mn2, mn2];
-  const intType = isIntType(data);
-  const bins = intType ? Math.min(mx - mn2 + 1, 1 << 16) : 1e3;
-  const scale2 = (bins - 1) / (mx - mn2);
-  const hist = new Float64Array(bins);
-  let total = 0;
-  for (let i = 0; i < n; i += step) {
-    hist[Math.round((data[i] - mn2) * scale2)]++;
-    total++;
-  }
-  const binValue = (b) => mn2 + b / scale2;
-  const at = (frac) => {
-    const target = frac * total;
-    let c = 0;
-    for (let b = 0; b < bins; b++) {
-      c += hist[b];
-      if (c >= target) return binValue(b);
-    }
-    return mx;
-  };
-  return [at(loP), at(hiP)];
-}
-function autoWindowLevel(data) {
-  const [lo, hi2] = histogramPercentiles(data, 1e-3, 0.999);
-  return { window: Math.max(1e-6, hi2 - lo), level: (lo + hi2) / 2 };
-}
-
-// render/demos/ira/ira-scene.ts
-var LIVESCENE_MIME = "application/vnd.slicerlive.scene+json";
-var EMBEDDED_SCENE_PARAM = "embedded";
-var EMBEDDED_SCENE_STORAGE_KEY = "ira.embeddedLiveScene";
-function looksLikeSceneJson(f) {
-  const role = String(f.role || "").toLowerCase();
-  if (role === "scene") return true;
-  const name = String(f.fileName || "").toLowerCase();
-  const url = String(f.url || "").toLowerCase();
-  if (name.endsWith(".json")) return true;
-  try {
-    const path = new URL(url).pathname.toLowerCase();
-    return path.endsWith(".json");
-  } catch {
-    return url.includes(".json");
-  }
-}
-function isLiveSceneDoc(value) {
-  if (!value || typeof value !== "object") return false;
-  const doc = value;
-  const nodes = doc.nodes;
-  const blobBase = String(doc.blobBase || "").trim();
-  return Boolean(nodes && typeof nodes === "object" && blobBase);
-}
-function sceneDocFromOpenContext(context) {
-  if (!Array.isArray(context)) return null;
-  for (const item of context) {
-    if (!item || typeof item !== "object") continue;
-    const row = item;
-    if (String(row.key || "").toLowerCase() !== "scene") continue;
-    if (isLiveSceneDoc(row.resource)) {
-      return { ...row.resource };
-    }
-  }
-  return null;
-}
-function sceneUrlFromOpenContext(context) {
-  const plan = ur(context);
-  if (!plan || plan.mode !== "files") return null;
-  const files = Array.isArray(plan.files) ? plan.files : [];
-  const sceneFile = files.find((f) => String(f.role || "").toLowerCase() === "scene") || files.find(looksLikeSceneJson) || files[0];
-  const url = String(sceneFile?.url || "").trim();
-  if (!url) return null;
-  if (!looksLikeSceneJson(sceneFile || {})) return null;
-  return url;
-}
-function studyParamsFromSceneUrl(sceneUrl) {
-  return { scene: String(sceneUrl || "").trim() };
-}
-function studyParamsFromSceneDoc(doc) {
-  const url = String(doc.url || "").trim();
-  if (url) return { scene: url };
-  try {
-    globalThis.sessionStorage?.setItem(
-      EMBEDDED_SCENE_STORAGE_KEY,
-      JSON.stringify(doc)
-    );
-  } catch (err) {
-    console.warn("[ira] failed to stash embedded LiveScene", err);
-  }
-  return { scene: EMBEDDED_SCENE_PARAM };
-}
-function takeEmbeddedSceneFromStorage() {
-  try {
-    const raw = globalThis.sessionStorage?.getItem(EMBEDDED_SCENE_STORAGE_KEY);
-    if (!raw) return null;
-    globalThis.sessionStorage?.removeItem(EMBEDDED_SCENE_STORAGE_KEY);
-    const data = JSON.parse(raw);
-    return isLiveSceneDoc(data) ? data : null;
-  } catch {
-    return null;
-  }
-}
-function imagingStudyContextFromSceneUrl(sceneUrl) {
-  const url = String(sceneUrl || "").trim();
-  if (!url) return [];
-  let fileName = "scene.json";
-  try {
-    const path = new URL(url).pathname;
-    const base = path.split("/").pop();
-    if (base) fileName = base;
-  } catch {
-  }
-  return Gt({
-    id: `scene-${fileName.replace(/\.[^.]+$/, "") || "livescene"}`,
-    files: [
-      {
-        url,
-        fileName,
-        role: "scene",
-        label: "LiveScene",
-        mimeType: LIVESCENE_MIME
-      }
-    ]
-  });
-}
-function imagingStudyContextFromSceneDoc(doc, idHint) {
-  const url = String(doc.url || "").trim();
-  const filesCtx = url ? imagingStudyContextFromSceneUrl(url) : Gt({
-    id: String(idHint || "livescene").trim() || "livescene",
-    files: []
-  });
-  const withoutScene = filesCtx.filter((item) => {
-    if (!item || typeof item !== "object") return true;
-    return item.key !== "scene";
-  });
-  withoutScene.push({ key: "scene", resource: { ...doc } });
-  return withoutScene;
-}
-async function fetchLiveSceneDoc(sceneUrl) {
-  const url = String(sceneUrl || "").trim();
-  if (!url) return null;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch LiveScene (${res.status})`);
-  }
-  const data = await res.json();
-  const nodes = data.nodes && typeof data.nodes === "object" ? data.nodes : void 0;
-  const doc = {
-    ...data,
-    url
-  };
-  if (typeof data.blobBase === "string") doc.blobBase = data.blobBase;
-  if (typeof data.mrson === "string") doc.mrson = data.mrson;
-  if (nodes) doc.nodes = nodes;
-  return doc;
-}
-function imagingStudyContextFromLocalStudy(opts) {
-  const studyUid = String(opts.studyInstanceUID || "").trim();
-  const seriesUid = String(opts.seriesInstanceUID || "").trim();
-  const id = String(opts.id || "").trim() || studyUid || seriesUid || `local-${Date.now()}`;
-  const context = Gt({
-    id,
-    files: []
-  });
-  for (const item of context) {
-    if (!item || typeof item !== "object") continue;
-    if (item.key !== "study") continue;
-    const resource = item.resource;
-    if (!resource || typeof resource !== "object") continue;
-    resource.description = String(opts.label || "").trim() || "Local study";
-    const modality = String(opts.modality || "").trim().toUpperCase();
-    if (modality) {
-      resource.modality = [{ coding: [{ system: "http://dicom.nema.org/resources/ontology/DCM", code: modality }] }];
-    }
-    if (studyUid) {
-      const identifiers = Array.isArray(resource.identifier) ? [...resource.identifier] : [];
-      identifiers.push({
-        system: "urn:dicom:uid",
-        value: `urn:oid:${studyUid}`
-      });
-      resource.identifier = identifiers;
-    }
-    if (opts.anonymized) {
-      resource.meta = {
-        ...typeof resource.meta === "object" && resource.meta ? resource.meta : {},
-        security: [
-          {
-            system: "http://terminology.hl7.org/CodeSystem/v3-ActCode",
-            code: "ANONYED",
-            display: "anonymized"
-          }
-        ]
-      };
-    }
-  }
-  return context;
-}
-function modalityFromSceneName(name) {
-  const n = String(name || "").toUpperCase();
-  if (/\bMR\b/.test(n) || n.includes("MRHEAD") || n.startsWith("MR")) return "MR";
-  return "CT";
-}
-function iraVolumeFromSceneVolume(sv) {
-  return {
-    vol: sv.voxels,
-    dims: sv.dims,
-    ijkToRAS: sv.ijkToRAS,
-    win: sv.win,
-    lev: sv.lev,
-    dtype: "float32",
-    modality: modalityFromSceneName(sv.name)
-  };
-}
-function iraVolumeFromLocalVolume(vol) {
-  const meta = vol.meta || {};
-  const winMeta = Number(meta.windowWidth);
-  const levMeta = Number(meta.windowCenter);
-  let win;
-  let lev;
-  if (Number.isFinite(winMeta) && Number.isFinite(levMeta) && winMeta > 0) {
-    win = winMeta;
-    lev = levMeta;
-  } else {
-    const wl = autoWindowLevel(vol.data);
-    win = wl.window;
-    lev = wl.level;
-  }
-  const data = new Float32Array(vol.data.length);
-  data.set(vol.data);
-  let modality = String(meta.modality || "CT").trim().toUpperCase();
-  if (modality === "PET") modality = "PT";
-  if (modality !== "CT" && modality !== "MR" && modality !== "PT") modality = "CT";
-  return {
-    vol: data,
-    dims: vol.dims,
-    ijkToRAS: vol.ijkToRAS.slice(),
-    win,
-    lev,
-    dtype: "float32",
-    modality
-  };
-}
-function vrPresetFromSceneVolume(sv) {
-  if (!sv.vr) return null;
-  return {
-    lut: sv.vr.lut,
-    clim: [sv.vr.clim[0], sv.vr.clim[1]],
-    shade: [
-      sv.vr.shade[0],
-      sv.vr.shade[1],
-      sv.vr.shade[2],
-      sv.vr.shade[3]
-    ]
-  };
-}
-
-// render/demos/ira/totalseg-modality.ts
+// totalseg-modality.ts
 function codingModality(value) {
   if (!value) return "";
   if (typeof value === "string") return value.trim().toUpperCase();
@@ -14942,7 +15935,7 @@ function resolveOpenStudyTotalSegModality() {
   };
 }
 
-// render/demos/ira/ira-inference.ts
+// ira-inference.ts
 var INFERENCE_SERVERS = [...O];
 var MAX_INFERENCE_DICOM_FILES = 300;
 var selectedId = null;
@@ -15034,7 +16027,7 @@ function installInferenceWindowDrag() {
 }
 function volumeFilesFromOpenStudy() {
   const ctx = getIraImagingStudyOpenContext();
-  const files = D(ctx);
+  const files = j(ctx);
   const out = [];
   for (const f of files) {
     const role = String(f.role || "").toLowerCase();
@@ -15368,7 +16361,7 @@ function updateDetail() {
     }
   }
   detail.className = "ira-inference-detail ira-inference-detail-card";
-  detail.innerHTML = fi(row.def) + (opLines.length ? `<pre class="ira-inference-op-notes">${opLines.map(
+  detail.innerHTML = di(row.def) + (opLines.length ? `<pre class="ira-inference-op-notes">${opLines.map(
     (l) => l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   ).join("\n")}</pre>` : "");
   const info = getIraCastSessionInfo();
@@ -15455,7 +16448,7 @@ async function probeAll() {
   updateDetail();
   appendLog("Probing inference servers\u2026");
   try {
-    const results = await mi(client2, {
+    const results = await gi(client2, {
       subscriberName: info.subscriberName,
       subscriberProductName: "SLICERLIVE-IRA",
       subscriberActor: "ID",
@@ -15570,7 +16563,7 @@ function installMedicalInferenceUi() {
   });
 }
 
-// logic/readers/dicom-local.ts
+// ../../../logic/readers/dicom-local.ts
 function looksDicom(bytes, name) {
   if (bytes.length >= 132 && String.fromCharCode(bytes[128], bytes[129], bytes[130], bytes[131]) === "DICM") return true;
   return /\.dcm$/i.test(name) || /^[0-9.]+$/.test(name) || name.toLowerCase() === "dicomdir" === false && /(^|\/)[^./]+$/.test(name) && bytes.length > 256;
@@ -15629,7 +16622,7 @@ function loadEntry(entry) {
   throw new Error("series has no parsed instances (re-index the folder)");
 }
 
-// logic/readers/unzip-files.ts
+// ../../../logic/readers/unzip-files.ts
 var enc = new TextDecoder("utf-8");
 function u16(view, o) {
   return view.getUint16(o, true);
@@ -15704,7 +16697,7 @@ async function unzipFileToFiles(file) {
   return unzipToFiles(await file.arrayBuffer());
 }
 
-// render/demos/ira/ira-header.ts
+// ira-header.ts
 var ID_ACTOR2 = "ID";
 var THEME_KEY = "pw46.ira.theme";
 var THEME_SLICERLIVE = "slicerlive";
@@ -15765,7 +16758,7 @@ function refreshSceneViewButton() {
   if (!btn) return;
   const hasScene = Boolean(getIraLiveScene());
   btn.disabled = !hasScene;
-  btn.title = hasScene ? "Scene View" : "No LiveScene loaded";
+  btn.title = hasScene ? "Scene" : "No LiveScene loaded";
 }
 var localStudyPick = null;
 var onMountLocalSeries;
@@ -16074,7 +17067,7 @@ function installIraHeader(opts = {}) {
   applyTheme(getStoredTheme());
   const statusEl = document.getElementById("iraCastStatus");
   if (statusEl) {
-    statusEl.innerHTML = On({ slashId: "iraCastRadioSlash" });
+    statusEl.innerHTML = Pn({ slashId: "iraCastRadioSlash" });
   }
   refreshRadio();
   setIraCastStatusListener(() => refreshRadio());
@@ -16100,7 +17093,7 @@ function installIraHeader(opts = {}) {
     console.warn("[ira] conference dialog not available");
   };
   try {
-    const conferenceDialog = Qn({
+    const conferenceDialog = er({
       classPrefix: "cast-conference",
       getSession: () => {
         const info = getIraCastSessionInfo();
@@ -16121,7 +17114,7 @@ function installIraHeader(opts = {}) {
     console.error("[ira] conference dialog init failed", err);
   }
   try {
-    const inviteController = tr({
+    const inviteController = nr({
       classPrefix: "cast-conference-invite",
       getSession: () => {
         const info = getIraCastSessionInfo();
@@ -16133,7 +17126,7 @@ function installIraHeader(opts = {}) {
           connected: info.connection === "connected"
         };
       },
-      shouldShow: () => er({
+      shouldShow: () => tr({
         selfActors: [ID_ACTOR2]
       }),
       onConferenceChange: (view) => {
@@ -16178,6 +17171,11 @@ function installIraHeader(opts = {}) {
     closeMenus();
     openMedicalInferenceDialog();
   });
+  document.getElementById("iraReportingBtn")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    closeMenus();
+    openIraReportingClient();
+  });
   document.getElementById("iraLeaveConferenceBtn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
     closeMenus();
@@ -16192,7 +17190,7 @@ function installIraHeader(opts = {}) {
       leaveBtn.disabled = true;
       leaveBtn.textContent = hostAction ? "Ending\u2026" : "Leaving\u2026";
     }
-    void Je(
+    void Ke(
       info.hubEndpoint,
       view.hostTopic,
       hostAction ? void 0 : info.topic
@@ -16231,7 +17229,7 @@ function installIraHeader(opts = {}) {
   });
 }
 
-// render/demos/ira/ira-idc.ts
+// ira-idc.ts
 function bucketFromIdcUrl(urlStr) {
   try {
     const host = new URL(urlStr).hostname.toLowerCase();
@@ -16258,7 +17256,7 @@ function isSegFile(f) {
   return role === "seg" || label === "seg" || name.includes("seg");
 }
 function sourceFromIdcOpenContext(context) {
-  const plan = ur(context);
+  const plan = fr(context);
   if (!plan || plan.mode !== "idc") {
     return null;
   }
@@ -16308,7 +17306,7 @@ function studyParamsFromIdcSource(source) {
   return params;
 }
 
-// render/demos/ira/ira-browser.ts
+// ira-browser.ts
 var P = new URLSearchParams(location.search);
 var applyCastNiftiSeg = null;
 var applyCastDicomSeg = null;
@@ -16486,16 +17484,35 @@ async function main() {
       return;
     }
     const idcSource = sourceFromIdcOpenContext(ctx);
-    if (!idcSource) {
-      status(
-        "Cast ImagingStudy-open: unsupported context (need scene JSON or idc CRDC prefix URLs)",
-        true
-      );
+    if (idcSource) {
+      status("Opening study\u2026");
+      syncIraStudyUrl(studyParamsFromIdcSource(idcSource));
+      await loadStudy2(idcSource);
       return;
     }
-    status("Opening study\u2026");
-    syncIraStudyUrl(studyParamsFromIdcSource(idcSource));
-    await loadStudy2(idcSource);
+    const volumeFile = volumeFileFromOpenContext(ctx);
+    if (volumeFile) {
+      status("Downloading volume\u2026");
+      const hubEndpoint = getIraCastSessionInfo().hubEndpoint;
+      let hubOrigin = "http://127.0.0.1:2018";
+      try {
+        hubOrigin = new URL(hubEndpoint).origin;
+      } catch {
+      }
+      const { localVolume, label } = await loadVolumeFromRemoteFile(
+        volumeFile,
+        hubOrigin
+      );
+      syncIraStudyUrl({ volume: volumeFile.fileName });
+      await loadStudy2({ localVolume, label, anonymized: false });
+      const info = document.getElementById("info");
+      if (info) info.textContent = label;
+      return;
+    }
+    status(
+      "Cast ImagingStudy-open: unsupported context (need scene JSON, idc CRDC prefix URLs, or volume files)",
+      true
+    );
   };
   setIraImagingStudyOpenHandler((ctx) => {
     status("Opening study\u2026");
@@ -16662,6 +17679,7 @@ async function main() {
   resolveLoadStudy = null;
   closeStudyImpl = () => {
     setIraLiveScene(null);
+    setIraSegCatalog(EMPTY_SEG_CATALOG);
     setIraImagingStudyContext([]);
     disposeStudy();
     syncIraStudyUrl({});
@@ -16719,7 +17737,7 @@ async function main() {
 }
 async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, signal) {
   let source;
-  let ct;
+  let ct2;
   let seg;
   let sceneVr = null;
   let sceneStream = null;
@@ -16738,18 +17756,18 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     setIraLiveScene(null);
     setIraImagingStudyContext([]);
     syncIraStudyUrl({});
-    ct = input.localVolume;
+    ct2 = input.localVolume;
     const patientBit = input.anonymized ? "Anonymous" : (input.label.split("\xB7")[0] || "Local").trim();
     source = {
       c: "",
       cb: "",
-      m: ct.modality || "CT",
+      m: ct2.modality || "CT",
       col: "Local",
       st: "",
       sd: input.anonymized ? `Anonymous \xB7 ${input.label}` : input.label || `${patientBit} \xB7 Local`,
       lic: "Local"
     };
-    status(`loaded local series \xB7 ${ct.dims.join("\xD7")}`);
+    status(`loaded local series \xB7 ${ct2.dims.join("\xD7")}`);
   } else if ("sceneDoc" in input || "sceneUrl" in input) {
     status("loading scene\u2026");
     let sceneDoc = null;
@@ -16810,12 +17828,12 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     }, { signal });
     const sv = await ready;
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    ct = iraVolumeFromSceneVolume(sv);
+    ct2 = iraVolumeFromSceneVolume(sv);
     sceneVr = vrPresetFromSceneVolume(sv);
     source = {
       c: "",
       cb: "",
-      m: ct.modality || "CT",
+      m: ct2.modality || "CT",
       col: "LiveScene",
       st: "",
       sd: `${sv.name} \xB7 LiveScene`,
@@ -16853,10 +17871,10 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       },
       onCTGeom: (meta) => {
         if (signal?.aborted) return;
-        if (ct) {
-          ct.ijkToRAS = meta.ijkToRAS;
-          if (Number.isFinite(meta.win)) ct.win = meta.win;
-          if (Number.isFinite(meta.lev)) ct.lev = meta.lev;
+        if (ct2) {
+          ct2.ijkToRAS = meta.ijkToRAS;
+          if (Number.isFinite(meta.win)) ct2.win = meta.win;
+          if (Number.isFinite(meta.lev)) ct2.lev = meta.lev;
         }
         applyIdcGeom?.(meta.ijkToRAS);
       },
@@ -16887,9 +17905,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         if (idcStreamVol && full.vol instanceof Float32Array && full.vol !== idcStreamVol) {
           idcStreamVol.set(full.vol);
         }
-        if (ct && Number.isFinite(full.win) && Number.isFinite(full.lev)) {
-          ct.win = full.win;
-          ct.lev = full.lev;
+        if (ct2 && Number.isFinite(full.win) && Number.isFinite(full.lev)) {
+          ct2.win = full.win;
+          ct2.lev = full.lev;
         }
         idcCtAssembled = true;
         if (sceneStream && idcStreamVol) {
@@ -16908,11 +17926,11 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       if (res.seg) pendingIdcSeg = res.seg;
       return res;
     });
-    ct = await ready;
+    ct2 = await ready;
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     seg = void 0;
   }
-  const sc = buildSegrouletteScene(gpu, srgb, ct, seg, {
+  const sc = buildSegrouletteScene(gpu, srgb, ct2, seg, {
     volumeField: sceneLodField
   });
   scHold = sc;
@@ -16922,7 +17940,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   const sampleRange = () => {
     vmin = Infinity;
     vmax = -Infinity;
-    const buf = ct.vol;
+    const buf = ct2.vol;
     const vstride = Math.max(1, Math.floor(buf.length / 2e6));
     for (let i = 0; i < buf.length; i += vstride) {
       const v2 = buf[i];
@@ -16960,8 +17978,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         return e;
       };
       const pid = (source.sd.split("\xB7")[0] || "").trim() || source.col;
-      mk("tl", `${pid}<br>${source.col} \xB7 ${ct.modality}`);
-      mk("tr", `${ct.modality} \xB7 ${sc.dims[2]} slices${sc.hasSeg ? " \xB7 SEG" : ""}<br>${sc.dims[0]}\xD7${sc.dims[1]}`);
+      mk("tl", `${pid}<br>${source.col} \xB7 ${ct2.modality}`);
+      mk("tr", `${ct2.modality} \xB7 ${sc.dims[2]} slices${sc.hasSeg ? " \xB7 SEG" : ""}<br>${sc.dims[0]}\xD7${sc.dims[1]}`);
       annEls[p] = { br: mk("br", "") };
     }
     updateAnnWL();
@@ -17016,11 +18034,19 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       });
     }
   };
+  let syncLiveScene = () => {
+  };
+  let drawAll = () => {
+    for (const p of PLANES) drawSlice(p);
+    draw3d();
+    xhair?.redraw();
+  };
   const segCards = mountSegmentCards(gpu, srgb, cardFont, cv.threeD, camera, {
     apply: (id, action) => {
       if (action === "reset") sc.setSegmentOpacities(sc.segments.map((s) => [s.num, 1]));
       else if (action === "hide") sc.setSegmentOpacity(id, 0);
       else sc.setSegmentOpacities(sc.segments.map((s) => [s.num, s.num === id ? 1 : 0.4]));
+      syncLiveScene();
       drawAll();
     },
     redraw: () => draw3d(),
@@ -17052,21 +18078,80 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     },
     segVisible: (num2) => sc.isSegmentVisible(num2)
   });
-  segCards.setScene(ct, seg ?? null, sc.segments);
-  const drawAll = () => {
+  segCards.setScene(ct2, seg ?? null, sc.segments);
+  drawAll = () => {
     for (const p of PLANES) drawSlice(p);
     draw3d();
     xhair?.redraw();
   };
+  syncLiveScene = () => {
+    if (studyDisposed) return;
+    setIraLiveScene(
+      buildIraLiveSceneDoc({
+        base: getIraLiveScene(),
+        dims: sc.dims,
+        ijkToRAS: sc.ijkToRAS,
+        modality: ct2.modality,
+        volumeName: source.sd || ct2.modality || "Volume",
+        segments: sc.segments.map((s) => ({
+          num: s.num,
+          name: s.name,
+          color: s.color,
+          visible: sc.isSegmentVisible(s.num)
+        })),
+        labelsVisible: labelsOn,
+        hasSeg: sc.hasSeg
+      })
+    );
+  };
+  syncLiveScene();
+  if (seg) setIraSegCatalog(buildSegCatalog(seg, sc.ijkToRAS));
+  else setIraSegCatalog(EMPTY_SEG_CATALOG);
+  setIraSceneUpdateHandler((context) => {
+    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
+    const ops = opsFromSceneUpdateContext(context);
+    if (!ops.length) return;
+    const base = buildIraLiveSceneDoc({
+      base: getIraLiveScene(),
+      dims: sc.dims,
+      ijkToRAS: sc.ijkToRAS,
+      modality: ct2.modality,
+      volumeName: source.sd || ct2.modality || "Volume",
+      segments: sc.segments.map((s) => ({
+        num: s.num,
+        name: s.name,
+        color: s.color,
+        visible: sc.isSegmentVisible(s.num)
+      })),
+      labelsVisible: labelsOn,
+      hasSeg: sc.hasSeg || sc.segments.length > 0
+    });
+    const { doc, result } = applySceneUpdateOps(base, ops);
+    setIraLiveScene(doc);
+    if (typeof result.labelsVisible === "boolean") {
+      labelsOn = result.labelsVisible;
+    }
+    for (const [num2, visible] of result.segmentVisibility) {
+      sc.setSegmentVisible(num2, visible);
+    }
+    if (typeof result.opacity === "number" && Number.isFinite(result.opacity)) {
+      sc.setSegOpacity(result.opacity);
+      sc.slice.setOverlayOpacity(result.opacity * SEG_FILL);
+    }
+    drawAll();
+    syncLiveScene();
+  });
   const refreshSegChrome = (labmap) => {
     seg = labmap;
     sc.setVolumeOpacity(0.5);
-    segCards.setScene(ct, seg, sc.segments);
+    segCards.setScene(ct2, seg, sc.segments);
+    setIraSegCatalog(buildSegCatalog(labmap, sc.ijkToRAS));
+    syncLiveScene();
     for (const p of PLANES) {
       const cell = document.querySelector(`[data-cell="${p}"]`);
       const tr2 = cell?.querySelector(".ann.tr");
       if (tr2) {
-        tr2.innerHTML = `${ct.modality} \xB7 ${sc.dims[2]} slices${sc.hasSeg ? " \xB7 SEG" : ""}<br>${sc.dims[0]}\xD7${sc.dims[1]}`;
+        tr2.innerHTML = `${ct2.modality} \xB7 ${sc.dims[2]} slices${sc.hasSeg ? " \xB7 SEG" : ""}<br>${sc.dims[0]}\xD7${sc.dims[1]}`;
       }
     }
     drawAll();
@@ -17142,9 +18227,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     const applyLodUpgrade = (sv) => {
       const oldCenter = [sc.center[0], sc.center[1], sc.center[2]];
       sc.swapVolumeField(sv.field, sv.dims, sv.ijkToRAS);
-      ct.vol = sv.voxels;
-      ct.dims = sv.dims;
-      ct.ijkToRAS = sv.ijkToRAS;
+      ct2.vol = sv.voxels;
+      ct2.dims = sv.dims;
+      ct2.ijkToRAS = sv.ijkToRAS;
       for (let i = 0; i < 3; i++) {
         const d = sc.center[i] - oldCenter[i];
         camera.position[i] += d;
@@ -17162,9 +18247,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       redraw: () => drawAll(),
       upgrade: applyLodUpgrade
     };
-    const [nx, ny, nz] = ct.dims;
-    if (ct.vol instanceof Float32Array && nz > 0) {
-      sc.patchVolumeScalars(ct.vol, 0, nz);
+    const [nx, ny, nz] = ct2.dims;
+    if (ct2.vol instanceof Float32Array && nz > 0) {
+      sc.patchVolumeScalars(ct2.vol, 0, nz);
     }
     if (pendingLodUpgrade) {
       const u = pendingLodUpgrade;
@@ -17230,8 +18315,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
           idcCtAssembled = true;
         })
       ]);
-      if (ct.vol instanceof Float32Array && ct.dims[2] > 0) {
-        sc.patchVolumeScalars(ct.vol, 0, ct.dims[2]);
+      if (ct2.vol instanceof Float32Array && ct2.dims[2] > 0) {
+        sc.patchVolumeScalars(ct2.vol, 0, ct2.dims[2]);
         drawAll();
       }
     }
@@ -17324,7 +18409,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     resetViews: () => sliceControls.forEach((c) => c.resetView()),
     close: () => status("This is the SlicerLive Basic Image Review demo \u2014 reload to restart."),
     jumpAll,
-    modality: ct.modality,
+    modality: ct2.modality,
     extraTools: [
       {
         id: "idc-share",
@@ -17546,6 +18631,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       get: () => labelsOn,
       set: (on2) => {
         labelsOn = on2;
+        syncLiveScene();
         draw3d();
       },
       disabled: () => !sc.hasSeg
@@ -17608,6 +18694,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       get: (num2) => sc.segmentOpacity(num2),
       set: (num2, o) => {
         sc.setSegmentOpacity(num2, o);
+        syncLiveScene();
         drawAll();
       },
       enabled: () => sc.hasSeg
@@ -17623,6 +18710,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       return {
         dispose: () => {
           studyDisposed = true;
+          setIraSegCatalog(EMPTY_SEG_CATALOG);
           labelsOn = false;
           try {
             segCards.clear();
@@ -17653,8 +18741,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       sc.attachSegmentation(pendingIdcSeg);
       refreshSegChrome(pendingIdcSeg);
     }
-    if (idcStreamVol && Number.isFinite(ct.win) && Number.isFinite(ct.lev)) {
-      setWL(ct.win, ct.lev);
+    if (idcStreamVol && Number.isFinite(ct2.win) && Number.isFinite(ct2.lev)) {
+      setWL(ct2.win, ct2.lev);
     }
     drawAll();
   }
@@ -17666,7 +18754,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         applyCastNiftiSeg = null;
         applyCastDicomSeg = null;
       }
+      setIraSegCatalog(EMPTY_SEG_CATALOG);
       labelsOn = false;
+      setIraSceneUpdateHandler(null);
       globalThis.removeEventListener("resize", resize);
       for (const ro of resizeObservers) ro.disconnect();
       try {
