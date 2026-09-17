@@ -274,6 +274,26 @@ export class LiveScene {
       this.feed({ id, type: node?.type, kind: "remove", origin, v: ++this.seq });
     } else if (e === "SnapshotComplete") {
       /* managers already received their snapshot nodes */
+    } else if (e === "Snapshot") {
+      // Compact Cast/LiveSync snapshot: full LiveScene doc in one event (HubBlobs already cached).
+      // Equivalent to NodeAdded × N for first paint; live updates continue as usual afterward.
+      const scene = ev.scene as { nodes?: Record<string, MrsonNode> } | undefined;
+      const incoming = scene?.nodes;
+      if (!incoming || typeof incoming !== "object") return;
+      const nextIds = new Set(Object.keys(incoming));
+      for (const [id, node] of [...this.nodes.entries()]) {
+        if (nextIds.has(id)) continue;
+        this.nodes.delete(id);
+        if (live) for (const m of this.interested(node.type)) m.onNodeRemoved?.(id, this);
+        this.feed({ id, type: node.type, kind: "remove", origin, v: ++this.seq });
+      }
+      for (const [id, node] of Object.entries(incoming)) {
+        if (!node || typeof node !== "object") continue;
+        const n = { ...node, id: node.id || id } as MrsonNode;
+        this.nodes.set(n.id, n);
+        if (live) for (const m of this.interested(n.type)) await m.onNodeAdded?.(n, this);
+        this.feed({ id: n.id, type: n.type, kind: "upsert", origin, v: ++this.seq, node: n });
+      }
     } else if (e === "SceneClosed") {
       this.nodes.clear();                                 // wholesale reset (Slicer closed the scene)
       if (live) for (const m of this.managers) m.onSceneClosed?.(this);

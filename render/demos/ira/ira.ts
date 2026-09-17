@@ -20,6 +20,8 @@ import { drawCross } from "../crosshair.ts";
 import type { Vec3 } from "../../mat4.ts";
 
 export type Plane = "axial" | "sagittal" | "coronal";
+/** Viewport selection / capture target — MPR planes plus the 3D scene. */
+export type ViewportId = Plane | "threeD";
 export type IraTool =
   | "scroll"
   | "wl"
@@ -66,7 +68,7 @@ export interface IraCfg {
   offsetMm: (p: Plane) => number;
   spacing: (p: Plane) => number;
   step: (p: Plane, forward: boolean) => void;
-  redraw: (p: Plane) => void;
+  redraw: (p: ViewportId) => void;
   redrawAll: () => void;
   rasLo: Vec3;
   rasHi: Vec3;
@@ -89,6 +91,13 @@ export interface IraCfg {
   initialLayout?: "single" | "twoUp" | "fourUp";
   /** Optional extra toolbar buttons (e.g. IDC Share / Download) — appended after Help. */
   extraTools?: { id: string; icon: string; title: string; run: () => void }[];
+  /**
+   * GPU-correct viewport readback (RGBA8, tightly packed). Required for reliable PNG
+   * capture from WebGPU canvases — `2d.drawImage(webgpuCanvas)` is often gray/empty.
+   */
+  readViewportRgba?: (
+    plane: ViewportId,
+  ) => Promise<{ rgba: Uint8Array; width: number; height: number } | null>;
 }
 
 export interface IraApi {
@@ -99,11 +108,20 @@ export interface IraApi {
   hooks(p: Plane): { onLeftGrab: (u: number, v: number, w: number, h: number) => boolean };
   drawOverlay(p: Plane): void;
   resize(): void;
-  selected(): Plane;
+  selected(): ViewportId;
   setLayout(l: "single" | "twoUp" | "fourUp"): void;
   reset(): void;
   detachKeys(): void;
+  /** Capture selected viewport as a full-resolution PNG (base64, no data-URL prefix). */
+  capturePngFullSize(): Promise<IraPngCapture | null>;
 }
+
+export type IraPngCapture = {
+  contentType: "image/png";
+  data: string;
+  width: number;
+  height: number;
+};
 
 /** Physical-display class for the hanging-protocol choice: don't cram tiny windows onto a
  *  phone; use the real estate of a 4K monitor for extra visible series. */
@@ -313,7 +331,7 @@ export function mountIra(cfg: IraCfg): IraApi {
 
   // ---- state ------------------------------------------------------------------------------
   let tool: IraTool = "scroll"; // spec: Scroll is the default modal tool
-  let selectedPlane: Plane = cfg.planes[0]; // spec: upper-left viewport initially selected
+  let selectedPlane: ViewportId = cfg.planes[0]; // spec: upper-left viewport initially selected
   let localizerOn = false; // spec default Off
   let inverted = false;
   let clamped = /^(NM|PT)$/i.test(cfg.modality); // spec: Clamped default for NM/PET
@@ -454,15 +472,20 @@ export function mountIra(cfg: IraCfg): IraApi {
     for (const p of cfg.planes) {
       cfg.cellOf(p)?.classList.toggle("ira-cell-selected", p === selectedPlane);
     }
+    cfg.cellOf("threeD")?.classList.toggle(
+      "ira-cell-selected",
+      selectedPlane === "threeD",
+    );
+  };
+  const selectViewport = (id: ViewportId) => {
+    if (selectedPlane === id) return;
+    selectedPlane = id;
+    markSelected();
   };
   for (const p of cfg.planes) {
-    cfg.cellOf(p)?.addEventListener("pointerdown", () => {
-      if (selectedPlane !== p) {
-        selectedPlane = p;
-        markSelected();
-      }
-    });
+    cfg.cellOf(p)?.addEventListener("pointerdown", () => selectViewport(p));
   }
+  cfg.cellOf("threeD")?.addEventListener("pointerdown", () => selectViewport("threeD"));
   markSelected();
 
   // ---- toolbar (persistent shell; reuse across remounts so grid height stays stable) ------
@@ -495,6 +518,7 @@ export function mountIra(cfg: IraCfg): IraApi {
   };
 
   const stepSelected = (forward: boolean) => {
+    if (selectedPlane === "threeD") return;
     cfg.step(selectedPlane, forward);
     cfg.redraw(selectedPlane);
   };
@@ -706,8 +730,13 @@ export function mountIra(cfg: IraCfg): IraApi {
     buttons.get("cine")!.classList.remove("active");
   };
   const cinePlay = (fps: number) => {
+    if (selectedPlane === "threeD") return;
     cineStop();
     cineTimer = setInterval(() => {
+      if (selectedPlane === "threeD") {
+        cineStop();
+        return;
+      }
       const before = cfg.off01(selectedPlane);
       cfg.step(selectedPlane, true);
       if (cfg.off01(selectedPlane) === before) cfg.setOff01(selectedPlane, 0); // loop
@@ -738,15 +767,18 @@ export function mountIra(cfg: IraCfg): IraApi {
     cbtn("pause", "Cine Pause", cineStop);
     cbtn("stop", "Cine Stop (back to first frame)", () => {
       cineStop();
+      if (selectedPlane === "threeD") return;
       cfg.setOff01(selectedPlane, 0);
       cfg.redraw(selectedPlane);
     });
     cbtn("toStart", "Go to first frame", () => {
+      if (selectedPlane === "threeD") return;
       cfg.setOff01(selectedPlane, 0);
       cfg.redraw(selectedPlane);
     });
     cbtn("stepFwd", "Step one frame", () => stepSelected(true));
     cbtn("toEnd", "Go to last frame", () => {
+      if (selectedPlane === "threeD") return;
       cfg.setOff01(selectedPlane, 1);
       cfg.redraw(selectedPlane);
     });
@@ -878,42 +910,124 @@ export function mountIra(cfg: IraCfg): IraApi {
     setLayout(cfg.initialLayout ?? "fourUp");
   }
 
-  // ---- print (IRA: selected viewport, current state incl. annotations) --------------------
-  const printViewport = () => {
+  // ---- print / PNG capture (IRA: selected viewport, current state incl. annotations) ----
+  const rgbaToCanvas = (
+    rgba: Uint8Array,
+    width: number,
+    height: number,
+  ): HTMLCanvasElement | null => {
+    const out = document.createElement("canvas");
+    out.width = width;
+    out.height = height;
+    const ctx = out.getContext("2d");
+    if (!ctx) return null;
+    // ImageData wants a plain ArrayBuffer-backed Uint8ClampedArray (not SharedArrayBuffer).
+    const clamped = new Uint8ClampedArray(width * height * 4);
+    clamped.set(rgba.subarray(0, clamped.length));
+    ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
+    return out;
+  };
+
+  const captureSelectedViewportCanvas = async (): Promise<HTMLCanvasElement | null> => {
     const p = selectedPlane;
-    cfg.redraw(p); // fresh frame, then capture on the next paint
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        const src = cfg.canvases[p];
+    // MPR overlays only — 3D has no measurement/localizer canvas.
+    if (p !== "threeD") drawOverlay(p);
+
+    let out: HTMLCanvasElement | null = null;
+    if (cfg.readViewportRgba) {
+      try {
+        const shot = await cfg.readViewportRgba(p);
+        if (shot?.rgba?.length && shot.width > 0 && shot.height > 0) {
+          out = rgbaToCanvas(shot.rgba, shot.width, shot.height);
+        }
+      } catch (err) {
+        console.warn("[ira] GPU viewport readback failed", err);
+      }
+    }
+
+    // Fallback: 2d.drawImage(webgpu) — often gray; keep for non-WebGPU hosts.
+    if (!out) {
+      const src = cfg.canvases[p];
+      if (!src?.width || !src.height) return null;
+      out = document.createElement("canvas");
+      out.width = src.width;
+      out.height = src.height;
+      const ctx = out.getContext("2d");
+      if (!ctx) return null;
+      try {
+        ctx.drawImage(src, 0, 0);
+      } catch {
+        return null;
+      }
+    }
+
+    const ctx = out.getContext("2d");
+    if (!ctx) return out;
+    try {
+      if (inverted) {
+        ctx.globalCompositeOperation = "difference";
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, out.width, out.height);
+        ctx.globalCompositeOperation = "source-over";
+      }
+      if (p !== "threeD") {
         const ov = overlays.get(p);
-        const out = document.createElement("canvas");
-        out.width = src.width;
-        out.height = src.height;
-        const ctx = out.getContext("2d")!;
-        try {
-          ctx.drawImage(src, 0, 0);
-          if (inverted) {
-            ctx.globalCompositeOperation = "difference";
-            ctx.fillStyle = "#fff";
-            ctx.fillRect(0, 0, out.width, out.height);
-            ctx.globalCompositeOperation = "source-over";
-          }
-          if (ov) ctx.drawImage(ov, 0, 0, out.width, out.height);
-        } catch { /* capture best-effort */ }
-        const [win, lev] = cfg.wl.get();
-        const w = globalThis.open("", "_blank", "width=900,height=700");
-        if (!w) return;
-        w.document.write(
-          `<title>SlicerRad print — ${p}</title>` +
-            `<p style="font:12px sans-serif">For Investigational Use Only — Not for Diagnostic Use · ` +
-            `${p} · W ${Math.round(win)} / L ${Math.round(lev)}</p>` +
-            `<img style="max-width:100%" src="${out.toDataURL("image/png")}">`,
-        );
-        w.document.close();
-        w.focus();
-        setTimeout(() => w.print(), 200);
-      }, 60);
-    });
+        if (ov) ctx.drawImage(ov, 0, 0, out.width, out.height);
+      }
+    } catch {
+      /* composite best-effort */
+    }
+    return out;
+  };
+
+  const capturePngFullSize = async (): Promise<IraPngCapture | null> => {
+    const p = selectedPlane;
+    cfg.redraw(p);
+    // Let the on-screen pass submit, then do an independent GPU readback render.
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    try {
+      await (cfg.slice()?.dev?.queue as GPUQueue | undefined)?.onSubmittedWorkDone?.();
+    } catch {
+      /* optional sync */
+    }
+    const out = await captureSelectedViewportCanvas();
+    if (!out) return null;
+    const dataUrl = out.toDataURL("image/png");
+    const comma = dataUrl.indexOf(",");
+    const data = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+    return {
+      contentType: "image/png",
+      data,
+      width: out.width,
+      height: out.height,
+    };
+  };
+
+  const printViewport = () => {
+    void (async () => {
+      const p = selectedPlane;
+      cfg.redraw(p);
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+      try {
+        await (cfg.slice()?.dev?.queue as GPUQueue | undefined)?.onSubmittedWorkDone?.();
+      } catch {
+        /* optional sync */
+      }
+      const out = await captureSelectedViewportCanvas();
+      if (!out) return;
+      const [win, lev] = cfg.wl.get();
+      const w = globalThis.open("", "_blank", "width=900,height=700");
+      if (!w) return;
+      w.document.write(
+        `<title>SlicerRad print — ${p}</title>` +
+          `<p style="font:12px sans-serif">For Investigational Use Only — Not for Diagnostic Use · ` +
+          `${p} · W ${Math.round(win)} / L ${Math.round(lev)}</p>` +
+          `<img style="max-width:100%" src="${out.toDataURL("image/png")}">`,
+      );
+      w.document.close();
+      w.focus();
+      setTimeout(() => w.print(), 200);
+    })();
   };
 
   // ---- help overlay (the IRA "manual") ---------------------------------------------------
@@ -1057,5 +1171,6 @@ export function mountIra(cfg: IraCfg): IraApi {
       document.removeEventListener("keydown", onKey);
       cineStop();
     },
+    capturePngFullSize,
   };
 }

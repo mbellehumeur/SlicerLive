@@ -195,14 +195,16 @@ export function buildSegrouletteScene(
   };
   if (activeSeg) fillSegmentsFrom(activeSeg);
 
-  // Per-segment opacity (tri-state in the UI: 1 → 0.5 → 0 → 1). Default 1 (opaque); 0 = hidden, 0.5 =
-  // translucent surface. Baking uses a palette whose alpha is the per-segment opacity (the colorized
-  // overlay dims with it; the SDF attr renders the shell at that opacity).
+  // Per-segment opacity (tri-state in the UI: 1 → 0.5 → 0 → 1). Default 1 (opaque); 0 = transparent
+  // shell. Visibility is a separate flag (eye toggle) so hide does not clobber stored opacity.
   const segOpacity = new Map<number, number>();
+  const segVisible = new Map<number, boolean>(); // absent → visible
   const opacityOf = (num: number) => segOpacity.get(num) ?? 1;
+  const visibleOf = (num: number) => segVisible.get(num) !== false;
+  const effectiveOpacity = (num: number) => (visibleOf(num) ? opacityOf(num) : 0);
   const visPalette = (): Float32Array => {
     const p = palette.slice();
-    for (const s of segments) if (s.num < 256) p[s.num * 4 + 3] = opacityOf(s.num);
+    for (const s of segments) if (s.num < 256) p[s.num * 4 + 3] = effectiveOpacity(s.num);
     return p;
   };
 
@@ -230,7 +232,7 @@ export function buildSegrouletteScene(
     // crisp outer shell for segments separated by background (ribs/vertebrae render identically).
     const boundaryMode = labelmapHasInternalBoundary(cap.lab, cap.dims) ? "all" : "outer";
     segLogic = new SegmentationLogic(dev, editable, { renderMode: "sdf", opacity: 1.0, boundaryMode, refineDelayMs: opts.refineDelayMs });
-    for (const s of segments) { segLogic.setLabelColor(s.num, s.color); segLogic.setLabelOpacity(s.num, opacityOf(s.num)); }
+    for (const s of segments) { segLogic.setLabelColor(s.num, s.color); segLogic.setLabelOpacity(s.num, effectiveOpacity(s.num)); }
     editable.loadLabelmap(cap.lab);   // fast bake
     segLogic.refineNow();             // static scene → high-quality bake now
     mode = "sdf";
@@ -360,8 +362,8 @@ export function buildSegrouletteScene(
     setSegmentOpacity(num, opacity) {
       const o = Math.max(0, Math.min(1, opacity));
       if (o >= 1) segOpacity.delete(num); else segOpacity.set(num, o);   // 1 is the default
-      rebakeColorized();                                   // 2D slice overlay (palette alpha = opacity)
-      segLogic?.setLabelOpacity(num, o);                   // 3D: per-segment shell opacity
+      rebakeColorized();                                   // 2D slice overlay (palette alpha = effective)
+      segLogic?.setLabelOpacity(num, effectiveOpacity(num)); // 3D: hide uses 0 without wiping stored o
       segLogic?.refineNow();                               // rebake attr + sdf in place (same field/texture)
     },
     setSegmentOpacities(entries) {
@@ -370,14 +372,20 @@ export function buildSegrouletteScene(
       for (const [num, opacity] of entries) {
         const o = Math.max(0, Math.min(1, opacity));
         if (o >= 1) segOpacity.delete(num); else segOpacity.set(num, o);
-        segLogic?.setLabelOpacity(num, o);
+        segLogic?.setLabelOpacity(num, effectiveOpacity(num));
       }
       rebakeColorized();
       segLogic?.refineNow();
     },
     segmentOpacity: (num) => opacityOf(num),
-    setSegmentVisible(num, visible) { this.setSegmentOpacity(num, visible ? 1 : 0); },
-    isSegmentVisible: (num) => opacityOf(num) > 0,
+    setSegmentVisible(num, visible) {
+      if (visible) segVisible.delete(num);
+      else segVisible.set(num, false);
+      rebakeColorized();
+      segLogic?.setLabelOpacity(num, effectiveOpacity(num));
+      segLogic?.refineNow();
+    },
+    isSegmentVisible: (num) => visibleOf(num),
     setRoiEnabled(on) { roiEnabled = on; rebuild(); },
     setRoiVisible(on) { roiVisible = on; rebuild(); },
     roiEnabled: () => roiEnabled,

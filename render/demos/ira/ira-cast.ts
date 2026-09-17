@@ -5,6 +5,9 @@
  */
 import CastClient, {
   castRadioStatusVisual,
+  castReportingPopupFeatures,
+  castReportingPopupPlacement,
+  CAST_REPORTING_WINDOW_NAME,
   cloneContextArray,
   generateSubscriberName,
   getHubEventLower,
@@ -16,6 +19,7 @@ import CastClient, {
   messageProductName,
   messageSubscriberName,
   parseStatusUpdateMessage,
+  placeCastPopupWindow,
   publishCastUrlSend,
   requestCastProductStatus,
   requestEventFor,
@@ -361,7 +365,7 @@ type StatusResponseItem = {
   };
 };
 
-const REPORTING_WINDOW_NAME = "castViewer-reporting";
+const REPORTING_WINDOW_NAME = CAST_REPORTING_WINDOW_NAME;
 
 let worklistClientWindow: WorklistClientWindow | null = null;
 let reportingWindow: Window | null = null;
@@ -408,41 +412,9 @@ function adoptWorklistClientWindowFromStatusResponses(
   }
 }
 
-function reportingPopupPlacementFromWorklist(): {
-  width: number;
-  height: number;
-  left: number;
-  top: number;
-} {
-  const width = 540;
-  const height = 394;
-  const availLeft = Number(globalThis.screen?.availLeft) || 0;
-  const availTop = Number(globalThis.screen?.availTop) || 0;
-  const availW =
-    globalThis.screen?.availWidth || globalThis.screen?.width || 1200;
-  const availH =
-    globalThis.screen?.availHeight || globalThis.screen?.height || 800;
-
-  const opener = worklistClientWindow;
-  const openerLeft = opener?.left ?? 0;
-  const openerTop = opener?.top ?? 0;
-  const openerW = opener?.width || availW;
-  const openerH = opener?.height || availH;
-
-  let left = opener
-    ? openerLeft + (openerW - width) / 2
-    : Math.max(0, (availW - width) / 2);
-  let top = opener
-    ? openerTop + (openerH - height) / 2
-    : Math.max(0, (availH - height) / 2);
-  left = Math.max(availLeft, Math.min(left, availLeft + availW - width));
-  top = Math.max(availTop, Math.min(top, availTop + availH - height));
-  return {
-    width,
-    height,
-    left: Math.floor(left),
-    top: Math.floor(top),
-  };
+/** Same size/placement as worklist — shared via @cast-interface/client. */
+function reportingPopupPlacement() {
+  return castReportingPopupPlacement(worklistClientWindow);
 }
 
 /**
@@ -515,14 +487,8 @@ export function openIraReportingClient(): Window | null {
   if (nextTopic) url.searchParams.set("topic", nextTopic);
   if (nextToken) url.searchParams.set("id-token", nextToken);
   const href = url.toString();
-  const place = reportingPopupPlacementFromWorklist();
-  const features = [
-    "popup",
-    `width=${place.width}`,
-    `height=${place.height}`,
-    `left=${place.left}`,
-    `top=${place.top}`,
-  ].join(",");
+  const place = reportingPopupPlacement();
+  const features = castReportingPopupFeatures(place);
   // One open() only — named window reuses an existing castViewer-reporting if any.
   const win = globalThis.open(href, REPORTING_WINDOW_NAME, features);
   if (!win) {
@@ -530,13 +496,7 @@ export function openIraReportingClient(): Window | null {
     return globalThis.open(href, REPORTING_WINDOW_NAME);
   }
   reportingWindow = win;
-  try {
-    win.resizeTo(place.width, place.height);
-    win.moveTo(place.left, place.top);
-    win.focus();
-  } catch {
-    /* Cross-origin or browser policy may block move/resize. */
-  }
+  placeCastPopupWindow(win, place);
   return win;
 }
 
@@ -681,6 +641,34 @@ let onSceneUpdate: IraSceneUpdateHandler | null = null;
 
 export function setIraSceneUpdateHandler(fn: IraSceneUpdateHandler | null): void {
   onSceneUpdate = fn;
+}
+
+/** Payload for Cast ``PNGFULLSIZE`` responses (base64 PNG, no data-URL prefix). */
+export type IraPngCapturePayload = {
+  contentType: string;
+  data: string;
+  width: number;
+  height: number;
+};
+
+export type IraPngCaptureHandler = () =>
+  | IraPngCapturePayload
+  | null
+  | Promise<IraPngCapturePayload | null>;
+
+let onPngCapture: IraPngCaptureHandler | null = null;
+
+/** @deprecated Prefer {@link setIraPngFullSizeCaptureHandler} */
+export function setIraPngThumbnailCaptureHandler(
+  fn: IraPngCaptureHandler | null,
+): void {
+  onPngCapture = fn;
+}
+
+export function setIraPngFullSizeCaptureHandler(
+  fn: IraPngCaptureHandler | null,
+): void {
+  onPngCapture = fn;
 }
 
 function handleSceneUpdateMessage(message: Record<string, unknown>): boolean {
@@ -985,6 +973,82 @@ function handleStatusRequest(message: Record<string, unknown>): boolean {
   return true;
 }
 
+function isPngFullSizeRequest(message: Record<string, unknown>): boolean {
+  const event = message?.event as
+    | {
+        "hub.event"?: string;
+        context?: Record<string, unknown>;
+      }
+    | undefined;
+  if (!event || !isRequestEvent(getHubEventLower(event))) return false;
+  const context =
+    event.context && typeof event.context === "object" ? event.context : {};
+  return String(context.dataType || "").toUpperCase() === "PNGFULLSIZE";
+}
+
+async function handlePngFullSizeRequest(
+  message: Record<string, unknown>,
+): Promise<boolean> {
+  const event = message?.event as
+    | {
+        "hub.event"?: string;
+        context?: Record<string, unknown>;
+        "hub.topic"?: string;
+      }
+    | undefined;
+  if (!event || !isRequestEvent(getHubEventLower(event))) return false;
+
+  const context =
+    event.context && typeof event.context === "object" ? event.context : {};
+  const correlationId = context.id;
+  if (typeof correlationId !== "string" || !correlationId) return false;
+
+  const requestedTargets = extractActorKeywords(message["target.actor"]);
+  if (
+    requestedTargets.length > 0 &&
+    !requestedTargets.includes("*") &&
+    !requestedTargets.includes(ID_ACTOR)
+  ) {
+    return false;
+  }
+  if (String(context.dataType || "").toUpperCase() !== "PNGFULLSIZE") {
+    return false;
+  }
+
+  markReportingConnectedApp(message);
+
+  let payload: IraPngCapturePayload | null = null;
+  try {
+    payload = (await onPngCapture?.()) ?? null;
+  } catch (err) {
+    console.error(`${LOG} PNGFULLSIZE capture failed`, err);
+  }
+  if (!payload?.data) {
+    console.warn(`${LOG} PNGFULLSIZE: no capture available`);
+    // Still answer so the hub request does not hang until timeout.
+    client?.sendCastRequestResponse(
+      correlationId,
+      "PNGFULLSIZE",
+      { contentType: "image/png", data: "", width: 0, height: 0, error: "no capture" },
+      event["hub.topic"],
+    );
+    return true;
+  }
+
+  client?.sendCastRequestResponse(
+    correlationId,
+    "PNGFULLSIZE",
+    {
+      contentType: payload.contentType || "image/png",
+      data: payload.data,
+      width: payload.width,
+      height: payload.height,
+    },
+    event["hub.topic"],
+  );
+  return true;
+}
+
 function handleStatusUpdate(message: Record<string, unknown>): boolean {
   const update = parseStatusUpdateMessage(message);
   if (!update) return false;
@@ -1151,7 +1215,8 @@ async function resolveAndApplyImagingStudyOpen(
  * Ask a worklist for STATUS.
  * Default (connect): presence ping on local topic; apply ImagingStudy only if we have none.
  * Join-and-follow: pass host topic + forceApply to adopt the host's open study.
- * Always adopts worklist ``clientWindow`` for DICOM SR popup placement.
+ * Always adopts worklist ``clientWindow`` for DICOM SR popup placement
+ * (shared `castReportingPopupPlacement` with that opener bounds).
  */
 async function requestStatusFromWorklist(opts?: {
   topic?: string;
@@ -1312,7 +1377,7 @@ function scheduleStatusRequestFromWorklist(delayMs: number): void {
   }, delayMs);
 }
 
-/** Apply radio visual classes for the current connection. */
+/** Apply connection tone classes + topic label for the Cast status control. */
 export function applyIraCastRadioVisual(statusEl: HTMLElement): void {
   const visual = castRadioStatusVisual(connection, {
     conferenceActive: Boolean(conference),
@@ -1328,12 +1393,21 @@ export function applyIraCastRadioVisual(statusEl: HTMLElement): void {
   );
   statusEl.classList.add(`ira-cast-${visual.tone}`);
   statusEl.classList.toggle("ira-cast-pulse", visual.pulse);
-  statusEl.classList.toggle("ira-cast-conference-pulse", visual.conferencePulse);
-  statusEl.title = conference?.title
+  statusEl.classList.toggle(
+    "ira-cast-conference-pulse",
+    visual.conferencePulse
+  );
+  const label = topic.trim() || "—";
+  statusEl.textContent = label;
+  const tip = conference?.title
     ? `${connectionDetail} · ${conference.title}`
     : connectionDetail;
-  const slash = statusEl.querySelector(".cast-radio-slash") as HTMLElement | null;
-  if (slash) slash.hidden = !visual.showSlash;
+  statusEl.title = tip;
+  const btn = statusEl.closest("button");
+  if (btn) {
+    btn.title = tip ? `Session info — ${tip}` : "Session info";
+    btn.setAttribute("aria-label", `Session info (${label})`);
+  }
 }
 
 /**
@@ -1367,6 +1441,7 @@ export async function connectIraCast(): Promise<void> {
         "imagingstudy-open",
         "imagingstudy-close",
         "status-request",
+        "pngfullsize-request",
         "subscription-removed",
         "status-update",
         "conference-start",
@@ -1386,6 +1461,10 @@ export async function connectIraCast(): Promise<void> {
   client.onMessage((message: Record<string, unknown>) => {
     if (handleSubscriptionRemoved(message)) return;
     if (handleStatusRequest(message)) return;
+    if (isPngFullSizeRequest(message)) {
+      void handlePngFullSizeRequest(message);
+      return;
+    }
     if (handleConferenceHubEvent(message)) return;
     if (handleStatusUpdate(message)) return;
     if (handleSceneUpdateMessage(message)) return;

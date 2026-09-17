@@ -147,6 +147,33 @@ function installInferenceWindowDrag(): void {
   });
 }
 
+function setInferenceDialogMinimized(minimized: boolean): void {
+  const panel = $("iraInferenceModal")?.querySelector(
+    ".ira-modal-inference",
+  ) as HTMLElement | null;
+  const btn = $("iraInferenceMinimizeBtn") as HTMLButtonElement | null;
+  if (!panel) return;
+  panel.classList.toggle("is-minimized", minimized);
+  if (minimized) {
+    panel.style.height = "";
+    panel.style.width = "";
+  }
+  if (btn) {
+    btn.setAttribute("aria-expanded", minimized ? "false" : "true");
+    btn.setAttribute("aria-label", minimized ? "Restore" : "Minimize");
+    btn.title = minimized ? "Restore" : "Minimize";
+    btn.textContent = minimized ? "▢" : "−";
+  }
+}
+
+function toggleInferenceDialogMinimized(): void {
+  const panel = $("iraInferenceModal")?.querySelector(
+    ".ira-modal-inference",
+  ) as HTMLElement | null;
+  if (!panel) return;
+  setInferenceDialogMinimized(!panel.classList.contains("is-minimized"));
+}
+
 function volumeFilesFromOpenStudy(): VolumeFile[] {
   const ctx = getIraImagingStudyOpenContext();
   const files = extractImagingStudyFiles(ctx) as Array<Record<string, unknown>>;
@@ -160,6 +187,22 @@ function volumeFilesFromOpenStudy(): VolumeFile[] {
     out.push({ url, fileName });
   }
   return out;
+}
+
+function looksLikeNiftiVolumeFile(file: VolumeFile): boolean {
+  return (
+    /\.nii(\.gz)?$/i.test(file.fileName) ||
+    /\.nii(\.gz)?(\?|$)/i.test(file.url)
+  );
+}
+
+/** Prefer nifti-send when open study is NIfTI; else the server catalog event. */
+function hubEventForInferenceJob(
+  catalogEvent: string,
+  files: VolumeFile[]
+): "nifti-send" | "dicom-send" {
+  if (files.some(looksLikeNiftiVolumeFile)) return "nifti-send";
+  return catalogEvent === "nifti-send" ? "nifti-send" : "dicom-send";
 }
 
 /** Parse `https://{bucket}.s3….amazonaws.com/{prefix}/` into bucket + CRDC prefix. */
@@ -573,7 +616,7 @@ function updateDetail(): void {
   const files = volumeFilesFromOpenStudy();
   const online = Boolean(row.probe?.online);
   const needsNifti = row.def.hubEvent === "nifti-send";
-  const hasNifti = files.some((f) => /\.nii(\.gz)?$/i.test(f.fileName) || /\.nii(\.gz)?(\?|$)/i.test(f.url));
+  const hasNifti = files.some(looksLikeNiftiVolumeFile);
 
   // Refresh TotalSeg modality/task UI before Run enablement checks.
   syncTotalSegOptionsVisibility();
@@ -734,7 +777,8 @@ async function runSelected(): Promise<void> {
         : `Sending ${rawFiles.length} volume file(s)…`
     );
     const files = await expandVolumeFilesForSend(rawFiles);
-    appendLog(`Publishing ${files.length} file(s) as ${row.def.hubEvent}…`);
+    const hubEvent = hubEventForInferenceJob(row.def.hubEvent, files);
+    appendLog(`Publishing ${files.length} file(s) as ${hubEvent}…`);
     const contextExtras =
       row.def.id === "totalseg" ? readTotalSegOptions() : undefined;
     if (contextExtras) {
@@ -744,11 +788,11 @@ async function runSelected(): Promise<void> {
     }
     const result = await publishInferenceJob({
       product: row.def.product,
-      hubEvent: row.def.hubEvent,
+      hubEvent,
       files,
       contextExtras,
     });
-    appendLog(result.ok ? `Published ${row.def.hubEvent} → ${row.def.product}` : `Publish failed: ${result.detail}`);
+    appendLog(result.ok ? `Published ${hubEvent} → ${row.def.product}` : `Publish failed: ${result.detail}`);
     if (result.ok) appendLog("Watch this log for status-update lines from the server.");
     else keepDialogOpenAfterJob = true;
   } catch (err) {
@@ -804,5 +848,8 @@ export function installMedicalInferenceUi(): void {
   });
   $("iraInferenceRunBtn")?.addEventListener("click", () => {
     void runSelected();
+  });
+  $("iraInferenceMinimizeBtn")?.addEventListener("click", () => {
+    toggleInferenceDialogMinimized();
   });
 }

@@ -1,8 +1,7 @@
 /**
- * IRA top-bar Cast radio menu (Session / Scene View / Hub) + Reporting + Start/Leave conference + Remote AI + ?.
+ * IRA top-bar Cast topic (session info) + Reporting + Start/Leave conference + Remote AI + ?.
  */
 import {
-  castRadioStatusMarkup,
   createCastConferenceDialog,
   createCastConferenceInviteController,
   deleteCastConference,
@@ -12,7 +11,6 @@ import {
 import {
   applyIraCastRadioVisual,
   getIraCastSessionInfo,
-  getIraHubAdminUrl,
   getIraLiveScene,
   openIraReportingClient,
   requestIraStatusFromHostWorklist,
@@ -20,7 +18,6 @@ import {
   setIraConferenceFollowHost,
   setIraConferenceHubHandler,
   setIraConferenceView,
-  setIraLiveSceneChangeListener,
 } from "./ira-cast.ts";
 import { openChromeHelp } from "../sl-chrome.ts";
 import {
@@ -81,7 +78,6 @@ function fillSessionDl(dl: HTMLElement): void {
   const info = getIraCastSessionInfo();
   const rows: Array<[string, string]> = [
     ["Hub", info.hubEndpoint || "—"],
-    ["Topic", info.topic || "(none)"],
     ["Subscriber", info.subscriberName || "—"],
     ["User", info.userName || "—"],
     ["Status", info.connectionDetail],
@@ -109,14 +105,12 @@ function fillSceneViewPre(pre: HTMLElement): void {
   }
 }
 
-function refreshSceneViewButton(): void {
-  const btn = document.getElementById(
-    "iraSceneViewBtn"
-  ) as HTMLButtonElement | null;
-  if (!btn) return;
-  const hasScene = Boolean(getIraLiveScene());
-  btn.disabled = !hasScene;
-  btn.title = hasScene ? "Scene" : "No LiveScene loaded";
+function openSceneView(): void {
+  const sceneViewModal = document.getElementById("iraSceneViewModal");
+  const sceneViewPre = document.getElementById("iraSceneViewPre");
+  if (!getIraLiveScene()) return;
+  if (sceneViewPre) fillSceneViewPre(sceneViewPre);
+  if (sceneViewModal) sceneViewModal.hidden = false;
 }
 
 type LocalStudyPick = IraLocalStudyPick;
@@ -501,39 +495,26 @@ function refreshRadio(): void {
   refreshLeaveConferenceButton(view);
 }
 
-/** Install menus and radio mark; call once early in main(). */
+/** Install header actions and Cast topic control; call once early in main(). */
 export function installIraHeader(opts: IraHeaderOpts = {}): void {
   onMountLocalSeries = opts.onMountLocalSeries;
   applyTheme(getStoredTheme());
 
-  const statusEl = document.getElementById("iraCastStatus");
-  if (statusEl) {
-    statusEl.innerHTML = castRadioStatusMarkup({ slashId: "iraCastRadioSlash" });
-  }
   refreshRadio();
   setIraCastStatusListener(() => refreshRadio());
-  refreshSceneViewButton();
-  setIraLiveSceneChangeListener(() => refreshSceneViewButton());
 
   const castBtn = document.getElementById("iraCastStatusBtn");
-  const castMenu = document.getElementById("iraCastStatusMenu");
   const helpBtn = document.getElementById("iraSettingsBtn");
   const sessionModal = document.getElementById("iraSessionModal");
   const sceneViewModal = document.getElementById("iraSceneViewModal");
   const aboutModal = document.getElementById("iraAboutModal");
   const loadLocalModal = document.getElementById("iraLoadLocalModal");
   const sessionDl = document.getElementById("iraSessionDl");
-  const sceneViewPre = document.getElementById("iraSceneViewPre");
 
   installMedicalInferenceUi();
   installLoadLocalStudyUi();
 
-  if (!castBtn || !castMenu) return;
-
-  const closeMenus = () => {
-    castMenu.hidden = true;
-    castBtn.setAttribute("aria-expanded", "false");
-  };
+  if (!castBtn) return;
 
   let openConferenceDialog = (): void => {
     console.warn("[ira] conference dialog not available");
@@ -597,42 +578,41 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
 
   castBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    const open = castMenu.hidden;
-    closeMenus();
-    castMenu.hidden = !open;
-    castBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (sessionDl) fillSessionDl(sessionDl);
+    if (sessionModal) sessionModal.hidden = false;
   });
   helpBtn?.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    closeMenus();
-    openChromeHelp();
+    const hasScene = Boolean(getIraLiveScene());
+    openChromeHelp(document.body, undefined, [
+      {
+        label: "Scene",
+        disabled: !hasScene,
+        title: hasScene ? "View LiveScene JSON" : "No LiveScene loaded",
+        onClick: () => openSceneView(),
+      },
+    ]);
   });
-  document.addEventListener("click", () => closeMenus());
-  castMenu.addEventListener("click", (ev) => ev.stopPropagation());
 
   document
     .getElementById("iraStartConferenceBtn")
     ?.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      closeMenus();
       if (getIraCastSessionInfo().conference) return;
       openConferenceDialog();
     });
   document.getElementById("iraMedicalInferenceBtn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    closeMenus();
     openMedicalInferenceDialog();
   });
   document.getElementById("iraReportingBtn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    closeMenus();
     openIraReportingClient();
   });
   document
     .getElementById("iraLeaveConferenceBtn")
     ?.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      closeMenus();
       const info = getIraCastSessionInfo();
       const view = info.conference;
       if (!view || info.connection !== "connected") return;
@@ -659,22 +639,6 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
           refreshRadio();
         });
     });
-  document.getElementById("iraSessionInfoBtn")?.addEventListener("click", () => {
-    if (sessionDl) fillSessionDl(sessionDl);
-    if (sessionModal) sessionModal.hidden = false;
-    closeMenus();
-  });
-  document.getElementById("iraSceneViewBtn")?.addEventListener("click", () => {
-    const btn = document.getElementById("iraSceneViewBtn") as HTMLButtonElement | null;
-    if (btn?.disabled) return;
-    if (sceneViewPre) fillSceneViewPre(sceneViewPre);
-    if (sceneViewModal) sceneViewModal.hidden = false;
-    closeMenus();
-  });
-  document.getElementById("iraHubBtn")?.addEventListener("click", () => {
-    window.open(getIraHubAdminUrl(), "_blank", "noopener,noreferrer");
-    closeMenus();
-  });
   document.querySelectorAll("[data-ira-close-modal]").forEach((el) => {
     el.addEventListener("click", () => {
       if (sessionModal) sessionModal.hidden = true;

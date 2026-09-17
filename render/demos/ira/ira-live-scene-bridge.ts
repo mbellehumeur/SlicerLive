@@ -16,6 +16,7 @@ export type IraSegDisplaySegment = {
   name: string;
   color: [number, number, number];
   visible: boolean;
+  opacity?: number;
 };
 
 export type IraSceneSyncInput = {
@@ -25,6 +26,16 @@ export type IraSceneSyncInput = {
   ijkToRAS: number[];
   modality?: string;
   volumeName?: string;
+  /** Volume-render opacity 0..1 (IRA local VR scale). */
+  volumeOpacity?: number;
+  /** VR transfer-function shift along the scalar axis (HU offset). */
+  volumeShift?: number;
+  /** Active VR preset id (Slicer CT-* name), or '' / null for default W/L. */
+  volumePreset?: string | null;
+  /** Volume-render crop enabled. */
+  cropEnabled?: boolean;
+  /** Crop ROI box visibility. */
+  roiVisible?: boolean;
   segments: IraSegDisplaySegment[];
   labelsVisible: boolean;
   hasSeg: boolean;
@@ -36,6 +47,7 @@ type SegEntry = {
   labelValue: number;
   color: number[];
   visible?: boolean;
+  opacity?: number;
 };
 
 function cloneNodes(
@@ -56,6 +68,34 @@ export function buildIraLiveSceneDoc(input: IraSceneSyncInput): IraLiveSceneDoc 
   const volName = String(input.volumeName || input.modality || "Volume").trim() || "Volume";
 
   const prevVol = nodes[IRA_VOL_NODE_ID] as Record<string, unknown> | undefined;
+  const volOpacity =
+    typeof input.volumeOpacity === "number" && Number.isFinite(input.volumeOpacity)
+      ? Math.max(0, Math.min(1, input.volumeOpacity))
+      : typeof prevVol?.opacity === "number" && Number.isFinite(prevVol.opacity)
+        ? Math.max(0, Math.min(1, Number(prevVol.opacity)))
+        : 1;
+  const volShift =
+    typeof input.volumeShift === "number" && Number.isFinite(input.volumeShift)
+      ? Number(input.volumeShift)
+      : typeof prevVol?.shift === "number" && Number.isFinite(prevVol.shift)
+        ? Number(prevVol.shift)
+        : 0;
+  const volPreset =
+    input.volumePreset !== undefined
+      ? String(input.volumePreset || "").trim()
+      : String(prevVol?.preset ?? "").trim();
+  const cropEnabled =
+    typeof input.cropEnabled === "boolean"
+      ? input.cropEnabled
+      : typeof prevVol?.cropEnabled === "boolean"
+        ? Boolean(prevVol.cropEnabled)
+        : false;
+  const roiVisible =
+    typeof input.roiVisible === "boolean"
+      ? input.roiVisible
+      : typeof prevVol?.roiVisible === "boolean"
+        ? Boolean(prevVol.roiVisible)
+        : false;
   nodes[IRA_VOL_NODE_ID] = {
     ...(prevVol || {}),
     type: "volume",
@@ -64,16 +104,28 @@ export function buildIraLiveSceneDoc(input: IraSceneSyncInput): IraLiveSceneDoc 
     dims: [...input.dims],
     ijkToRAS: [...input.ijkToRAS],
     modality: input.modality || "CT",
+    opacity: volOpacity,
+    shift: volShift,
+    preset: volPreset,
+    cropEnabled,
+    roiVisible,
   } as MrsonNode;
 
   if (input.hasSeg && input.segments.length) {
-    const segments: SegEntry[] = input.segments.map((s) => ({
-      id: `Segment_${s.num}`,
-      name: s.name,
-      labelValue: s.num,
-      color: [s.color[0], s.color[1], s.color[2], 1],
-      visible: s.visible !== false,
-    }));
+    const segments: SegEntry[] = input.segments.map((s) => {
+      const op = Math.max(
+        0,
+        Math.min(1, Number(s.opacity ?? 1)),
+      );
+      return {
+        id: `Segment_${s.num}`,
+        name: s.name,
+        labelValue: s.num,
+        color: [s.color[0], s.color[1], s.color[2], op],
+        opacity: op,
+        visible: s.visible !== false,
+      };
+    });
     const prev = nodes[IRA_SEG_NODE_ID] as Record<string, unknown> | undefined;
     nodes[IRA_SEG_NODE_ID] = {
       ...(prev || {}),
@@ -105,8 +157,20 @@ export function buildIraLiveSceneDoc(input: IraSceneSyncInput): IraLiveSceneDoc 
 export type SceneUpdateApplyResult = {
   labelsVisible?: boolean;
   segmentVisibility: Map<number, boolean>;
+  /** Per-segment opacity 0..1 when segments were patched. */
+  segmentOpacity: Map<number, number>;
   /** Global segmentation opacity 0..1 when patched. */
   opacity?: number;
+  /** Volume-render opacity 0..1 when patched on a volume node. */
+  volumeOpacity?: number;
+  /** VR scalar-axis shift (HU) when patched on a volume node. */
+  volumeShift?: number;
+  /** VR preset id when patched on a volume node ('' = default W/L). */
+  volumePreset?: string;
+  /** Volume crop enabled when patched on a volume node. */
+  cropEnabled?: boolean;
+  /** Crop ROI box visibility when patched on a volume node. */
+  roiVisible?: boolean;
   /** True when the scene document nodes were mutated. */
   changed: boolean;
 };
@@ -120,8 +184,14 @@ export function applySceneUpdateOps(
   const map = new Map<string, MrsonNode>(Object.entries(nodes));
   let changed = false;
   const segmentVisibility = new Map<number, boolean>();
+  const segmentOpacity = new Map<number, number>();
   let labelsVisible: boolean | undefined;
   let opacity: number | undefined;
+  let volumeOpacity: number | undefined;
+  let volumeShift: number | undefined;
+  let volumePreset: string | undefined;
+  let cropEnabled: boolean | undefined;
+  let roiVisible: boolean | undefined;
 
   for (const op of ops) {
     if (!op || typeof op !== "object" || !op.op || !op.id) continue;
@@ -129,7 +199,42 @@ export function applySceneUpdateOps(
     const res = applyOp(map, op);
     if (res.changed) changed = true;
     const after = map.get(op.id);
-    if (!after || after.type !== "segmentation") continue;
+    if (!after) continue;
+
+    if (after.type === "volume") {
+      const volOp = Number((after as { opacity?: unknown }).opacity);
+      if (Number.isFinite(volOp)) {
+        volumeOpacity = Math.max(0, Math.min(1, volOp));
+      }
+      const volSh = Number((after as { shift?: unknown }).shift);
+      if (Number.isFinite(volSh)) {
+        volumeShift = volSh;
+      }
+      if (
+        op.op === "patch" &&
+        typeof (op as { path?: string }).path === "string" &&
+        (op as { path: string }).path === "#/preset"
+      ) {
+        volumePreset = String((op as { value?: unknown }).value ?? "").trim();
+      }
+      if (
+        op.op === "patch" &&
+        typeof (op as { path?: string }).path === "string" &&
+        (op as { path: string }).path === "#/cropEnabled"
+      ) {
+        cropEnabled = Boolean((op as { value?: unknown }).value);
+      }
+      if (
+        op.op === "patch" &&
+        typeof (op as { path?: string }).path === "string" &&
+        (op as { path: string }).path === "#/roiVisible"
+      ) {
+        roiVisible = Boolean((op as { value?: unknown }).value);
+      }
+      continue;
+    }
+
+    if (after.type !== "segmentation") continue;
 
     if (typeof after.labelsVisible === "boolean") {
       labelsVisible = after.labelsVisible;
@@ -145,6 +250,14 @@ export function applySceneUpdateOps(
         const lv = Number(s.labelValue);
         if (!Number.isFinite(lv)) continue;
         segmentVisibility.set(lv, s.visible !== false);
+        const fromField = Number(s.opacity);
+        const fromColor = Number(s.color?.[3]);
+        const so = Number.isFinite(fromField)
+          ? fromField
+          : Number.isFinite(fromColor)
+            ? fromColor
+            : 1;
+        segmentOpacity.set(lv, Math.max(0, Math.min(1, so)));
       }
     }
 
@@ -169,7 +282,18 @@ export function applySceneUpdateOps(
   for (const [id, n] of map) nextNodes[id] = n;
   return {
     doc: { ...doc, nodes: nextNodes },
-    result: { labelsVisible, segmentVisibility, opacity, changed },
+    result: {
+      labelsVisible,
+      segmentVisibility,
+      segmentOpacity,
+      opacity,
+      volumeOpacity,
+      volumeShift,
+      volumePreset,
+      cropEnabled,
+      roiVisible,
+      changed,
+    },
   };
 }
 

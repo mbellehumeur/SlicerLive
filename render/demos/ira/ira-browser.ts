@@ -43,6 +43,7 @@ import {
   setIraImagingStudyOpenHandler,
   setIraLiveScene,
   setIraNiftiSendHandler,
+  setIraPngFullSizeCaptureHandler,
   setIraSceneUpdateHandler,
   setIraSegCatalog,
   syncIraStudyUrl,
@@ -363,6 +364,10 @@ async function main() {
       );
       syncIraStudyUrl({ volume: volumeFile.fileName });
       await loadStudy({ localVolume, label, anonymized: false });
+      // loadStudy(localVolume) clears ImagingStudy context; restore Cast open
+      // files so Remote AI can publish nifti-send / dicom-send jobs.
+      setIraImagingStudyContext(ctx);
+      syncIraStudyUrl({ volume: volumeFile.fileName });
       const info = document.getElementById("info");
       if (info) info.textContent = label;
       return;
@@ -1034,6 +1039,14 @@ async function mountStudyFromSource(
     xhair?.redraw();
   };
 
+  // Shared with VR chrome (declared early so syncLiveScene / scene-update can use it).
+  let vrShift = 0;
+  let vrPreset: string | null = null;
+  /** Filled once the VR preset helpers are ready (below). */
+  let applyVrPresetFn: (name: string | null) => void = (name) => {
+    vrPreset = name;
+  };
+
   syncLiveScene = () => {
     if (studyDisposed) return;
     setIraLiveScene(
@@ -1043,11 +1056,17 @@ async function mountStudyFromSource(
         ijkToRAS: sc.ijkToRAS,
         modality: ct.modality,
         volumeName: source.sd || ct.modality || "Volume",
+        volumeOpacity: sc.volumeOpacity(),
+        volumeShift: sc.volumeShift(),
+        volumePreset: vrPreset,
+        cropEnabled: roiEnabled,
+        roiVisible: roiVisible,
         segments: sc.segments.map((s) => ({
           num: s.num,
           name: s.name,
           color: s.color,
           visible: sc.isSegmentVisible(s.num),
+          opacity: sc.segmentOpacity(s.num),
         })),
         labelsVisible: labelsOn,
         hasSeg: sc.hasSeg,
@@ -1069,11 +1088,17 @@ async function mountStudyFromSource(
       ijkToRAS: sc.ijkToRAS,
       modality: ct.modality,
       volumeName: source.sd || ct.modality || "Volume",
+      volumeOpacity: sc.volumeOpacity(),
+      volumeShift: sc.volumeShift(),
+      volumePreset: vrPreset,
+      cropEnabled: roiEnabled,
+      roiVisible: roiVisible,
       segments: sc.segments.map((s) => ({
         num: s.num,
         name: s.name,
         color: s.color,
         visible: sc.isSegmentVisible(s.num),
+        opacity: sc.segmentOpacity(s.num),
       })),
       labelsVisible: labelsOn,
       hasSeg: sc.hasSeg || sc.segments.length > 0,
@@ -1083,12 +1108,38 @@ async function mountStudyFromSource(
     if (typeof result.labelsVisible === "boolean") {
       labelsOn = result.labelsVisible;
     }
+    for (const [num, op] of result.segmentOpacity) {
+      sc.setSegmentOpacity(num, op);
+    }
     for (const [num, visible] of result.segmentVisibility) {
       sc.setSegmentVisible(num, visible);
     }
     if (typeof result.opacity === "number" && Number.isFinite(result.opacity)) {
       sc.setSegOpacity(result.opacity);
       sc.slice.setOverlayOpacity(result.opacity * SEG_FILL);
+    }
+    if (typeof result.volumeOpacity === "number" && Number.isFinite(result.volumeOpacity)) {
+      sc.setVolumeOpacity(result.volumeOpacity);
+    }
+    if (typeof result.volumeShift === "number" && Number.isFinite(result.volumeShift)) {
+      vrShift = result.volumeShift;
+      sc.setVolumeShift(result.volumeShift);
+    }
+    if (typeof result.volumePreset === "string") {
+      applyVrPresetFn(result.volumePreset || null);
+    }
+    if (typeof result.cropEnabled === "boolean") {
+      roiEnabled = result.cropEnabled;
+      if (result.cropEnabled && roiFirstEnable) {
+        roiVisible = true;
+        roiFirstEnable = false;
+      }
+      sc.setRoiEnabled(roiEnabled);
+      sc.setRoiVisible(roiVisible);
+    }
+    if (typeof result.roiVisible === "boolean") {
+      roiVisible = result.roiVisible;
+      sc.setRoiVisible(roiVisible);
     }
     drawAll();
     syncLiveScene();
@@ -1377,10 +1428,41 @@ async function mountStudyFromSource(
     spacing: (p) => sliceIx.spacing(p),
     step: (p, fwd) => (off[p] = sliceIx.wheel(p, off[p], fwd)),
     redraw: (p) => {
-      drawSlice(p);
+      if (p === "threeD") draw3d();
+      else drawSlice(p);
       xhair?.redraw();
     },
     redrawAll: drawAll,
+    readViewportRgba: async (plane) => {
+      const canvas = cv[plane];
+      const w = canvas?.width || 0;
+      const h = canvas?.height || 0;
+      if (!w || !h) return null;
+      let raw: Uint8Array;
+      if (plane === "threeD") {
+        sc.scene.setCamera(
+          camera.position,
+          camera.focalPoint,
+          camera.viewUp,
+          camera.viewAngle,
+          w,
+          h,
+        );
+        raw = await sc.scene.renderToRGBA(w, h);
+      } else {
+        sc.slice.setPlane(plane, off[plane]);
+        raw = await sc.slice.renderToRGBA(w, h);
+      }
+      // Canvas preferred format is often bgra8unorm*; ImageData/PNG need RGBA.
+      if (String(preferred).toLowerCase().startsWith("bgra")) {
+        for (let i = 0; i + 3 < raw.length; i += 4) {
+          const b = raw[i];
+          raw[i] = raw[i + 2];
+          raw[i + 2] = b;
+        }
+      }
+      return { rgba: raw, width: w, height: h };
+    },
     rasLo: sc.rasLo,
     rasHi: sc.rasHi,
     wl: { get: () => [wl.win, wl.lev], set: setWL, auto: [sc.win, sc.lev] },
@@ -1428,6 +1510,7 @@ async function mountStudyFromSource(
       },
     ],
   });
+  setIraPngFullSizeCaptureHandler(() => ira?.capturePngFullSize() ?? null);
   (globalThis as Record<string, unknown>).__iraDbg = {
     ready: () => !!ira,
     dims: () => sc.dims,
@@ -1521,22 +1604,35 @@ async function mountStudyFromSource(
   // vrPreset = active preset id (null = grayscale W/L VR). vrShift = Slicer's VR "Shift" (offset
   // the whole transfer function along the scalar axis). Shift range derives from the actual data
   // range (sampled), like Slicer's shift slider spanning the scalar range.
-  let vrPreset: string | null = null;
-  let vrShift = 0;
   const shiftRange = Math.max(200, (vmax - vmin) / 2);
   // Default bake: scene VolumeProperty when loaded from ?scene=, else grayscale W/L (null).
   const defaultVrBake = sceneVr;
-  const bakeOf = (name: string | null) =>
-    name ? presetLUT(CT_VR_PRESETS.find((p) => p.name === name)!) : defaultVrBake;
+  const bakeOf = (name: string | null) => {
+    if (!name) return defaultVrBake;
+    const p = CT_VR_PRESETS.find((x) => x.name === name);
+    if (!p) {
+      console.warn(`[ira] unknown VR preset: ${name}`);
+      return defaultVrBake;
+    }
+    return presetLUT(p);
+  };
   const presetLabel = () => vrPreset ? (CT_VR_PRESETS.find((p) => p.name === vrPreset)?.label ?? vrPreset) : (defaultVrBake ? "Scene TF" : "Default (W/L)");
-  const applyVrPreset = (name: string | null) => {
+  applyVrPresetFn = (name: string | null) => {
     vrPreset = name;
     sc.setVolumePreset(bakeOf(name));
-    if (sc.volumeOpacity() <= 0) sc.setVolumeOpacity(1); // reveal the VR so the preset is visible
+    if (name && sc.volumeOpacity() <= 0) sc.setVolumeOpacity(1); // reveal the VR so the preset is visible
     draw3d();
     xhair?.redraw();
+    syncLiveScene();
   };
-  const applyVrShift = (hu: number) => { vrShift = hu; sc.setVolumeShift(hu); draw3d(); xhair?.redraw(); };
+  const applyVrPreset = (name: string | null) => applyVrPresetFn(name);
+  const applyVrShift = (hu: number) => {
+    vrShift = hu;
+    sc.setVolumeShift(hu);
+    draw3d();
+    xhair?.redraw();
+    syncLiveScene();
+  };
 
   // On-the-fly thumbnails: render THIS volume at the CURRENT camera with each preset into a small
   // WebGPU canvas. Full opacity, no shift, segmentation hidden for a clean preview; live state is
@@ -1588,6 +1684,7 @@ async function mountStudyFromSource(
         sc.setVolumeOpacity(o);
         draw3d();
         xhair?.redraw();
+        syncLiveScene();
       },
       color: [0.75, 0.78, 0.85],
     },
@@ -1758,6 +1855,7 @@ async function mountStudyFromSource(
       setIraSegCatalog(EMPTY_SEG_CATALOG);
       labelsOn = false;
       setIraSceneUpdateHandler(null);
+      setIraPngFullSizeCaptureHandler(null);
       globalThis.removeEventListener("resize", resize);
       for (const ro of resizeObservers) ro.disconnect();
       try {

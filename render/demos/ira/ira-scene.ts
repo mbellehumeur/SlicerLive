@@ -117,7 +117,9 @@ export function materializeLiveSceneBlobUrls(
       continue;
     }
     if (!bytes) continue;
-    hashToUrl.set(name, URL.createObjectURL(new Blob([bytes])));
+    const hash = name.toLowerCase().endsWith(".bin") ? name.slice(0, -4) : name;
+    hashToUrl.set(hash, URL.createObjectURL(new Blob([bytes])));
+    if (hash !== name) hashToUrl.set(name, hashToUrl.get(hash)!);
   }
   if (!hashToUrl.size) return { ...sceneDoc };
 
