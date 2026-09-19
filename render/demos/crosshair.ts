@@ -109,7 +109,13 @@ export interface Crosshair4up {
  *  callback, and calls `redraw()` after it renders (so the crosshair tracks orbit/scroll). This is
  *  the DRY entry point every MPR demo shares — the feature lives here, not in each browser. */
 export function mountCrosshair(cfg: {
-  cells: Record<"axial" | "coronal" | "sagittal" | "threeD", HTMLCanvasElement>;
+  cells: {
+    axial: HTMLCanvasElement;
+    coronal: HTMLCanvasElement;
+    sagittal: HTMLCanvasElement;
+    threeD: HTMLCanvasElement;
+    oblique?: HTMLCanvasElement;
+  };
   // Getters (not values) so the mount survives a demo rebuilding its scene/slice — e.g. SEGRoulette
   // spinning a new case keeps the same canvases + crosshair while swapping the renderers underneath.
   getScene: () => SceneRenderer;
@@ -120,20 +126,25 @@ export function mountCrosshair(cfg: {
   visible?: boolean;
 }): Crosshair4up {
   const state = createCrosshair(cfg.visible ?? true);
-  const slices = ["axial", "coronal", "sagittal"] as const;
+  const slices = (["axial", "coronal", "sagittal", "oblique"] as const)
+    .filter((k) => k !== "oblique" || cfg.cells.oblique) as Orientation[];
   const all = [...slices, "threeD"] as const;
+  const cellOf = (cell: (typeof all)[number]): HTMLCanvasElement =>
+    cell === "threeD" ? cfg.cells.threeD : cfg.cells[cell]!;
   const ctx: Record<string, { c: HTMLCanvasElement; g: CanvasRenderingContext2D }> = {};
   for (const cell of all) {
+    const host = cellOf(cell);
     const o = document.createElement("canvas");
     o.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;border-radius:6px;background:transparent;";
-    cfg.cells[cell].parentElement!.appendChild(o);
+    host.parentElement!.appendChild(o);
     ctx[cell] = { c: o, g: o.getContext("2d")! };
   }
   const redraw = () => {
     const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
     for (const cell of all) {
       const { c, g } = ctx[cell];
-      const w = cfg.cells[cell].clientWidth, h = cfg.cells[cell].clientHeight;
+      const host = cellOf(cell);
+      const w = host.clientWidth, h = host.clientHeight;
       if (!w || !h) continue;
       if (c.width !== Math.floor(w * dpr)) { c.width = Math.floor(w * dpr); c.height = Math.floor(h * dpr); }
       g.setTransform(c.width / w, 0, 0, c.height / h, 0, 0);
@@ -164,9 +175,10 @@ export function mountCrosshair(cfg: {
     if (inFlight) queued = { u, v }; else pick3d(u, v);
   });
   for (const cell of slices) {
-    cfg.cells[cell].addEventListener("pointermove", (e) => {
+    const host = cellOf(cell);
+    host.addEventListener("pointermove", (e) => {
       if (!isShiftHover(e)) return;
-      const { u, v, aspect } = uvOf(cfg.cells[cell], e);
+      const { u, v, aspect } = uvOf(host, e);
       const ras = cfg.getSlice().viewToRas(cell, cfg.getOffset(cell), u, v, aspect);
       state.set(ras); cfg.onJump(ras);
     });

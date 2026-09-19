@@ -25,7 +25,7 @@ import { SegmentationLogic } from "../../logic/segmentation-logic.ts";
 // to ray-march. The JFA bake is capped to SDF_MAX_DIM per axis (the labelmap is downsampled for the
 // 3D SDF only; the 2D slice overlay stays full-res) so large IDC volumes don't blow GPU memory.
 const SDF_MAX_DIM = 256;
-import type { Vec3 } from "../mat4.ts";
+import type { Mat4, Vec3 } from "../mat4.ts";
 import type { CTVolume, SegLabelmap } from "../vendor/idc_tools/types.js";
 
 /** Modality-appropriate volume-render transfer function: grayscale with a bone-weighted opacity
@@ -103,6 +103,12 @@ export interface SegrouletteScene {
   reclip(): void;
   /** Add/replace demo-supplied fields (CardFields, …) that composite in the SAME 3D ray-march. */
   setExtraFields(fields: Field[]): void;
+  /** Shared volume GPU texture (for Drop-Slice / SlicePlaneField in 3D). */
+  volumeTexture(): GPUTexture;
+  /** RAS → texture[0,1] for the background volume. */
+  patientToTexture(): Mat4;
+  /** Scalar normScale for clim packing (r8 volumes); 1 for float volumes. */
+  normScale(): number;
   /** Patch a z-range of the volume texture from a full-volume Float32Array (progressive zarr). */
   patchVolumeScalars(data: Float32Array, zStart: number, zCount: number): void;
   /** Remap patient geometry after a progressive load finalizes true ijkToRAS (no voxel reupload). */
@@ -391,6 +397,9 @@ export function buildSegrouletteScene(
     roiEnabled: () => roiEnabled,
     roiVisible: () => roiVisible,
     setExtraFields(fields: Field[]) { extraFields = fields; rebuild(); },
+    volumeTexture: () => volumeField.volumeTexture(),
+    patientToTexture: () => volumeField.patientToTexture(),
+    normScale: () => volumeField.normScaleOf(),
     patchVolumeScalars(data, zStart, zCount) {
       volumeField.updateScalars(data, zStart, zCount);
     },

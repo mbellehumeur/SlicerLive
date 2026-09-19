@@ -35,6 +35,7 @@ import {
   materializeLiveSceneBlobUrls,
   sceneDocFromOpenContext,
 } from "./ira-scene.ts";
+import { filterSceneUpdateContextForVanishing } from "./ira-vanishing.ts";
 import {
   EMPTY_SEG_CATALOG,
   type SegCatalog,
@@ -131,8 +132,13 @@ let userName = "";
 let connection: IraCastConnection = "idle";
 let connectionDetail = "Not connected";
 let conference: CastConferenceView | null = null;
-/** When true, apply inbound ImagingStudy-open from conference host. */
+/** When true, apply inbound ImagingStudy-open / display scene-updates from host. */
 let conferenceFollowHost = false;
+/**
+ * Explicit invite decision: null = unset (default follow when roster says following),
+ * true/false = Join and follow / Join but do not follow.
+ */
+let conferenceFollowChoice: boolean | null = null;
 let lastImagingStudyOpenContext: unknown[] = [];
 /** Cached LiveScene document (blobBase + nodes) for STATUS + Scene View. */
 let lastLiveScene: IraLiveSceneDoc | null = null;
@@ -263,15 +269,55 @@ export function getIraCastSessionInfo(): {
 }
 
 export function setIraConferenceView(view: CastConferenceView | null): void {
+  const wasHost = conference?.selfRole === "leading";
   conference = view;
   if (!view) {
     conferenceFollowHost = false;
+    conferenceFollowChoice = null;
+  } else if (view.selfRole === "leading") {
+    // Host must not be marked "following".
+    conferenceFollowHost = false;
+    conferenceFollowChoice = null;
+  } else if (view.selfRole === "following") {
+    // Default follow when listed as attendee unless user opted out / in via invite.
+    if (conferenceFollowChoice === null) {
+      conferenceFollowChoice = true;
+      conferenceFollowHost = true;
+    } else {
+      conferenceFollowHost = conferenceFollowChoice;
+    }
+  }
+  const nowHost = conference?.selfRole === "leading";
+  if (nowHost && !wasHost) {
+    console.info(`${LOG} conference host active — scene-update publish armed`);
+    onConferenceHost?.();
   }
   onStatus?.(connection, connectionDetail);
 }
 
 export function setIraConferenceFollowHost(followHost: boolean): void {
-  conferenceFollowHost = Boolean(followHost);
+  conferenceFollowChoice = Boolean(followHost);
+  // Host leads; do not treat leading session as "following" for inbound gates.
+  if (conference?.selfRole === "leading") {
+    conferenceFollowHost = false;
+    return;
+  }
+  conferenceFollowHost = conferenceFollowChoice;
+}
+
+/** True when this IRA session is the Cast conference host (leading). */
+export function isIraConferenceHost(): boolean {
+  return conference?.selfRole === "leading";
+}
+
+/** Fired once when this session becomes conference host (leading). */
+type ConferenceHostHandler = () => void;
+let onConferenceHost: ConferenceHostHandler | null = null;
+
+export function setIraConferenceHostHandler(
+  fn: ConferenceHostHandler | null,
+): void {
+  onConferenceHost = fn;
 }
 
 type ConferenceHubHandler = (message: Record<string, unknown>) => boolean;
@@ -304,13 +350,28 @@ async function syncIraConferenceView(): Promise<void> {
 }
 
 function handleConferenceHubEvent(message: Record<string, unknown>): boolean {
-  if (conferenceHubHandler?.(message)) {
-    return true;
-  }
   const event = message?.event as
     | { "hub.event"?: string; context?: Record<string, unknown> }
     | undefined;
   const hubEvent = getHubEventLower(event);
+  const inviteHandled = Boolean(conferenceHubHandler?.(message));
+  if (inviteHandled) {
+    // Invite refresh is async; still sync so worklist-started conferences arm
+    // host scene-update publish via setIraConferenceView → onConferenceHost.
+    if (hubEvent === "conference-start") {
+      void syncIraConferenceView();
+    } else if (hubEvent === "conference-end") {
+      const context =
+        event?.context && typeof event.context === "object" ? event.context : {};
+      const leaveTopic = String(context.leaveTopic ?? "").trim();
+      if (!leaveTopic || leaveTopic === topic) {
+        setIraConferenceView(null);
+      } else {
+        void syncIraConferenceView();
+      }
+    }
+    return true;
+  }
   if (hubEvent === "conference-start") {
     void syncIraConferenceView();
     return true;
@@ -643,6 +704,49 @@ export function setIraSceneUpdateHandler(fn: IraSceneUpdateHandler | null): void
   onSceneUpdate = fn;
 }
 
+/**
+ * Publish Cast scene-update display ops (mrson patches) to actor ID peers.
+ * Used when this IRA is conference host so followers mirror VR/seg display state.
+ */
+export async function publishIraSceneUpdate(
+  ops: Array<Record<string, unknown>>,
+): Promise<boolean> {
+  if (!client || connection !== "connected" || !topic) {
+    console.warn(`${LOG} scene-update: not connected`);
+    return false;
+  }
+  if (!Array.isArray(ops) || !ops.length) {
+    console.info(`${LOG} scene-update skip: no ops`);
+    return false;
+  }
+  try {
+    const res = await client.publish({
+      event: {
+        "hub.topic": topic,
+        "hub.event": "scene-update",
+        context: [{ key: "scene", resource: { ops } }],
+      },
+      actor: ID_ACTOR,
+      // Fan-out like ImagingStudy so all topic peers (IRA ID actors) receive it.
+      "target.actor": "*",
+      "target.product.name": "*",
+    });
+    const ok = Boolean(res && res.ok);
+    if (!ok) {
+      console.warn(
+        `${LOG} scene-update failed`,
+        res ? `HTTP ${res.status}` : "No response",
+      );
+    } else {
+      console.info(`${LOG} published scene-update ops=`, ops.length);
+    }
+    return ok;
+  } catch (err) {
+    console.error(`${LOG} scene-update exception`, err);
+    return false;
+  }
+}
+
 /** Payload for Cast ``PNGFULLSIZE`` responses (base64 PNG, no data-URL prefix). */
 export type IraPngCapturePayload = {
   contentType: string;
@@ -676,7 +780,19 @@ function handleSceneUpdateMessage(message: Record<string, unknown>): boolean {
   if (getHubEventLower(event) !== "scene-update") return false;
   const context = messageEventContext(message);
   const items = Array.isArray(context) ? context : [];
-  void Promise.resolve(onSceneUpdate?.(items)).catch((err) =>
+  // Collaborative vanishing ink always delivers; display/study ops still require follow-host.
+  // Conference hosts are not "following" but must still apply reporting (and peer) display ops.
+  const deliver =
+    conference && !conferenceFollowHost && !isIraConferenceHost()
+      ? filterSceneUpdateContextForVanishing(items)
+      : items;
+  if (!deliver.length) {
+    if (conference && !conferenceFollowHost && !isIraConferenceHost()) {
+      console.info(`${LOG} scene-update ignored (not following host; no vanishing ops)`);
+    }
+    return true;
+  }
+  void Promise.resolve(onSceneUpdate?.(deliver)).catch((err) =>
     console.error(`${LOG} scene-update handler failed`, err),
   );
   return true;
@@ -832,6 +948,8 @@ function setConnection(next: IraCastConnection, detail: string): void {
   connectionDetail = detail;
   if (wasConnected && next !== "connected") {
     conference = null;
+    conferenceFollowHost = false;
+    conferenceFollowChoice = null;
     clearReportingConnectedApps();
     worklistClientWindow = null;
   }
@@ -906,11 +1024,16 @@ function handleSubscriptionRemoved(message: Record<string, unknown>): boolean {
 function stripCastParamsFromUrl(): void {
   if (!globalThis.history?.replaceState) return;
   const url = new URL(globalThis.location.href);
-  if (!url.searchParams.has("topic") && !url.searchParams.has("id-token")) {
+  if (
+    !url.searchParams.has("topic") &&
+    !url.searchParams.has("id-token") &&
+    !url.searchParams.has("followHost")
+  ) {
     return;
   }
   url.searchParams.delete("topic");
   url.searchParams.delete("id-token");
+  url.searchParams.delete("followHost");
   globalThis.history.replaceState(null, "", url.toString());
 }
 
@@ -1418,6 +1541,12 @@ export async function connectIraCast(): Promise<void> {
   const params = new URLSearchParams(globalThis.location.search);
   topic = params.get("topic")?.trim() || "";
   let urlToken = params.get("id-token")?.trim() || "";
+  const followHostParam = params.get("followHost")?.trim().toLowerCase() || "";
+  if (followHostParam === "1" || followHostParam === "true") {
+    setIraConferenceFollowHost(true);
+  } else if (followHostParam === "0" || followHostParam === "false") {
+    setIraConferenceFollowHost(false);
+  }
 
   if (!topic && !urlToken) {
     setConnection("idle", "Not connected");

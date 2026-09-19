@@ -31,6 +31,8 @@ const NORMAL: Record<Orientation, { axis: 0 | 1 | 2; sign: 1 | -1 }> = {
   axial: { axis: 2, sign: 1 },      // sliceToRAS col2 = +S
   coronal: { axis: 1, sign: 1 },    // sliceToRAS col2 = +A
   sagittal: { axis: 0, sign: -1 },  // sliceToRAS col2 = -R
+  // Default dental oblique nDir ≈ [0,-√½,√½] — nearest RAS axis is +S.
+  oblique: { axis: 2, sign: 1 },
 };
 
 /** Which IJK axis is most aligned with a RAS axis (column of the row-major ijkToRAS). */

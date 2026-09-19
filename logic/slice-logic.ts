@@ -13,6 +13,7 @@ const IN_PLANE: Record<Orientation, [0 | 1 | 2, 0 | 1 | 2]> = {
   axial: [0, 1],     // R (horizontal), A (vertical)
   coronal: [0, 2],   // R, S
   sagittal: [1, 2],  // A, S
+  oblique: [0, 2],   // R, approx S (tilted axial; FOV uses nearest anatomical axes)
 };
 
 /** Fitted [fovX, fovY, slabZ] mm for `orient` framing the RAS box [rasLo,rasHi] in a viewport of viewW×viewH px. */
@@ -43,9 +44,12 @@ export function offsetRangeResolution(orient: Orientation, ijkToRAS: ArrayLike<n
  *  native slice planes: Axial normal +S, Sagittal normal +R, Coronal normal +A; radiological in-plane axes. */
 export function reformatSliceToRAS(orient: Orientation, center: Vec3): number[] {
   const [cx, cy, cz] = center;
+  const s = Math.SQRT1_2;
   switch (orient) {
     case "axial": return [1, 0, 0, cx, 0, 1, 0, cy, 0, 0, 1, cz, 0, 0, 0, 1];
     case "sagittal": return [0, 0, 1, cx, 1, 0, 0, cy, 0, 1, 0, cz, 0, 0, 0, 1];
     case "coronal": return [1, 0, 0, cx, 0, 0, 1, cy, 0, 1, 0, cz, 0, 0, 0, 1];
+    // ~45° axial tilt about R–L (matches SliceRenderer BASES.oblique display frame).
+    case "oblique": return [-1, 0, 0, cx, 0, s, s, cy, 0, -s, s, cz, 0, 0, 0, 1];
   }
 }

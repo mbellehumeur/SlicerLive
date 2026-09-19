@@ -13,7 +13,7 @@
 import { initDevice } from "../../device.ts";
 import { loadSceneVolumeFieldProgressive, type SceneVolume } from "../../scene-volume.ts";
 import type { ImageField } from "../../fields.ts";
-import { slicerDefaultOffset01 } from "../../slice-renderer.ts";
+import { slicerDefaultOffset01, type PlaneBasis } from "../../slice-renderer.ts";
 import { offset01ToMm, SliceInteractor } from "../../slice-interactor.ts";
 import { buildSegrouletteScene, type SegrouletteScene } from "../segroulette-scene.ts";
 import { type Crosshair4up, mountCrosshair } from "../crosshair.ts";
@@ -27,7 +27,12 @@ import { buildFontAtlas } from "../../sdf-text.ts";
 import { mountSegmentCards } from "../../segment-cards.ts";
 import { loadSeries } from "../../vendor/idc_tools/index.js";
 import type { CTVolume, SegLabelmap } from "../../vendor/idc_tools/types.js";
-import { type IraApi, ensureIraToolbarShell, mountIra, type Plane, resetIraToolbarShell } from "./ira.ts";
+import { type IraApi, ensureIraToolbarShell, mountIra, type IraLayout, type Plane, resetIraToolbarShell } from "./ira.ts";
+import {
+  VanishingStrokeStore,
+  partitionVanishingOps,
+} from "./ira-vanishing.ts";
+import { SlicePlaneField, type SlicePlaneOpts } from "../../slice-plane-field.ts";
 import { downloadStudyWithDialog, type SeriesRef, shareStudy } from "../idc-share.ts";
 import { downloadStl, pickSegment, safeStlFileName, segmentToStl } from "../segment-stl.ts";
 import { CT_VR_PRESETS, presetLUT } from "../../ct-vr-presets.ts";
@@ -37,6 +42,9 @@ import {
   connectIraCast,
   getIraCastSessionInfo,
   getIraLiveScene,
+  isIraConferenceHost,
+  publishIraSceneUpdate,
+  setIraConferenceHostHandler,
   setIraDicomSendHandler,
   setIraImagingStudyCloseHandler,
   setIraImagingStudyContext,
@@ -51,8 +59,14 @@ import {
 } from "./ira-cast.ts";
 import {
   applySceneUpdateOps,
+  buildIraDisplaySceneUpdateOps,
   buildIraLiveSceneDoc,
+  IRA_SLICE_LAYOUT_BY_PLANE,
+  IRA_SLICE_ORIENTATION_BY_PLANE,
   opsFromSceneUpdateContext,
+  sliceToRASFromBasis,
+  type IraSliceFrame,
+  type IraSlicePlaneName,
 } from "./ira-live-scene-bridge.ts";
 import { mergeSegLabelmaps, segLabelmapFromNiftiSendEvent } from "./ira-nifti-seg.ts";
 import { segLabelmapFromDicomSendEvent } from "./ira-dicom-seg.ts";
@@ -284,7 +298,7 @@ const status = (msg: string, err = false) => {
 };
 const cvEl = (id: string) => document.getElementById(id) as HTMLCanvasElement;
 
-const PLANES: Plane[] = ["axial", "coronal", "sagittal"];
+const PLANES: Plane[] = ["axial", "coronal", "sagittal", "oblique"];
 const SEG_FILL = 0.5; // 2D MPR segmentation-overlay alpha at 100% (buildSegrouletteScene default)
 const CT_WL_PRESETS = [
   { name: "Soft Tissue", win: 400, lev: 40 },
@@ -410,7 +424,7 @@ async function main() {
   const preferred = (navigator as unknown as { gpu: GPU }).gpu.getPreferredCanvasFormat();
   const srgb = (preferred + "-srgb") as GPUTextureFormat;
 
-  const names = ["axial", "threeD", "coronal", "sagittal"] as const;
+  const names = ["axial", "threeD", "coronal", "sagittal", "oblique"] as const;
   const cv: Record<string, HTMLCanvasElement> = {}, cx: Record<string, GPUCanvasContext> = {};
   for (const n of names) {
     cv[n] = cvEl("c-" + n);
@@ -643,7 +657,7 @@ async function mountStudyFromSource(
   gpu: Awaited<ReturnType<typeof initDevice>>,
   preferred: GPUTextureFormat,
   srgb: GPUTextureFormat,
-  names: readonly ["axial", "threeD", "coronal", "sagittal"],
+  names: readonly ["axial", "threeD", "coronal", "sagittal", "oblique"],
   cv: Record<string, HTMLCanvasElement>,
   cx: Record<string, GPUCanvasContext>,
   signal?: AbortSignal,
@@ -947,12 +961,155 @@ async function mountStudyFromSource(
     axial: slicerDefaultOffset01("axial", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
     coronal: slicerDefaultOffset01("coronal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
     sagittal: slicerDefaultOffset01("sagittal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
+    oblique: slicerDefaultOffset01("oblique", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
   };
   let sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
   const camera = framedCamera(sc.center, sc.radius);
   const wl = { win: sc.win, lev: sc.lev };
   let ira: IraApi | null = null;
+  const vanishingStore = new VanishingStrokeStore({
+    onChange: () => {
+      if (!ira) return;
+      for (const p of PLANES) ira.drawOverlay(p);
+      ira.drawOverlay3d();
+    },
+  });
   let xhair: Crosshair4up | null = null;
+
+  // Dental Drop-Slice: textured oblique plane in the 3D view (SlicePlaneField).
+  let obliqueIn3D: SlicePlaneField | null = null;
+  let dentalLayout = false;
+  const dot3 = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross3 = (a: Vec3, b: Vec3): Vec3 => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const norm3 = (v: Vec3): Vec3 => {
+    const L = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / L, v[1] / L, v[2] / L];
+  };
+  /** Rodrigues rotation of `v` about unit axis `k` by `ang` radians. */
+  const rotAxis = (v: Vec3, k: Vec3, ang: number): Vec3 => {
+    const c = Math.cos(ang), s = Math.sin(ang);
+    const d = dot3(k, v);
+    const x = cross3(k, v);
+    return [
+      v[0] * c + x[0] * s + k[0] * d * (1 - c),
+      v[1] * c + x[1] * s + k[1] * d * (1 - c),
+      v[2] * c + x[2] * s + k[2] * d * (1 - c),
+    ];
+  };
+  /** Pitch (about u) + yaw (about v); re-orthonormalize so u×v convention matches BASES (v = u×n). */
+  const tiltBasis = (b: PlaneBasis, dPitch: number, dYaw: number): PlaneBasis => {
+    let u = b.uDir, v = b.vDir, n = b.nDir;
+    n = rotAxis(n, u, dPitch);
+    v = rotAxis(v, u, dPitch);
+    n = rotAxis(n, v, dYaw);
+    u = rotAxis(u, v, dYaw);
+    n = norm3(n);
+    u = norm3([u[0] - n[0] * dot3(u, n), u[1] - n[1] * dot3(u, n), u[2] - n[2] * dot3(u, n)]);
+    v = cross3(u, n);
+    return { uDir: u, vDir: v, nDir: n };
+  };
+  const extentAlong = (d: Vec3): { lo: number; hi: number } => {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      const c: Vec3 = [
+        i & 1 ? sc.rasHi[0] : sc.rasLo[0],
+        i & 2 ? sc.rasHi[1] : sc.rasLo[1],
+        i & 4 ? sc.rasHi[2] : sc.rasLo[2],
+      ];
+      const t = dot3(c, d);
+      if (t < lo) lo = t;
+      if (t > hi) hi = t;
+    }
+    return { lo, hi };
+  };
+  /** Current oblique plane centre in RAS (scrub position; ignores pan). */
+  const obliqueCenterRAS = (): Vec3 => {
+    const b = sc.slice.basisOf("oblique");
+    const origin: Vec3 = [
+      (sc.rasLo[0] + sc.rasHi[0]) / 2,
+      (sc.rasLo[1] + sc.rasHi[1]) / 2,
+      (sc.rasLo[2] + sc.rasHi[2]) / 2,
+    ];
+    const nx = extentAlong(b.nDir);
+    const want = nx.lo + Math.max(0, Math.min(1, off.oblique)) * (nx.hi - nx.lo);
+    const have = dot3(origin, b.nDir);
+    origin[0] += b.nDir[0] * (want - have);
+    origin[1] += b.nDir[1] * (want - have);
+    origin[2] += b.nDir[2] * (want - have);
+    return origin;
+  };
+  /** Left-drag on Oblique (Scroll tool): tilt the plane; keep the RAS centre fixed. */
+  const tiltObliqueByPx = (dxPx: number, dyPx: number) => {
+    const sens = 0.005; // rad / px
+    const center = obliqueCenterRAS();
+    const next = tiltBasis(sc.slice.basisOf("oblique"), dyPx * sens, -dxPx * sens);
+    sc.slice.setBasis("oblique", next);
+    off.oblique = sc.slice.offset01Along("oblique", center);
+    drawSlice("oblique");
+    xhair?.redraw();
+    syncLiveScene();
+  };
+  const obliquePlaneOpts = (): SlicePlaneOpts => {
+    const b = sc.slice.basisOf("oblique");
+    const origin = obliqueCenterRAS();
+    let hu = 0, hv = 0;
+    for (const sx of [sc.rasLo[0], sc.rasHi[0]]) {
+      for (const sy of [sc.rasLo[1], sc.rasHi[1]]) {
+        for (const sz of [sc.rasLo[2], sc.rasHi[2]]) {
+          const r: Vec3 = [sx - origin[0], sy - origin[1], sz - origin[2]];
+          hu = Math.max(hu, Math.abs(dot3(r, b.uDir)));
+          hv = Math.max(hv, Math.abs(dot3(r, b.vDir)));
+        }
+      }
+    }
+    const halfWin = wl.win / 2;
+    return {
+      p2t: sc.patientToTexture(),
+      origin,
+      normal: b.nDir,
+      uAxis: b.uDir,
+      vAxis: b.vDir,
+      halfExtU: hu,
+      halfExtV: hv,
+      clim: [wl.lev - halfWin, wl.lev + halfWin],
+      halfThick: Math.max(0.25, sliceIx.spacing("oblique") / 2),
+      normScale: sc.normScale(),
+    };
+  };
+  const ensureObliqueIn3D = () => {
+    const opts = obliquePlaneOpts();
+    if (!obliqueIn3D) obliqueIn3D = new SlicePlaneField(sc.volumeTexture(), opts);
+    else obliqueIn3D.setPlane(opts);
+    return obliqueIn3D;
+  };
+  const setDentalObliqueVisible = (on: boolean) => {
+    dentalLayout = on;
+    if (on) {
+      sc.setExtraFields([ensureObliqueIn3D()]);
+      draw3d();
+    } else {
+      sc.setExtraFields([]);
+      draw3d();
+    }
+  };
+  const refreshObliqueIn3D = () => {
+    if (!dentalLayout || !obliqueIn3D) return;
+    obliqueIn3D.setPlane(obliquePlaneOpts());
+    sc.scene.syncUniforms();
+    draw3d();
+  };
+  const invalidateObliqueIn3D = () => {
+    // Volume texture swapped (LOD) — drop the field so the next show recreates against the new tex.
+    if (dentalLayout) sc.setExtraFields([]);
+    obliqueIn3D = null;
+    if (dentalLayout) {
+      sc.setExtraFields([ensureObliqueIn3D()]);
+    }
+  };
 
   const drawSlice = (p: Plane) => {
     if (studyDisposed) return;
@@ -961,12 +1118,14 @@ async function mountStudyFromSource(
     sc.slice.setPlane(p, off[p]);
     sc.slice.renderToView(cx[p].getCurrentTexture().createView({ format: srgb }), cv[p].width, cv[p].height);
     updateReadout(p);
+    if (p === "oblique") refreshObliqueIn3D();
   };
   const draw3d = () => {
     if (studyDisposed) return;
     if (!cv.threeD.width) return;
     sc.scene.setCamera(camera.position, camera.focalPoint, camera.viewUp, camera.viewAngle, cv.threeD.width, cv.threeD.height);
     sc.scene.renderToView(cx.threeD.getCurrentTexture().createView({ format: srgb }), cv.threeD.width, cv.threeD.height);
+    ira?.drawOverlay3d();
     if (!labelsOn) return;
     const now = performance.now();
     const dt = (now - cardDt) / 1000;
@@ -989,6 +1148,34 @@ async function mountStudyFromSource(
   };
   let syncLiveScene = () => {
     /* assigned below once sc helpers exist */
+  };
+  const collectSliceFrames = (): IraSliceFrame[] => {
+    const slices: IraSliceFrame[] = [];
+    for (const p of PLANES) {
+      const plane = p as IraSlicePlaneName;
+      const layoutName = IRA_SLICE_LAYOUT_BY_PLANE[plane];
+      const aspect = cv[p].width / Math.max(1, cv[p].height);
+      const center = sc.slice.viewToRas(p, off[p], 0.5, 0.5, aspect) as [
+        number,
+        number,
+        number,
+      ];
+      const { fovX, fovY } = sc.slice.mirrorFrame(p, aspect);
+      const slab = sliceIx.spacing(p);
+      const b = sc.slice.basisOf(p);
+      slices.push({
+        layoutName,
+        orientation: IRA_SLICE_ORIENTATION_BY_PLANE[plane],
+        sliceToRAS: sliceToRASFromBasis(
+          [b.uDir[0], b.uDir[1], b.uDir[2]],
+          [b.vDir[0], b.vDir[1], b.vDir[2]],
+          [b.nDir[0], b.nDir[1], b.nDir[2]],
+          center,
+        ),
+        fieldOfView: [fovX, fovY, slab],
+      });
+    }
+    return slices;
   };
   let drawAll = () => {
     for (const p of PLANES) drawSlice(p);
@@ -1046,11 +1233,115 @@ async function mountStudyFromSource(
   let applyVrPresetFn: (name: string | null) => void = (name) => {
     vrPreset = name;
   };
+  /** Skip host publish while applying an inbound scene-update. */
+  let applyingRemoteSceneUpdate = false;
+  let hostScenePublishRaf = 0;
+  let hostScenePublishPending: ReturnType<typeof buildIraLiveSceneDoc> | null = null;
+  let hostScenePublishPrev: ReturnType<typeof getIraLiveScene> = null;
+
+  const scheduleHostScenePublish = (
+    doc: ReturnType<typeof buildIraLiveSceneDoc>,
+    prev: ReturnType<typeof getIraLiveScene>,
+    opts?: { full?: boolean },
+  ) => {
+    if (applyingRemoteSceneUpdate || !isIraConferenceHost()) return;
+    hostScenePublishPending = doc;
+    if (opts?.full) hostScenePublishPrev = null;
+    else if (!hostScenePublishPrev) hostScenePublishPrev = prev;
+    if (hostScenePublishRaf) return;
+    hostScenePublishRaf = requestAnimationFrame(() => {
+      hostScenePublishRaf = 0;
+      const next = hostScenePublishPending;
+      const from = hostScenePublishPrev;
+      hostScenePublishPending = null;
+      hostScenePublishPrev = null;
+      if (!next || applyingRemoteSceneUpdate || !isIraConferenceHost()) {
+        console.info("[ira] scene-update publish skip: raf gate", {
+          hasNext: Boolean(next),
+          applyingRemoteSceneUpdate,
+          host: isIraConferenceHost(),
+          role: getIraCastSessionInfo().conference?.selfRole ?? null,
+        });
+        return;
+      }
+      const ops = buildIraDisplaySceneUpdateOps(next, from);
+      if (!ops.length) {
+        console.info("[ira] scene-update publish skip: empty ops diff");
+        return;
+      }
+      console.info(
+        "[ira] scene-update publishing ops=",
+        ops.length,
+        ops.map((o) => `${o.id}${(o as { path?: string }).path || ""}`),
+      );
+      void publishIraSceneUpdate(ops);
+    });
+  };
 
   syncLiveScene = () => {
     if (studyDisposed) return;
-    setIraLiveScene(
-      buildIraLiveSceneDoc({
+    const prev = getIraLiveScene();
+    const doc = buildIraLiveSceneDoc({
+      base: prev,
+      dims: sc.dims,
+      ijkToRAS: sc.ijkToRAS,
+      modality: ct.modality,
+      volumeName: source.sd || ct.modality || "Volume",
+      volumeOpacity: sc.volumeOpacity(),
+      volumeShift: sc.volumeShift(),
+      volumePreset: vrPreset,
+      cropEnabled: roiEnabled,
+      roiVisible: roiVisible,
+      segments: sc.segments.map((s) => ({
+        num: s.num,
+        name: s.name,
+        color: s.color,
+        visible: sc.isSegmentVisible(s.num),
+        opacity: sc.segmentOpacity(s.num),
+      })),
+      labelsVisible: labelsOn,
+      opacity: sc.segOpacity(),
+      hasSeg: sc.hasSeg,
+      camera: {
+        position: [camera.position[0], camera.position[1], camera.position[2]],
+        focalPoint: [camera.focalPoint[0], camera.focalPoint[1], camera.focalPoint[2]],
+        viewUp: [camera.viewUp[0], camera.viewUp[1], camera.viewUp[2]],
+        viewAngle: camera.viewAngle,
+      },
+      slices: collectSliceFrames(),
+    });
+    setIraLiveScene(doc);
+    scheduleHostScenePublish(doc, prev);
+  };
+  syncLiveScene();
+  if (seg) setIraSegCatalog(buildSegCatalog(seg, sc.ijkToRAS));
+  else setIraSegCatalog(EMPTY_SEG_CATALOG);
+
+  setIraConferenceHostHandler(() => {
+    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
+    // Full display snapshot so followers catch up when host starts.
+    syncLiveScene();
+    const doc = getIraLiveScene();
+    if (doc) scheduleHostScenePublish(doc, null, { full: true });
+  });
+  // Study loaded while already hosting (conference created earlier).
+  if (isIraConferenceHost()) {
+    const doc = getIraLiveScene();
+    if (doc) scheduleHostScenePublish(doc, null, { full: true });
+  }
+
+  setIraSceneUpdateHandler((context) => {
+    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
+    const allOps = opsFromSceneUpdateContext(context);
+    const { vanishing, rest } = partitionVanishingOps(allOps);
+    if (vanishing.length) {
+      vanishingStore.applyOps(vanishing);
+    }
+    if (!rest.length) return;
+    applyingRemoteSceneUpdate = true;
+    try {
+      // Refresh from live sc so patch targets exist even if STATUS scene was volume-only.
+      const base = buildIraLiveSceneDoc({
         base: getIraLiveScene(),
         dims: sc.dims,
         ijkToRAS: sc.ijkToRAS,
@@ -1069,80 +1360,77 @@ async function mountStudyFromSource(
           opacity: sc.segmentOpacity(s.num),
         })),
         labelsVisible: labelsOn,
-        hasSeg: sc.hasSeg,
-      }),
-    );
-  };
-  syncLiveScene();
-  if (seg) setIraSegCatalog(buildSegCatalog(seg, sc.ijkToRAS));
-  else setIraSegCatalog(EMPTY_SEG_CATALOG);
-
-  setIraSceneUpdateHandler((context) => {
-    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
-    const ops = opsFromSceneUpdateContext(context);
-    if (!ops.length) return;
-    // Refresh from live sc so patch targets exist even if STATUS scene was volume-only.
-    const base = buildIraLiveSceneDoc({
-      base: getIraLiveScene(),
-      dims: sc.dims,
-      ijkToRAS: sc.ijkToRAS,
-      modality: ct.modality,
-      volumeName: source.sd || ct.modality || "Volume",
-      volumeOpacity: sc.volumeOpacity(),
-      volumeShift: sc.volumeShift(),
-      volumePreset: vrPreset,
-      cropEnabled: roiEnabled,
-      roiVisible: roiVisible,
-      segments: sc.segments.map((s) => ({
-        num: s.num,
-        name: s.name,
-        color: s.color,
-        visible: sc.isSegmentVisible(s.num),
-        opacity: sc.segmentOpacity(s.num),
-      })),
-      labelsVisible: labelsOn,
-      hasSeg: sc.hasSeg || sc.segments.length > 0,
-    });
-    const { doc, result } = applySceneUpdateOps(base, ops);
-    setIraLiveScene(doc);
-    if (typeof result.labelsVisible === "boolean") {
-      labelsOn = result.labelsVisible;
-    }
-    for (const [num, op] of result.segmentOpacity) {
-      sc.setSegmentOpacity(num, op);
-    }
-    for (const [num, visible] of result.segmentVisibility) {
-      sc.setSegmentVisible(num, visible);
-    }
-    if (typeof result.opacity === "number" && Number.isFinite(result.opacity)) {
-      sc.setSegOpacity(result.opacity);
-      sc.slice.setOverlayOpacity(result.opacity * SEG_FILL);
-    }
-    if (typeof result.volumeOpacity === "number" && Number.isFinite(result.volumeOpacity)) {
-      sc.setVolumeOpacity(result.volumeOpacity);
-    }
-    if (typeof result.volumeShift === "number" && Number.isFinite(result.volumeShift)) {
-      vrShift = result.volumeShift;
-      sc.setVolumeShift(result.volumeShift);
-    }
-    if (typeof result.volumePreset === "string") {
-      applyVrPresetFn(result.volumePreset || null);
-    }
-    if (typeof result.cropEnabled === "boolean") {
-      roiEnabled = result.cropEnabled;
-      if (result.cropEnabled && roiFirstEnable) {
-        roiVisible = true;
-        roiFirstEnable = false;
+        opacity: sc.segOpacity(),
+        hasSeg: sc.hasSeg || sc.segments.length > 0,
+        camera: {
+          position: [camera.position[0], camera.position[1], camera.position[2]],
+          focalPoint: [camera.focalPoint[0], camera.focalPoint[1], camera.focalPoint[2]],
+          viewUp: [camera.viewUp[0], camera.viewUp[1], camera.viewUp[2]],
+          viewAngle: camera.viewAngle,
+        },
+        slices: collectSliceFrames(),
+      });
+      const { doc, result } = applySceneUpdateOps(base, rest);
+      setIraLiveScene(doc);
+      if (typeof result.labelsVisible === "boolean") {
+        labelsOn = result.labelsVisible;
       }
-      sc.setRoiEnabled(roiEnabled);
-      sc.setRoiVisible(roiVisible);
+      for (const [num, op] of result.segmentOpacity) {
+        sc.setSegmentOpacity(num, op);
+      }
+      for (const [num, visible] of result.segmentVisibility) {
+        sc.setSegmentVisible(num, visible);
+      }
+      if (typeof result.opacity === "number" && Number.isFinite(result.opacity)) {
+        sc.setSegOpacity(result.opacity);
+        sc.slice.setOverlayOpacity(result.opacity * SEG_FILL);
+      }
+      if (typeof result.volumeOpacity === "number" && Number.isFinite(result.volumeOpacity)) {
+        sc.setVolumeOpacity(result.volumeOpacity);
+      }
+      if (typeof result.volumeShift === "number" && Number.isFinite(result.volumeShift)) {
+        vrShift = result.volumeShift;
+        sc.setVolumeShift(result.volumeShift);
+      }
+      if (typeof result.volumePreset === "string") {
+        applyVrPresetFn(result.volumePreset || null);
+      }
+      if (typeof result.cropEnabled === "boolean") {
+        roiEnabled = result.cropEnabled;
+        if (result.cropEnabled && roiFirstEnable) {
+          roiVisible = true;
+          roiFirstEnable = false;
+        }
+        sc.setRoiEnabled(roiEnabled);
+        sc.setRoiVisible(roiVisible);
+      }
+      if (typeof result.roiVisible === "boolean") {
+        roiVisible = result.roiVisible;
+        sc.setRoiVisible(roiVisible);
+      }
+      if (result.camera) {
+        camera.position = [...result.camera.position];
+        camera.focalPoint = [...result.camera.focalPoint];
+        camera.viewUp = [...result.camera.viewUp];
+        camera.viewAngle = result.camera.viewAngle;
+      }
+      for (const intent of result.slices) {
+        const p = intent.plane;
+        if (p === "oblique") {
+          sc.slice.setBasis("oblique", intent.basis);
+        }
+        off[p] = sc.slice.offset01Along(p, intent.centerRAS);
+        sc.slice.setPlane(p, off[p]);
+        const fov = intent.fieldOfView;
+        if (fov && fov[0] > 0 && fov[1] > 0) {
+          sc.slice.setMirrorFrame(p, intent.centerRAS, fov[0], fov[1]);
+        }
+      }
+      drawAll();
+      syncLiveScene();
+    } finally {
+      applyingRemoteSceneUpdate = false;
     }
-    if (typeof result.roiVisible === "boolean") {
-      roiVisible = result.roiVisible;
-      sc.setRoiVisible(roiVisible);
-    }
-    drawAll();
-    syncLiveScene();
   });
 
   const refreshSegChrome = (labmap: SegLabelmap) => {
@@ -1249,7 +1537,9 @@ async function mountStudyFromSource(
       off.axial = slicerDefaultOffset01("axial", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
       off.coronal = slicerDefaultOffset01("coronal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
       off.sagittal = slicerDefaultOffset01("sagittal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
+      off.oblique = slicerDefaultOffset01("oblique", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
       sampleRange();
+      invalidateObliqueIn3D();
       drawAll();
     };
     sceneStream = {
@@ -1293,10 +1583,14 @@ async function mountStudyFromSource(
       M[8] * ijk[0] + M[9] * ijk[1] + M[10] * ijk[2] + M[11],
     ];
     for (const p of PLANES) {
-      const axis = p === "axial" ? 2 : p === "coronal" ? 1 : 0;
-      const span = sc.rasHi[axis] - sc.rasLo[axis];
-      off[p] = span === 0 ? 0.5 : (ras[axis] - sc.rasLo[axis]) / span;
-      off[p] = Math.max(0, Math.min(1, off[p]));
+      if (p === "oblique") {
+        off[p] = sc.slice.offset01Along("oblique", ras as Vec3);
+      } else {
+        const axis = p === "axial" ? 2 : p === "coronal" ? 1 : 0;
+        const span = sc.rasHi[axis] - sc.rasLo[axis];
+        off[p] = span === 0 ? 0.5 : (ras[axis] - sc.rasLo[axis]) / span;
+        off[p] = Math.max(0, Math.min(1, off[p]));
+      }
     }
     drawAll();
   };
@@ -1367,6 +1661,7 @@ async function mountStudyFromSource(
     wl.lev = lev;
     sc.slice.setWindowLevel(win, lev);
     for (const p of PLANES) drawSlice(p);
+    refreshObliqueIn3D();
     xhair?.redraw();
     syncWl();
     updateAnnWL(); // live W/L in the corner annotation
@@ -1388,13 +1683,18 @@ async function mountStudyFromSource(
   });
   syncWl();
 
-  const nAxisOf: Record<Plane, 0 | 1 | 2> = { axial: 2, coronal: 1, sagittal: 0 };
+  const nAxisOf: Record<Exclude<Plane, "oblique">, 0 | 1 | 2> = { axial: 2, coronal: 1, sagittal: 0 };
   const jumpAll = (ras: Vec3) => {
     for (const p of PLANES) {
-      const a = nAxisOf[p];
-      off[p] = Math.max(0, Math.min(1, (ras[a] - sc.rasLo[a]) / (sc.rasHi[a] - sc.rasLo[a])));
+      if (p === "oblique") {
+        off[p] = sc.slice.offset01Along("oblique", ras);
+      } else {
+        const a = nAxisOf[p];
+        off[p] = Math.max(0, Math.min(1, (ras[a] - sc.rasLo[a]) / (sc.rasHi[a] - sc.rasLo[a])));
+      }
     }
     drawAll();
+    syncLiveScene();
   };
 
   // The IHE Integrated Reporting Applications reader chrome (shared demos/ira/ira.ts).
@@ -1431,8 +1731,13 @@ async function mountStudyFromSource(
       if (p === "threeD") draw3d();
       else drawSlice(p);
       xhair?.redraw();
+      syncLiveScene();
     },
-    redrawAll: drawAll,
+    redrawAll: () => {
+      drawAll();
+      syncLiveScene();
+    },
+    onLayoutChange: (l: IraLayout) => setDentalObliqueVisible(l === "dental"),
     readViewportRgba: async (plane) => {
       const canvas = cv[plane];
       const w = canvas?.width || 0;
@@ -1470,7 +1775,22 @@ async function mountStudyFromSource(
     resetViews: () => sliceControls.forEach((c) => c.resetView()),
     close: () => status("This is the SlicerLive Basic Image Review demo — reload to restart."),
     jumpAll,
-    modality: ct.modality,
+    modality: ct.modality || "",
+    vanishingStore,
+    onVanishingStroke: (op) => {
+      void publishIraSceneUpdate([op as Record<string, unknown>]);
+    },
+    vanishingAuthor: () => {
+      const info = getIraCastSessionInfo();
+      return info.userName || info.subscriberName || undefined;
+    },
+    vanishing3d: {
+      canvas: () => cv.threeD,
+      pick: (u, v) => sc.scene.pick(u, v),
+      worldToDisplay: (ras, w, h) => camera.worldToDisplay(ras, w, h),
+      displayToWorldAtDepth: (x, y, depth, w, h) =>
+        camera.displayToWorldAtDepth(x, y, depth, w, h) as Vec3,
+    },
     extraTools: [
       {
         id: "idc-share",
@@ -1535,6 +1855,49 @@ async function mountStudyFromSource(
 
   for (const p of PLANES) {
     const hooks = ira.hooks(p);
+    // Oblique + Scroll tool: left-drag tilts the plane (wheel still scrolls). Other tools unchanged.
+    let obliqueTilt: { u: number; v: number; w: number; h: number } | null = null;
+    const obliqueHooks = p === "oblique"
+      ? {
+          onLeftGrab: (u: number, v: number, w: number, h: number) => {
+            if (hooks.onLeftGrab(u, v, w, h)) return true;
+            if (ira!.leftMode() !== "scroll") return false;
+            obliqueTilt = { u, v, w, h };
+            cv.oblique.style.cursor = "move";
+            return true;
+          },
+          onLeftDrag: (u: number, v: number, w: number, h: number) => {
+            if (obliqueTilt) {
+              const dx = (u - obliqueTilt.u) * obliqueTilt.w;
+              const dy = (v - obliqueTilt.v) * obliqueTilt.h;
+              obliqueTilt = { u, v, w, h };
+              tiltObliqueByPx(dx, dy);
+              return;
+            }
+            hooks.onLeftDrag?.(u, v, w, h);
+          },
+          onLeftDrop: (movedPx: number) => {
+            if (obliqueTilt) {
+              obliqueTilt = null;
+              cv.oblique.style.cursor = "";
+              return;
+            }
+            hooks.onLeftDrop?.(movedPx);
+          },
+          onDoubleClick: () => {
+            viewGrid.toggleMax(p);
+            return true;
+          },
+        }
+      : {
+          onLeftGrab: hooks.onLeftGrab,
+          onLeftDrag: hooks.onLeftDrag,
+          onLeftDrop: hooks.onLeftDrop,
+          onDoubleClick: () => {
+            viewGrid.toggleMax(p);
+            return true;
+          },
+        };
     sliceControls.push(attachSliceControls(cv[p], {
       orient: p,
       getSlice: () => sc.slice,
@@ -1542,6 +1905,7 @@ async function mountStudyFromSource(
       redraw: () => {
         drawSlice(p);
         xhair?.redraw();
+        syncLiveScene();
       },
       wl: {
         enabled: () => ira!.tool() === "wl",
@@ -1551,16 +1915,16 @@ async function mountStudyFromSource(
         reset: () => setWL(sc.win, sc.lev),
       },
       leftMode: () => ira!.leftMode(),
-      hooks: {
-        onLeftGrab: hooks.onLeftGrab,
-        onDoubleClick: () => {
-          viewGrid.toggleMax(p);
-          return true;
-        },
-      },
+      hooks: obliqueHooks,
     }));
   }
-  attachCameraControls(cv.threeD, camera, { onChange: () => { draw3d(); xhair?.redraw(); } });
+  attachCameraControls(cv.threeD, camera, {
+    onChange: () => {
+      draw3d();
+      xhair?.redraw();
+      syncLiveScene();
+    },
+  });
 
   // 3D ROI-crop widget: grab a face/corner/centre handle to resize/move the crop box; the
   // cursor changes over a handle while the box is visible. Capture-phase, so grabbing a
@@ -1590,9 +1954,17 @@ async function mountStudyFromSource(
     },
     onChange: () => draw3d(),
   });
+  // After ROI widget so handle grabs (preventDefault) beat Marker ink.
+  ira.attachVanishing3dInput();
 
   xhair = mountCrosshair({
-    cells: { axial: cv.axial, coronal: cv.coronal, sagittal: cv.sagittal, threeD: cv.threeD },
+    cells: {
+      axial: cv.axial,
+      coronal: cv.coronal,
+      sagittal: cv.sagittal,
+      threeD: cv.threeD,
+      oblique: cv.oblique,
+    },
     getScene: () => sc.scene,
     getSlice: () => sc.slice,
     getCamera: () => camera,
@@ -1712,6 +2084,7 @@ async function mountStudyFromSource(
       setOpacity: (o) => {
         sc.setSegOpacity(o); // 3D surface global opacity
         sc.slice.setOverlayOpacity(o * SEG_FILL); // AND the 2D MPR overlay (fill/outline)
+        syncLiveScene();
         drawAll();
       },
       disabled: () => !sc.hasSeg,
@@ -1751,6 +2124,7 @@ async function mountStudyFromSource(
         }
         sc.setRoiEnabled(roiEnabled);
         sc.setRoiVisible(roiVisible);
+        syncLiveScene();
         draw3d();
         xhair?.redraw();
       },
@@ -1762,6 +2136,7 @@ async function mountStudyFromSource(
       set: (on) => {
         roiVisible = on;
         sc.setRoiVisible(on);
+        syncLiveScene();
         draw3d();
         xhair?.redraw();
       },
@@ -1802,6 +2177,7 @@ async function mountStudyFromSource(
       return {
         dispose: () => {
           studyDisposed = true;
+          vanishingStore.clear();
           setIraSegCatalog(EMPTY_SEG_CATALOG);
           labelsOn = false;
           try {
@@ -1848,6 +2224,14 @@ async function mountStudyFromSource(
   return {
     dispose: () => {
       studyDisposed = true;
+      vanishingStore.clear();
+      dentalLayout = false;
+      obliqueIn3D = null;
+      try {
+        sc.setExtraFields([]);
+      } catch {
+        /* ignore */
+      }
       if (thisCastMountId === castNiftiMountId) {
         applyCastNiftiSeg = null;
         applyCastDicomSeg = null;
@@ -1855,6 +2239,7 @@ async function mountStudyFromSource(
       setIraSegCatalog(EMPTY_SEG_CATALOG);
       labelsOn = false;
       setIraSceneUpdateHandler(null);
+      setIraConferenceHostHandler(null);
       setIraPngFullSizeCaptureHandler(null);
       globalThis.removeEventListener("resize", resize);
       for (const ro of resizeObservers) ro.disconnect();

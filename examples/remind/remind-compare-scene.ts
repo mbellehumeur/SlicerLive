@@ -167,7 +167,7 @@ export function basisFromNormal(nIn: Vec3): PlaneBasis {
 }
 
 /** The three planes of a volume's own grid: normals along its k, j and i axes. */
-export function nativeBases(ijkToRAS: number[]): Record<Orientation, PlaneBasis> {
+export function nativeBases(ijkToRAS: number[]): Record<"axial" | "coronal" | "sagittal", PlaneBasis> {
   const col = (c: number): Vec3 => [ijkToRAS[c], ijkToRAS[4 + c], ijkToRAS[8 + c]];
   return {
     axial: basisFromNormal(col(2)),     // through the acquisition stack — the stored image plane
@@ -447,7 +447,7 @@ export class RemindScene {
     for (const r of this.readyRows()) r.slice!.setMirrorFrame(orient, centerRAS, fovMm, fovMm);
   }
 
-  private frameBases: Record<Orientation, PlaneBasis> | null = null;
+  private frameBases: Record<"axial" | "coronal" | "sagittal", PlaneBasis> | null = null;
   private frameKey: string | null = null;
   /** Reslice EVERY row along the axes of one volume (null = anatomical patient planes).
    *  The same RAS basis goes to every row, so the rows stay registered with each other. */
@@ -458,9 +458,12 @@ export class RemindScene {
     for (const r of this.readyRows()) this.applyBasis(r);
   }
   frameVolume() { return this.frameKey; }
-  frameBasis(o: Orientation): PlaneBasis | null { return this.frameBases?.[o] ?? null; }
+  frameBasis(o: Orientation): PlaneBasis | null {
+    if (o === "oblique") return null;
+    return this.frameBases?.[o] ?? null;
+  }
   private applyBasis(r: Row) {
-    for (const o of ["axial", "coronal", "sagittal"] as Orientation[]) {
+    for (const o of ["axial", "coronal", "sagittal"] as const) {
       r.slice!.setBasis(o, this.frameBases?.[o] ?? null);
     }
   }

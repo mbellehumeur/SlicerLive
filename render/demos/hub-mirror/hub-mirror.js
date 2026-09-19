@@ -9832,8 +9832,8 @@ var qr = "lung";
 var zr = "LUNGSCREENING";
 var Hr = "Lung Screening";
 var Gr = "Toronto, Canada";
-var Vr = "CT lung screening (dicom-send / nifti-send). Returns a screening result line.";
-var Wr = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/lung_screening.py";
+var Vr = "CT lung screening (dicom-send / nifti-send). Returns a 2048-D vector.";
+var Wr = "https://github.com/rphellan/slicerW45";
 var Jr = "dicom-send";
 var Kr = {
   id: qr,

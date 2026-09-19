@@ -10,6 +10,96 @@ import type { IraLiveSceneDoc } from "./ira-cast.ts";
 
 export const IRA_VOL_NODE_ID = "vol1";
 export const IRA_SEG_NODE_ID = "seg1";
+export const IRA_CAM_NODE_ID = "cam1";
+
+/** Slicer layoutName ↔ IRA MPR plane (Red/Yellow/Green + Oblique). */
+export type IraSliceLayoutName = "Red" | "Yellow" | "Green" | "Oblique";
+export type IraSlicePlaneName = "axial" | "sagittal" | "coronal" | "oblique";
+
+export const IRA_SLICE_LAYOUT_BY_PLANE: Record<
+  IraSlicePlaneName,
+  IraSliceLayoutName
+> = {
+  axial: "Red",
+  sagittal: "Yellow",
+  coronal: "Green",
+  oblique: "Oblique",
+};
+
+export const IRA_SLICE_PLANE_BY_LAYOUT: Record<
+  IraSliceLayoutName,
+  IraSlicePlaneName
+> = {
+  Red: "axial",
+  Yellow: "sagittal",
+  Green: "coronal",
+  Oblique: "oblique",
+};
+
+export const IRA_SLICE_ORIENTATION_BY_PLANE: Record<IraSlicePlaneName, string> = {
+  axial: "Axial",
+  sagittal: "Sagittal",
+  coronal: "Coronal",
+  oblique: "Oblique",
+};
+
+export function iraSliceNodeId(layout: IraSliceLayoutName): string {
+  return `iraSlice-${layout}`;
+}
+
+export const IRA_SLICE_NODE_IDS = (
+  Object.keys(IRA_SLICE_PLANE_BY_LAYOUT) as IraSliceLayoutName[]
+).map(iraSliceNodeId);
+
+/** LiveScene-compatible MPR slice frame for STATUS / scene-update. */
+export type IraSliceFrame = {
+  layoutName: IraSliceLayoutName;
+  orientation: string;
+  /** Row-major 4×4: columns = u, v, n; last column = plane centre RAS. */
+  sliceToRAS: number[];
+  /** [fovX, fovY, slab] mm. */
+  fieldOfView: [number, number, number];
+};
+
+/** Follower intent extracted from a put/patch slice view node. */
+export type IraSliceApplyIntent = {
+  layoutName: IraSliceLayoutName;
+  plane: IraSlicePlaneName;
+  centerRAS: [number, number, number];
+  fieldOfView?: [number, number, number];
+  basis: {
+    uDir: [number, number, number];
+    vDir: [number, number, number];
+    nDir: [number, number, number];
+  };
+};
+
+/** Build sliceToRAS (row-major) from basis columns + centre. */
+export function sliceToRASFromBasis(
+  uDir: [number, number, number],
+  vDir: [number, number, number],
+  nDir: [number, number, number],
+  center: [number, number, number],
+): number[] {
+  return [
+    uDir[0],
+    vDir[0],
+    nDir[0],
+    center[0],
+    uDir[1],
+    vDir[1],
+    nDir[1],
+    center[1],
+    uDir[2],
+    vDir[2],
+    nDir[2],
+    center[2],
+    0,
+    0,
+    0,
+    1,
+  ];
+}
 
 export type IraSegDisplaySegment = {
   num: number;
@@ -17,6 +107,14 @@ export type IraSegDisplaySegment = {
   color: [number, number, number];
   visible: boolean;
   opacity?: number;
+};
+
+/** 3D camera pose (RAS / world), matching mrson camera node fields. */
+export type IraCameraPose = {
+  position: [number, number, number];
+  focalPoint: [number, number, number];
+  viewUp: [number, number, number];
+  viewAngle: number;
 };
 
 export type IraSceneSyncInput = {
@@ -38,7 +136,13 @@ export type IraSceneSyncInput = {
   roiVisible?: boolean;
   segments: IraSegDisplaySegment[];
   labelsVisible: boolean;
+  /** Global segmentation opacity 0..1. */
+  opacity?: number;
   hasSeg: boolean;
+  /** Current 3D camera pose. */
+  camera?: IraCameraPose | null;
+  /** MPR slice frames (Red/Yellow/Green/Oblique LiveScene view nodes). */
+  slices?: IraSliceFrame[] | null;
 };
 
 type SegEntry = {
@@ -127,6 +231,12 @@ export function buildIraLiveSceneDoc(input: IraSceneSyncInput): IraLiveSceneDoc 
       };
     });
     const prev = nodes[IRA_SEG_NODE_ID] as Record<string, unknown> | undefined;
+    const segOpacity =
+      typeof input.opacity === "number" && Number.isFinite(input.opacity)
+        ? Math.max(0, Math.min(1, input.opacity))
+        : typeof prev?.opacity === "number"
+          ? Number(prev.opacity)
+          : 1;
     nodes[IRA_SEG_NODE_ID] = {
       ...(prev || {}),
       type: "segmentation",
@@ -137,7 +247,7 @@ export function buildIraLiveSceneDoc(input: IraSceneSyncInput): IraLiveSceneDoc 
       ijkToRAS: [...input.ijkToRAS],
       refs: { source: [IRA_VOL_NODE_ID] },
       visible: true,
-      opacity: typeof prev?.opacity === "number" ? prev.opacity : 1,
+      opacity: segOpacity,
       labelsVisible: input.labelsVisible,
       fill2D: (prev?.fill2D as object) || { visible: true, opacity: 0.5 },
       outline2D: (prev?.outline2D as object) || { visible: true, opacity: 1 },
@@ -145,6 +255,45 @@ export function buildIraLiveSceneDoc(input: IraSceneSyncInput): IraLiveSceneDoc 
     } as MrsonNode;
   } else {
     delete nodes[IRA_SEG_NODE_ID];
+  }
+
+  if (input.camera) {
+    const prevCam = nodes[IRA_CAM_NODE_ID] as Record<string, unknown> | undefined;
+    const c = input.camera;
+    nodes[IRA_CAM_NODE_ID] = {
+      ...(prevCam || {}),
+      type: "camera",
+      id: IRA_CAM_NODE_ID,
+      name: String(prevCam?.name || "Camera"),
+      position: [...c.position],
+      focalPoint: [...c.focalPoint],
+      viewUp: [...c.viewUp],
+      viewAngle: Number.isFinite(c.viewAngle) ? c.viewAngle : 30,
+    } as MrsonNode;
+  }
+
+  if (Array.isArray(input.slices)) {
+    for (const frame of input.slices) {
+      if (!frame?.layoutName || !Array.isArray(frame.sliceToRAS)) continue;
+      const id = iraSliceNodeId(frame.layoutName);
+      const prevSlice = nodes[id] as Record<string, unknown> | undefined;
+      const fov = frame.fieldOfView;
+      nodes[id] = {
+        ...(prevSlice || {}),
+        type: "view",
+        kind: "slice",
+        id,
+        name: frame.layoutName,
+        layoutName: frame.layoutName,
+        orientation: String(frame.orientation || "").trim() || frame.layoutName,
+        sliceToRAS: [...frame.sliceToRAS],
+        fieldOfView: [
+          Number(fov?.[0]) || 0,
+          Number(fov?.[1]) || 0,
+          Number(fov?.[2]) || 0,
+        ],
+      } as MrsonNode;
+    }
   }
 
   return {
@@ -171,9 +320,103 @@ export type SceneUpdateApplyResult = {
   cropEnabled?: boolean;
   /** Crop ROI box visibility when patched on a volume node. */
   roiVisible?: boolean;
+  /** 3D camera pose when a camera node was patched / put. */
+  camera?: IraCameraPose;
+  /** MPR slice frames when view/slice nodes were put / patched. */
+  slices: IraSliceApplyIntent[];
   /** True when the scene document nodes were mutated. */
   changed: boolean;
 };
+
+function vec3From(value: unknown): [number, number, number] | null {
+  if (!Array.isArray(value) || value.length < 3) return null;
+  const a = Number(value[0]);
+  const b = Number(value[1]);
+  const c = Number(value[2]);
+  if (![a, b, c].every(Number.isFinite)) return null;
+  return [a, b, c];
+}
+
+function norm3(v: [number, number, number]): [number, number, number] {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+}
+
+function layoutNameFromSliceNode(
+  node: Record<string, unknown>,
+): IraSliceLayoutName | null {
+  const raw = String(node.layoutName || node.name || "").trim();
+  if (raw === "Red" || raw === "Yellow" || raw === "Green" || raw === "Oblique") {
+    return raw;
+  }
+  const id = String(node.id || "");
+  if (id.endsWith("-Red")) return "Red";
+  if (id.endsWith("-Yellow")) return "Yellow";
+  if (id.endsWith("-Green")) return "Green";
+  if (id.endsWith("-Oblique")) return "Oblique";
+  const orient = String(node.orientation || "").trim().toLowerCase();
+  if (orient === "axial") return "Red";
+  if (orient === "sagittal") return "Yellow";
+  if (orient === "coronal") return "Green";
+  if (orient === "oblique") return "Oblique";
+  return null;
+}
+
+/** Parse a LiveScene view/slice node into an IRA apply intent. */
+export function sliceIntentFromNode(
+  node: Record<string, unknown> | undefined,
+): IraSliceApplyIntent | null {
+  if (!node || node.type !== "view" || node.kind !== "slice") return null;
+  const layoutName = layoutNameFromSliceNode(node);
+  if (!layoutName) return null;
+  const m = node.sliceToRAS;
+  if (!Array.isArray(m) || m.length < 16) return null;
+  const nums = m.map((x) => Number(x));
+  if (!nums.every(Number.isFinite)) return null;
+  const col = (c: number): [number, number, number] => [
+    nums[c]!,
+    nums[4 + c]!,
+    nums[8 + c]!,
+  ];
+  const centerRAS = col(3);
+  const uDir = norm3(col(0));
+  const vDir = norm3(col(1));
+  const nDir = norm3(col(2));
+  const fovRaw = node.fieldOfView;
+  let fieldOfView: [number, number, number] | undefined;
+  if (Array.isArray(fovRaw) && fovRaw.length >= 2) {
+    const fx = Number(fovRaw[0]);
+    const fy = Number(fovRaw[1]);
+    const fz = Number(fovRaw[2]);
+    if (Number.isFinite(fx) && Number.isFinite(fy) && fx > 0 && fy > 0) {
+      fieldOfView = [fx, fy, Number.isFinite(fz) ? fz : 0];
+    }
+  }
+  return {
+    layoutName,
+    plane: IRA_SLICE_PLANE_BY_LAYOUT[layoutName],
+    centerRAS,
+    fieldOfView,
+    basis: { uDir, vDir, nDir },
+  };
+}
+
+function cameraPoseFromNode(
+  node: Record<string, unknown> | undefined,
+): IraCameraPose | undefined {
+  if (!node || node.type !== "camera") return undefined;
+  const position = vec3From(node.position);
+  const focalPoint = vec3From(node.focalPoint);
+  const viewUp = vec3From(node.viewUp);
+  if (!position || !focalPoint || !viewUp) return undefined;
+  const viewAngle = Number(node.viewAngle);
+  return {
+    position,
+    focalPoint,
+    viewUp,
+    viewAngle: Number.isFinite(viewAngle) ? viewAngle : 30,
+  };
+}
 
 /** Apply mrson ops from a scene-update resource onto a scene doc; collect visibility intents. */
 export function applySceneUpdateOps(
@@ -192,6 +435,8 @@ export function applySceneUpdateOps(
   let volumePreset: string | undefined;
   let cropEnabled: boolean | undefined;
   let roiVisible: boolean | undefined;
+  let camera: IraCameraPose | undefined;
+  const slicesByLayout = new Map<IraSliceLayoutName, IraSliceApplyIntent>();
 
   for (const op of ops) {
     if (!op || typeof op !== "object" || !op.op || !op.id) continue;
@@ -200,6 +445,18 @@ export function applySceneUpdateOps(
     if (res.changed) changed = true;
     const after = map.get(op.id);
     if (!after) continue;
+
+    if (after.type === "camera") {
+      const pose = cameraPoseFromNode(after as Record<string, unknown>);
+      if (pose) camera = pose;
+      continue;
+    }
+
+    if (after.type === "view" && (after as { kind?: string }).kind === "slice") {
+      const intent = sliceIntentFromNode(after as Record<string, unknown>);
+      if (intent) slicesByLayout.set(intent.layoutName, intent);
+      continue;
+    }
 
     if (after.type === "volume") {
       const volOp = Number((after as { opacity?: unknown }).opacity);
@@ -292,6 +549,8 @@ export function applySceneUpdateOps(
       volumePreset,
       cropEnabled,
       roiVisible,
+      camera,
+      slices: [...slicesByLayout.values()],
       changed,
     },
   };
@@ -375,4 +634,186 @@ export function primarySegNodeId(doc: IraLiveSceneDoc | null | undefined): strin
     }
   }
   return null;
+}
+
+/** Find the primary volume node id in a scene doc. */
+export function primaryVolNodeId(doc: IraLiveSceneDoc | null | undefined): string | null {
+  if (!doc?.nodes || typeof doc.nodes !== "object") return null;
+  if (doc.nodes[IRA_VOL_NODE_ID]) return IRA_VOL_NODE_ID;
+  for (const [id, n] of Object.entries(doc.nodes)) {
+    if (n && typeof n === "object" && (n as { type?: string }).type === "volume") {
+      return id;
+    }
+  }
+  return null;
+}
+
+function stableJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
+function displayFieldChanged(
+  prevNode: Record<string, unknown> | undefined,
+  nextNode: Record<string, unknown> | undefined,
+  key: string,
+): boolean {
+  if (!prevNode) return nextNode != null && key in nextNode;
+  return stableJson(prevNode[key]) !== stableJson(nextNode?.[key]);
+}
+
+/**
+ * Build scene-update patch ops for display fields (seg visibility/opacity, VR, crop).
+ * When ``prev`` is provided, only emit ops for fields that changed.
+ */
+export function buildIraDisplaySceneUpdateOps(
+  doc: IraLiveSceneDoc | null | undefined,
+  prev?: IraLiveSceneDoc | null,
+): Op[] {
+  if (!doc?.nodes || typeof doc.nodes !== "object") return [];
+  const ops: Op[] = [];
+  const full = !prev?.nodes;
+
+  const segId = primarySegNodeId(doc) || IRA_SEG_NODE_ID;
+  const seg = doc.nodes[segId] as Record<string, unknown> | undefined;
+  const prevSeg = prev?.nodes?.[segId] as Record<string, unknown> | undefined;
+  if (seg && typeof seg === "object" && seg.type === "segmentation") {
+    if (full || displayFieldChanged(prevSeg, seg, "segments")) {
+      if (Array.isArray(seg.segments)) {
+        ops.push({
+          op: "patch",
+          id: segId,
+          path: "#/segments",
+          value: structuredClone(seg.segments),
+        });
+      }
+    }
+    if (full || displayFieldChanged(prevSeg, seg, "labelsVisible")) {
+      if (typeof seg.labelsVisible === "boolean") {
+        ops.push({
+          op: "patch",
+          id: segId,
+          path: "#/labelsVisible",
+          value: seg.labelsVisible,
+        });
+      }
+    }
+    if (full || displayFieldChanged(prevSeg, seg, "opacity")) {
+      const o = Number(seg.opacity);
+      if (Number.isFinite(o)) {
+        ops.push({
+          op: "patch",
+          id: segId,
+          path: "#/opacity",
+          value: Math.max(0, Math.min(1, o)),
+        });
+      }
+    }
+  }
+
+  const volId = primaryVolNodeId(doc) || IRA_VOL_NODE_ID;
+  const vol = doc.nodes[volId] as Record<string, unknown> | undefined;
+  const prevVol = prev?.nodes?.[volId] as Record<string, unknown> | undefined;
+  if (vol && typeof vol === "object" && vol.type === "volume") {
+    if (full || displayFieldChanged(prevVol, vol, "opacity")) {
+      const o = Number(vol.opacity);
+      if (Number.isFinite(o)) {
+        ops.push({
+          op: "patch",
+          id: volId,
+          path: "#/opacity",
+          value: Math.max(0, Math.min(1, o)),
+        });
+      }
+    }
+    if (full || displayFieldChanged(prevVol, vol, "shift")) {
+      const s = Number(vol.shift);
+      if (Number.isFinite(s)) {
+        ops.push({
+          op: "patch",
+          id: volId,
+          path: "#/shift",
+          value: s,
+        });
+      }
+    }
+    if (full || displayFieldChanged(prevVol, vol, "preset")) {
+      ops.push({
+        op: "patch",
+        id: volId,
+        path: "#/preset",
+        value: String(vol.preset ?? "").trim(),
+      });
+    }
+    if (full || displayFieldChanged(prevVol, vol, "cropEnabled")) {
+      if (typeof vol.cropEnabled === "boolean") {
+        ops.push({
+          op: "patch",
+          id: volId,
+          path: "#/cropEnabled",
+          value: vol.cropEnabled,
+        });
+      }
+    }
+    if (full || displayFieldChanged(prevVol, vol, "roiVisible")) {
+      if (typeof vol.roiVisible === "boolean") {
+        ops.push({
+          op: "patch",
+          id: volId,
+          path: "#/roiVisible",
+          value: vol.roiVisible,
+        });
+      }
+    }
+  }
+
+  const camId = IRA_CAM_NODE_ID;
+  const cam = doc.nodes[camId] as Record<string, unknown> | undefined;
+  const prevCam = prev?.nodes?.[camId] as Record<string, unknown> | undefined;
+  if (cam && typeof cam === "object" && cam.type === "camera") {
+    const camChanged =
+      full ||
+      !prevCam ||
+      displayFieldChanged(prevCam, cam, "position") ||
+      displayFieldChanged(prevCam, cam, "focalPoint") ||
+      displayFieldChanged(prevCam, cam, "viewUp") ||
+      displayFieldChanged(prevCam, cam, "viewAngle");
+    if (camChanged) {
+      // put so followers without an existing cam1 node still apply the pose
+      ops.push({
+        op: "put",
+        id: camId,
+        node: structuredClone(cam) as MrsonNode,
+      });
+    }
+  }
+
+  for (const layout of Object.keys(
+    IRA_SLICE_PLANE_BY_LAYOUT,
+  ) as IraSliceLayoutName[]) {
+    const id = iraSliceNodeId(layout);
+    const slice = doc.nodes[id] as Record<string, unknown> | undefined;
+    const prevSlice = prev?.nodes?.[id] as Record<string, unknown> | undefined;
+    if (!slice || typeof slice !== "object" || slice.type !== "view") continue;
+    if ((slice as { kind?: string }).kind !== "slice") continue;
+    const sliceChanged =
+      full ||
+      !prevSlice ||
+      displayFieldChanged(prevSlice, slice, "sliceToRAS") ||
+      displayFieldChanged(prevSlice, slice, "fieldOfView") ||
+      displayFieldChanged(prevSlice, slice, "orientation") ||
+      displayFieldChanged(prevSlice, slice, "layoutName");
+    if (sliceChanged) {
+      ops.push({
+        op: "put",
+        id,
+        node: structuredClone(slice) as MrsonNode,
+      });
+    }
+  }
+
+  return ops;
 }

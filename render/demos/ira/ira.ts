@@ -18,10 +18,22 @@
 
 import { drawCross } from "../crosshair.ts";
 import type { Vec3 } from "../../mat4.ts";
+import {
+  DEFAULT_VANISHING_COLOR,
+  DEFAULT_VANISHING_TTL_MS,
+  DEFAULT_VANISHING_WIDTH_PX,
+  VANISHING_PUBLISH_INTERVAL_MS,
+  buildVanishingStrokeOp,
+  newStrokeId,
+  type VanishingStrokeArgs,
+  type VanishingStrokeOp,
+  type VanishingStrokeStore,
+} from "./ira-vanishing.ts";
 
-export type Plane = "axial" | "sagittal" | "coronal";
+export type Plane = "axial" | "sagittal" | "coronal" | "oblique";
 /** Viewport selection / capture target — MPR planes plus the 3D scene. */
 export type ViewportId = Plane | "threeD";
+export type IraLayout = "single" | "twoUp" | "fourUp" | "dental";
 export type IraTool =
   | "scroll"
   | "wl"
@@ -30,13 +42,15 @@ export type IraTool =
   | "select"
   | "distance"
   | "angle"
-  | "crosshair";
+  | "crosshair"
+  | "marker";
 
 /** Slicer view colors (axial red / sagittal yellow / coronal green) for localizer lines. */
 const PLANE_COLOR: Record<Plane, string> = {
   axial: "#f05a5a",
   sagittal: "#f0d24a",
   coronal: "#5ad07a",
+  oblique: "#c9a0ff",
 };
 
 interface Measurement {
@@ -88,7 +102,9 @@ export interface IraCfg {
   strip?: StripItem[];
   /** Requested initial layout (study-mode open uses "single" for a single axial view).
    *  Overridden to "single" on phones. Defaults to "fourUp". */
-  initialLayout?: "single" | "twoUp" | "fourUp";
+  initialLayout?: IraLayout;
+  /** Fired after hanging-protocol layout changes (e.g. Dental → drop oblique in 3D). */
+  onLayoutChange?: (l: IraLayout) => void;
   /** Optional extra toolbar buttons (e.g. IDC Share / Download) — appended after Help. */
   extraTools?: { id: string; icon: string; title: string; run: () => void }[];
   /**
@@ -98,6 +114,38 @@ export interface IraCfg {
   readViewportRgba?: (
     plane: ViewportId,
   ) => Promise<{ rgba: Uint8Array; width: number; height: number } | null>;
+  /** Shared ephemeral stroke store (conference vanishing marker). */
+  vanishingStore?: VanishingStrokeStore;
+  /** Publish a vanishingStroke scene-update op (throttled draw / end). */
+  onVanishingStroke?: (op: VanishingStrokeOp) => void;
+  /** Optional author label for published strokes (conference place name). */
+  vanishingAuthor?: () => string | undefined;
+  /**
+   * Optional 3D helpers — when set, Marker can draw on the 3D cell (2D overlay + volume pick).
+   * `canvas` is the WebGPU view that receives pointer events.
+   */
+  vanishing3d?: {
+    canvas: () => HTMLCanvasElement;
+    pick: (u: number, v: number) => Promise<Vec3 | null>;
+    worldToDisplay: (
+      ras: Vec3,
+      w: number,
+      h: number,
+    ) => { x: number; y: number; depth: number };
+    displayToWorldAtDepth: (
+      x: number,
+      y: number,
+      depth: number,
+      w: number,
+      h: number,
+    ) => Vec3;
+  };
+}
+
+export interface IraSliceHooks {
+  onLeftGrab: (u: number, v: number, w: number, h: number) => boolean;
+  onLeftDrag?: (u: number, v: number, w: number, h: number) => void;
+  onLeftDrop?: (movedPx: number) => void;
 }
 
 export interface IraApi {
@@ -105,17 +153,23 @@ export interface IraApi {
   setTool(t: IraTool): void;
   measureCount(): number;
   leftMode(): "scroll" | "wl" | "zoom" | "pan";
-  hooks(p: Plane): { onLeftGrab: (u: number, v: number, w: number, h: number) => boolean };
+  hooks(p: Plane): IraSliceHooks;
   drawOverlay(p: Plane): void;
+  /** Redraw vanishing-marker (and future) ink on the 3D overlay. */
+  drawOverlay3d(): void;
+  /**
+   * Install 3D Marker pointer capture (call AFTER ROI widget controls so handles
+   * still win). Safe to call once per mount.
+   */
+  attachVanishing3dInput(): void;
   resize(): void;
   selected(): ViewportId;
-  setLayout(l: "single" | "twoUp" | "fourUp"): void;
+  setLayout(l: IraLayout): void;
   reset(): void;
   detachKeys(): void;
   /** Capture selected viewport as a full-resolution PNG (base64, no data-URL prefix). */
   capturePngFullSize(): Promise<IraPngCapture | null>;
 }
-
 export type IraPngCapture = {
   contentType: "image/png";
   data: string;
@@ -272,6 +326,11 @@ const ICONS: Record<string, string> = {
   crosshair: I(
     `<circle cx="12" cy="12" r="8"/><path d="M12 4v5M12 15v5M4 12h5M15 12h5" stroke-dasharray="3 2"/>`,
   ),
+  // Freehand vanishing marker (conference whiteboard ink)
+  marker: I(
+    `<path d="M4 20l2.5-2.5 11-11 2.5 2.5-11 11L4 20z"/><path d="M15.5 6.5l2.5 2.5"/>` +
+      `<path d="M5 19l1 1" stroke-width="2.2"/>`,
+  ),
   // Cine controls
   play: I(`<path d="M7 5l12 7-12 7z" fill="currentColor"/>`),
   stop: I(`<rect x="6" y="6" width="12" height="12" fill="currentColor"/>`),
@@ -339,9 +398,97 @@ export function mountIra(cfg: IraCfg): IraApi {
   let crossRas: Vec3 | null = null;
   const measurements: Measurement[] = [];
   let pending: Measurement | null = null; // in-progress clicks
-  let layout: "single" | "twoUp" | "fourUp" = "fourUp";
+  let layout: IraLayout = "fourUp";
 
-  // ---- overlay canvases (measurements / localizer / crosshair marks) ----------------------
+  /** In-progress freehand marker stroke (local draft before / while publishing). */
+  type MarkerDraft = {
+    strokeId: string;
+    plane: Plane | "threeD";
+    mm: number;
+    pts: Vec3[];
+    color: number[];
+    widthPx: number;
+    lastPublishAt: number;
+    /** View-space depth lock while drawing on 3D (from first pick). */
+    depth?: number;
+  };
+  let markerDraft: MarkerDraft | null = null;
+  /** True while a 3D marker gesture is in progress (may be awaiting first pick). */
+  let marker3dActive = false;
+  let marker3dPointerId: number | null = null;
+
+  const rgbaCss = (color: number[], alphaScale = 1): string => {
+    const r = Math.round(Math.max(0, Math.min(1, color[0] ?? 1)) * 255);
+    const g = Math.round(Math.max(0, Math.min(1, color[1] ?? 1)) * 255);
+    const b = Math.round(Math.max(0, Math.min(1, color[2] ?? 1)) * 255);
+    const a = Math.max(0, Math.min(1, (color[3] ?? 1) * alphaScale));
+    return `rgba(${r},${g},${b},${a})`;
+  };
+
+  const publishMarker = (phase: "draw" | "end", draft: MarkerDraft) => {
+    const args: VanishingStrokeArgs = {
+      strokeId: draft.strokeId,
+      points: draft.pts.map((p) => [p[0], p[1], p[2]]),
+      color: draft.color,
+      widthPx: draft.widthPx,
+      phase,
+      ttlMs: DEFAULT_VANISHING_TTL_MS,
+      author: cfg.vanishingAuthor?.(),
+      plane: draft.plane,
+      mm: draft.mm,
+    };
+    const op = buildVanishingStrokeOp(args);
+    cfg.vanishingStore?.applyOp(op);
+    cfg.onVanishingStroke?.(op);
+    draft.lastPublishAt = performance.now();
+  };
+
+  const strokeNearPlane = (
+    s: { plane?: string; mm?: number; points: Vec3[] },
+    p: Plane,
+  ): boolean => {
+    if (s.plane && s.plane === p && typeof s.mm === "number") {
+      return Math.abs(s.mm - cfg.offsetMm(p)) <= cfg.spacing(p) / 2 + 1e-3;
+    }
+    // Fallback: any point near this slice (RAS mm along normal for axis-aligned MPR).
+    const nAxis: Partial<Record<Plane, 0 | 1 | 2>> = {
+      sagittal: 0,
+      coronal: 1,
+      axial: 2,
+    };
+    const ax = nAxis[p];
+    if (ax === undefined) return true; // oblique: always project
+    const mm = cfg.offsetMm(p);
+    const tol = Math.max(cfg.spacing(p), 1) * 1.5;
+    return s.points.some((pt) => Math.abs(pt[ax] - mm) <= tol);
+  };
+
+  const drawStrokePoly = (
+    ctx: CanvasRenderingContext2D,
+    p: Plane,
+    points: Vec3[],
+    w: number,
+    h: number,
+    color: number[],
+    widthPx: number,
+    alpha: number,
+  ) => {
+    if (points.length < 2 || alpha <= 0) return;
+    const px = points.map((r) => toPx(p, r, w, h));
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = rgbaCss(color, 1);
+    ctx.lineWidth = widthPx;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(px[0].x, px[0].y);
+    for (let i = 1; i < px.length; i++) ctx.lineTo(px[i].x, px[i].y);
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  // ---- overlay canvases (measurements / localizer / crosshair marks / 3D ink) -------------
   const overlays = new Map<Plane, HTMLCanvasElement>();
   for (const p of cfg.planes) {
     const cell = cfg.cellOf(p);
@@ -354,11 +501,27 @@ export function mountIra(cfg: IraCfg): IraApi {
     cell.appendChild(c);
     overlays.set(p, c);
   }
+  let overlay3d: HTMLCanvasElement | null = null;
+  {
+    const cell3 = cfg.cellOf("threeD");
+    if (cell3) {
+      cell3.querySelectorAll("canvas.ira-overlay").forEach((el) => el.remove());
+      overlay3d = document.createElement("canvas");
+      overlay3d.className = "ira-overlay";
+      overlay3d.style.cssText =
+        "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3;";
+      cell3.appendChild(overlay3d);
+    }
+  }
   const resizeOverlays = () => {
     const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
     for (const [, c] of overlays) {
       c.width = Math.max(1, Math.floor(c.clientWidth * dpr));
       c.height = Math.max(1, Math.floor(c.clientHeight * dpr));
+    }
+    if (overlay3d) {
+      overlay3d.width = Math.max(1, Math.floor(overlay3d.clientWidth * dpr));
+      overlay3d.height = Math.max(1, Math.floor(overlay3d.clientHeight * dpr));
     }
   };
 
@@ -381,11 +544,11 @@ export function mountIra(cfg: IraCfg): IraApi {
 
     // Localizer lines (IRA 5.7): intersection of the OTHER planes with this one, in the
     // other plane's Slicer color. Axis-aligned MPR → each is a straight line through the
-    // two volume-corner points on the intersection.
-    if (localizerOn) {
-      const nAxis: Record<Plane, 0 | 1 | 2> = { sagittal: 0, coronal: 1, axial: 2 };
+    // two volume-corner points on the intersection. Skip oblique (tilted normal).
+    if (localizerOn && p !== "oblique") {
+      const nAxis: Record<Exclude<Plane, "oblique">, 0 | 1 | 2> = { sagittal: 0, coronal: 1, axial: 2 };
       for (const q of cfg.planes) {
-        if (q === p) continue;
+        if (q === p || q === "oblique") continue;
         const free = ([0, 1, 2] as const).find((a) => a !== nAxis[p] && a !== nAxis[q])!;
         const mk = (t: number): Vec3 => {
           const r: Vec3 = [0, 0, 0];
@@ -464,8 +627,98 @@ export function mountIra(cfg: IraCfg): IraApi {
         label(`${deg.toFixed(1)}°`, px[3].x + 8, px[3].y - 8);
       }
     }
+
+    // Vanishing freehand marker strokes (local draft + shared store).
+    const now = performance.now();
+    const storeStrokes = cfg.vanishingStore?.list() ?? [];
+    for (const s of storeStrokes) {
+      if (markerDraft && s.strokeId === markerDraft.strokeId) continue; // draft drawn below
+      if (!strokeNearPlane(s, p)) continue;
+      const alpha = cfg.vanishingStore?.alphaOf(s, now) ?? 1;
+      drawStrokePoly(ctx, p, s.points, w, h, s.color, s.widthPx, alpha);
+    }
+    if (markerDraft && markerDraft.plane === p) {
+      drawStrokePoly(
+        ctx,
+        p,
+        markerDraft.pts,
+        w,
+        h,
+        markerDraft.color,
+        markerDraft.widthPx,
+        1,
+      );
+    }
   };
-  const redrawOverlays = () => { for (const p of cfg.planes) drawOverlay(p); };
+
+  const drawStrokePoly3d = (
+    ctx: CanvasRenderingContext2D,
+    points: Vec3[],
+    w: number,
+    h: number,
+    color: number[],
+    widthPx: number,
+    alpha: number,
+  ) => {
+    const v3 = cfg.vanishing3d;
+    if (!v3 || points.length < 2 || alpha <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = rgbaCss(color, 1);
+    ctx.lineWidth = widthPx;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    let started = false;
+    for (const ras of points) {
+      const pr = v3.worldToDisplay(ras, w, h);
+      if (!(pr.depth > 0)) continue;
+      if (!started) {
+        ctx.moveTo(pr.x, pr.y);
+        started = true;
+      } else {
+        ctx.lineTo(pr.x, pr.y);
+      }
+    }
+    if (started) ctx.stroke();
+    ctx.restore();
+  };
+
+  const drawOverlay3d = () => {
+    if (!overlay3d || !cfg.vanishing3d) return;
+    const ctx = overlay3d.getContext("2d");
+    if (!ctx) return;
+    const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = overlay3d.width / dpr;
+    const h = overlay3d.height / dpr;
+    ctx.clearRect(0, 0, w, h);
+    if (!w || !h) return;
+
+    const now = performance.now();
+    const storeStrokes = cfg.vanishingStore?.list() ?? [];
+    for (const s of storeStrokes) {
+      if (markerDraft && s.strokeId === markerDraft.strokeId) continue;
+      const alpha = cfg.vanishingStore?.alphaOf(s, now) ?? 1;
+      drawStrokePoly3d(ctx, s.points, w, h, s.color, s.widthPx, alpha);
+    }
+    if (markerDraft && markerDraft.pts.length >= 2) {
+      drawStrokePoly3d(
+        ctx,
+        markerDraft.pts,
+        w,
+        h,
+        markerDraft.color,
+        markerDraft.widthPx,
+        1,
+      );
+    }
+  };
+
+  const redrawOverlays = () => {
+    for (const p of cfg.planes) drawOverlay(p);
+    drawOverlay3d();
+  };
 
   // ---- viewport selection (IRA 5.11): implicit on click, explicit via Select tool ---------
   const markSelected = () => {
@@ -555,6 +808,7 @@ export function mountIra(cfg: IraCfg): IraApi {
   for (
     const [v, label] of [
       ["fourUp", "Four-Up (MPR + 3D)"],
+      ["dental", "Dental (MPR + 3D + Oblique)"],
       ["twoUp", "2 side-by-side"],
       ["single", "Single viewport"],
       ["browser", "Browser (patient/study/series)"],
@@ -579,12 +833,17 @@ export function mountIra(cfg: IraCfg): IraApi {
     distance: "crosshair",
     angle: "crosshair",
     crosshair: "crosshair",
+    marker: "crosshair",
     select: "pointer",
     scroll: "default",
   };
   const setTool = (t: IraTool) => {
     tool = t;
     pending = null;
+    if (t !== "marker" && markerDraft) {
+      // Abandon in-progress stroke without publishing end (drop local draft).
+      markerDraft = null;
+    }
     for (
       const [id, tl] of [
         ["tool-scroll", "scroll"],
@@ -595,9 +854,12 @@ export function mountIra(cfg: IraCfg): IraApi {
         ["tool-distance", "distance"],
         ["tool-angle", "angle"],
         ["tool-crosshair", "crosshair"],
+        ["tool-marker", "marker"],
       ] as const
     ) buttons.get(id)?.classList.toggle("active", tool === tl);
     for (const p of cfg.planes) cfg.canvases[p].style.cursor = CURSORS[tool] ?? "default";
+    const c3 = cfg.vanishing3d?.canvas?.() ?? cfg.canvases["threeD"];
+    if (c3) c3.style.cursor = CURSORS[tool] ?? "default";
     cfg.onToolChange?.(tool);
     redrawOverlays();
   };
@@ -609,6 +871,12 @@ export function mountIra(cfg: IraCfg): IraApi {
   btn("tool-distance", "distance", "Distance measurement (click start, click end) — D", () => setTool("distance"));
   btn("tool-angle", "angle", "Angle measurement (two segments, four clicks — Cobb) — A", () => setTool("angle"));
   btn("tool-crosshair", "crosshair", "Cross-hair (click to localize in all viewports) — J", () => setTool("crosshair"));
+  btn(
+    "tool-marker",
+    "marker",
+    "Vanishing marker (freehand on MPR or 3D; fades after a few seconds) — B (toggle)",
+    () => setTool(tool === "marker" ? "scroll" : "marker"),
+  );
   sep();
 
   // -- windowing group --
@@ -817,6 +1085,7 @@ export function mountIra(cfg: IraCfg): IraApi {
     cfg.wl.set(...cfg.wl.auto);
     measurements.length = 0;
     pending = null;
+    markerDraft = null;
     if (inverted) buttons.get("invert")!.click();
     cfg.redrawAll();
     redrawOverlays();
@@ -839,23 +1108,37 @@ export function mountIra(cfg: IraCfg): IraApi {
   }
 
   // ---- layouts (hanging protocols) --------------------------------------------------------
-  const setLayout = (l: typeof layout) => {
+  const setLayout = (l: IraLayout) => {
     layout = l;
     const show: Record<string, boolean> = {};
     const names = [...cfg.planes, "threeD"];
     if (l === "single") for (const n of names) show[n] = n === selectedPlane;
     else if (l === "twoUp") for (const n of names) show[n] = n === "axial" || n === "sagittal";
-    else for (const n of names) show[n] = true;
+    else if (l === "fourUp") for (const n of names) show[n] = n !== "oblique";
+    else for (const n of names) show[n] = true; // dental: all five
     for (const n of names) {
       const cell = cfg.cellOf(n);
       if (cell) cell.style.display = show[n] ? "" : "none";
     }
-    cfg.grid.style.gridTemplateColumns = l === "single" ? "1fr" : "1fr 1fr";
-    cfg.grid.style.gridTemplateRows = l === "fourUp" ? "1fr 1fr" : "1fr";
+    cfg.grid.classList.toggle("layout-dental", l === "dental");
+    if (l === "dental") {
+      cfg.grid.style.gridTemplateColumns = "";
+      cfg.grid.style.gridTemplateRows = "";
+    } else if (l === "fourUp") {
+      cfg.grid.style.gridTemplateColumns = "1fr 1fr";
+      cfg.grid.style.gridTemplateRows = "1fr 1fr";
+    } else if (l === "twoUp") {
+      cfg.grid.style.gridTemplateColumns = "1fr 1fr";
+      cfg.grid.style.gridTemplateRows = "1fr";
+    } else {
+      cfg.grid.style.gridTemplateColumns = "1fr";
+      cfg.grid.style.gridTemplateRows = "1fr";
+    }
     layoutSel.value = l;
-    buttons.get("advanced")!.classList.toggle("active", l === "fourUp");
+    buttons.get("advanced")!.classList.toggle("active", l === "fourUp" || l === "dental");
     // canvases changed size → re-render (presentVolume's resize handler redraws all)
     globalThis.dispatchEvent(new Event("resize"));
+    cfg.onLayoutChange?.(l);
   };
 
   // ---- thumbnail strip (IRA 5.3 Navigation) ----------------------------------------------
@@ -1053,6 +1336,7 @@ export function mountIra(cfg: IraCfg): IraApi {
           ["V", "Select viewport (click also selects)"],
           ["D / A", "Distance (2 clicks) / Angle (4 clicks, Cobb) measurements"],
           ["J", "Cross-hair — click localizes in all viewports"],
+          ["B", "Vanishing marker — toggle freehand on MPR or 3D (fades after a few seconds)"],
           ["O", "Localizer lines on/off"],
           ["I", "Annotations — full / minimal / off"],
           ["C", "Cine — plays immediately; controls appear in the toolbar"],
@@ -1087,6 +1371,7 @@ export function mountIra(cfg: IraCfg): IraApi {
   // ---- keyboard shortcuts (case-insensitive per spec) -------------------------------------
   const onKey = (e: KeyboardEvent) => {
     if (!document.body.contains(cfg.overlay)) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
     const t = e.target as HTMLElement;
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(t?.tagName ?? "")) return;
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -1099,6 +1384,7 @@ export function mountIra(cfg: IraCfg): IraApi {
       d: () => setTool("distance"),
       a: () => setTool("angle"),
       j: () => setTool("crosshair"),
+      b: () => setTool(tool === "marker" ? "scroll" : "marker"),
       o: () => buttons.get("localizer")!.click(),
       i: () => buttons.get("annotation")!.click(),
       c: () => cineToggle(),
@@ -1123,13 +1409,28 @@ export function mountIra(cfg: IraCfg): IraApi {
   document.addEventListener("keydown", onKey);
 
   // ---- modal-tool click capture (via SlicerLive slice-control hooks) ----------------------
-  const hooks = (p: Plane) => ({
+  const hooks = (p: Plane): IraSliceHooks => ({
     onLeftGrab: (u: number, v: number, w: number, h: number): boolean => {
       if (tool === "select") return true; // selection happened on pointerdown; consume
       if (tool === "crosshair") {
         crossRas = rasOfClick(p, u, v, w, h);
         cfg.jumpAll(crossRas);
         redrawOverlays();
+        return true;
+      }
+      if (tool === "marker") {
+        const ras = rasOfClick(p, u, v, w, h);
+        markerDraft = {
+          strokeId: newStrokeId(),
+          plane: p,
+          mm: cfg.offsetMm(p),
+          pts: [ras],
+          color: [...DEFAULT_VANISHING_COLOR],
+          widthPx: DEFAULT_VANISHING_WIDTH_PX,
+          lastPublishAt: 0,
+        };
+        publishMarker("draw", markerDraft);
+        drawOverlay(p);
         return true;
       }
       if (tool === "distance" || tool === "angle") {
@@ -1149,9 +1450,162 @@ export function mountIra(cfg: IraCfg): IraApi {
       }
       return false; // scroll/wl/zoom/pan → slice-control leftMode handles the drag
     },
+    onLeftDrag: (u: number, v: number, w: number, h: number) => {
+      if (tool !== "marker" || !markerDraft || markerDraft.plane !== p) return;
+      const ras = rasOfClick(p, u, v, w, h);
+      const last = markerDraft.pts[markerDraft.pts.length - 1];
+      // Skip near-duplicates (sub-pixel jitter).
+      if (
+        last &&
+        Math.hypot(ras[0] - last[0], ras[1] - last[1], ras[2] - last[2]) < 0.35
+      ) {
+        return;
+      }
+      markerDraft.pts.push(ras);
+      const now = performance.now();
+      if (now - markerDraft.lastPublishAt >= VANISHING_PUBLISH_INTERVAL_MS) {
+        publishMarker("draw", markerDraft);
+      }
+      drawOverlay(p);
+    },
+    onLeftDrop: () => {
+      if (tool !== "marker" || !markerDraft || markerDraft.plane !== p) return;
+      if (markerDraft.pts.length >= 2) {
+        publishMarker("end", markerDraft);
+      } else {
+        // Too short — still end so peers/TTL clear any single-point draft.
+        publishMarker("end", markerDraft);
+      }
+      markerDraft = null;
+      redrawOverlays();
+    },
   });
 
+  // ---- 3D vanishing marker (2D overlay + volume pick; steals left-drag from camera) --------
+  const endMarker3d = () => {
+    marker3dActive = false;
+    marker3dPointerId = null;
+    if (markerDraft && markerDraft.plane === "threeD") {
+      publishMarker("end", markerDraft);
+      markerDraft = null;
+      redrawOverlays();
+    }
+  };
+
+  const onMarker3dDown = (e: PointerEvent) => {
+    if (!cfg.vanishing3d || tool !== "marker" || e.button !== 0) return;
+    if (e.isPrimary === false) return;
+    // ROI widget (registered before us) calls preventDefault when it grabs a handle.
+    if (e.defaultPrevented) return;
+    // Stop camera (same-target bubble) as well as further propagation.
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    selectViewport("threeD");
+    marker3dActive = true;
+    marker3dPointerId = e.pointerId;
+    const canvas = cfg.vanishing3d.canvas();
+    canvas.setPointerCapture?.(e.pointerId);
+    const r = canvas.getBoundingClientRect();
+    const u = (e.clientX - r.left) / Math.max(1, r.width);
+    const v = (e.clientY - r.top) / Math.max(1, r.height);
+    const strokeId = newStrokeId();
+    // Optimistic empty draft; first RAS arrives when pick resolves.
+    markerDraft = {
+      strokeId,
+      plane: "threeD",
+      mm: 0,
+      pts: [],
+      color: [...DEFAULT_VANISHING_COLOR],
+      widthPx: DEFAULT_VANISHING_WIDTH_PX,
+      lastPublishAt: 0,
+    };
+    void cfg.vanishing3d.pick(u, v).then((ras) => {
+      if (!marker3dActive || !markerDraft || markerDraft.strokeId !== strokeId) return;
+      if (!ras) {
+        // Missed volume — cancel without publishing.
+        markerDraft = null;
+        marker3dActive = false;
+        marker3dPointerId = null;
+        drawOverlay3d();
+        return;
+      }
+      const cw = Math.max(1, canvas.clientWidth);
+      const ch = Math.max(1, canvas.clientHeight);
+      const pr = cfg.vanishing3d!.worldToDisplay(ras, cw, ch);
+      markerDraft.pts = [ras];
+      markerDraft.depth = pr.depth > 0 ? pr.depth : undefined;
+      publishMarker("draw", markerDraft);
+      drawOverlay3d();
+    });
+  };
+
+  const onMarker3dMove = (e: PointerEvent) => {
+    if (!cfg.vanishing3d || !marker3dActive || e.pointerId !== marker3dPointerId) return;
+    if (!markerDraft || markerDraft.plane !== "threeD") return;
+    if (typeof markerDraft.depth !== "number") return; // still waiting on pick
+    e.stopPropagation();
+    const canvas = cfg.vanishing3d.canvas();
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    const cw = Math.max(1, r.width);
+    const ch = Math.max(1, r.height);
+    const ras = cfg.vanishing3d.displayToWorldAtDepth(
+      x,
+      y,
+      markerDraft.depth,
+      cw,
+      ch,
+    ) as Vec3;
+    const last = markerDraft.pts[markerDraft.pts.length - 1];
+    if (
+      last &&
+      Math.hypot(ras[0] - last[0], ras[1] - last[1], ras[2] - last[2]) < 0.35
+    ) {
+      return;
+    }
+    markerDraft.pts.push(ras);
+    const now = performance.now();
+    if (now - markerDraft.lastPublishAt >= VANISHING_PUBLISH_INTERVAL_MS) {
+      publishMarker("draw", markerDraft);
+    }
+    drawOverlay3d();
+  };
+
+  const onMarker3dUp = (e: PointerEvent) => {
+    if (!marker3dActive || e.pointerId !== marker3dPointerId) return;
+    e.stopPropagation();
+    try {
+      cfg.vanishing3d?.canvas().releasePointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    endMarker3d();
+  };
+
+  if (cfg.vanishing3d) {
+    // Listeners are attached via api.attachVanishing3dInput() AFTER ROI widget
+    // capture handlers so handle grabs still beat marker ink.
+  }
+
   resizeOverlays();
+
+  const attachVanishing3dInput = (): (() => void) => {
+    if (!cfg.vanishing3d) return () => {};
+    const c3 = cfg.vanishing3d.canvas();
+    c3.addEventListener("pointerdown", onMarker3dDown, true);
+    c3.addEventListener("pointermove", onMarker3dMove, true);
+    c3.addEventListener("pointerup", onMarker3dUp, true);
+    c3.addEventListener("pointercancel", onMarker3dUp, true);
+    return () => {
+      c3.removeEventListener("pointerdown", onMarker3dDown, true);
+      c3.removeEventListener("pointermove", onMarker3dMove, true);
+      c3.removeEventListener("pointerup", onMarker3dUp, true);
+      c3.removeEventListener("pointercancel", onMarker3dUp, true);
+    };
+  };
+
+  let detachVanishing3d: (() => void) | null = null;
 
   return {
     tool: () => tool,
@@ -1160,6 +1614,11 @@ export function mountIra(cfg: IraCfg): IraApi {
     leftMode: () => (tool === "wl" || tool === "zoom" || tool === "pan" ? tool : "scroll"),
     hooks,
     drawOverlay,
+    drawOverlay3d,
+    attachVanishing3dInput: () => {
+      detachVanishing3d?.();
+      detachVanishing3d = attachVanishing3dInput();
+    },
     resize: () => {
       resizeOverlays();
       redrawOverlays();
@@ -1170,6 +1629,8 @@ export function mountIra(cfg: IraCfg): IraApi {
     detachKeys: () => {
       document.removeEventListener("keydown", onKey);
       cineStop();
+      detachVanishing3d?.();
+      detachVanishing3d = null;
     },
     capturePngFullSize,
   };

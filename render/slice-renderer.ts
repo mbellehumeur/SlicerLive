@@ -15,7 +15,8 @@ import { applyMat4, type Mat4, type Vec3 } from "./mat4.ts";
 
 const DEFAULT_FORMAT: GPUTextureFormat = "rgba8unorm-srgb";
 
-export type Orientation = "axial" | "coronal" | "sagittal";
+export type AnatomicalOrientation = "axial" | "coronal" | "sagittal";
+export type Orientation = AnatomicalOrientation | "oblique";
 
 const SHADER = /* wgsl */ `
 struct U {
@@ -157,6 +158,12 @@ const BASES: Record<Orientation, PlaneBasis> = {
   axial: { uDir: [-1, 0, 0], vDir: [0, 1, 0], nDir: [0, 0, 1] },
   coronal: { uDir: [-1, 0, 0], vDir: [0, 0, 1], nDir: [0, 1, 0] },
   sagittal: { uDir: [0, -1, 0], vDir: [0, 0, 1], nDir: [1, 0, 0] },
+  // ~45° tilt of axial about R–L (default dental / reformat demo plane).
+  oblique: {
+    uDir: [-1, 0, 0],
+    vDir: [0, Math.SQRT1_2, Math.SQRT1_2],
+    nDir: [0, -Math.SQRT1_2, Math.SQRT1_2],
+  },
 };
 const dot3 = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
@@ -240,6 +247,7 @@ export class SliceRenderer {
     axial: { panU: 0, panV: 0, zoom: 1 },
     coronal: { panU: 0, panV: 0, zoom: 1 },
     sagittal: { panU: 0, panV: 0, zoom: 1 },
+    oblique: { panU: 0, panV: 0, zoom: 1 },
   };
   private cX: Vec3 = [0, 0, 0];   // in-plane centre of the LAST rendered frame (for viewToTex picking)
   // Optional per-orientation basis override (reslice along a volume's own axes). null = the

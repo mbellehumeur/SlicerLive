@@ -90,7 +90,7 @@ async function main() {
   const rowOf = (k: MethodKey) => sc.rows[k === "spineps" ? 0 : 1];
 
   // ── linked navigation state ────────────────────────────────────────────────
-  const off: Record<Orientation, number> = {
+  const off: Record<"axial" | "coronal" | "sagittal", number> = {
     axial: slicerDefaultOffset01("axial", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
     coronal: slicerDefaultOffset01("coronal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
     sagittal: slicerDefaultOffset01("sagittal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),

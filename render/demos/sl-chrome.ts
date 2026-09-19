@@ -91,10 +91,18 @@ function closeChromeHelp() {
   }
 }
 
+export type ChromeHelpAction = {
+  label: string;
+  disabled?: boolean;
+  title?: string;
+  onClick: () => void;
+};
+
 /** Mouse/keyboard cheat-sheet overlay (same content as the chrome "?" button). */
 export function openChromeHelp(
   host: HTMLElement = document.body,
   sheets: { title: string; rows: [string, string][] }[] = DEFAULT_HELP,
+  actions: ChromeHelpAction[] = [],
 ): void {
   if (helpEl) return;
   helpEl = document.createElement("div");
@@ -113,7 +121,39 @@ export function openChromeHelp(
       `<div style="font:700 11px -apple-system,system-ui,sans-serif;letter-spacing:1.1px;text-transform:uppercase;color:#9fe9ff;margin-bottom:9px">${sec.title}</div>` +
       `<div style="display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;align-items:baseline">${rows}</div></div>`;
   }
-  panel.innerHTML += `<div style="margin-top:16px;font-size:12px;color:rgba(232,238,255,.55)">Press <b style="color:#fff5d6">esc</b> or click outside to dismiss.</div>`;
+  if (actions.length) {
+    const actionsRow = document.createElement("div");
+    actionsRow.style.cssText =
+      "margin-top:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center";
+    for (const action of actions) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = action.label;
+      btn.disabled = Boolean(action.disabled);
+      if (action.title) btn.title = action.title;
+      btn.style.cssText =
+        "cursor:pointer;padding:7px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.18);" +
+        "background:rgba(255,255,255,.08);color:#eaf0ff;font:650 12px/1 -apple-system,system-ui,sans-serif;";
+      if (btn.disabled) {
+        btn.style.opacity = "0.45";
+        btn.style.cursor = "not-allowed";
+      }
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (btn.disabled) return;
+        closeChromeHelp();
+        action.onClick();
+      });
+      actionsRow.append(btn);
+    }
+    panel.append(actionsRow);
+  }
+  const dismiss = document.createElement("div");
+  dismiss.style.cssText =
+    "margin-top:16px;font-size:12px;color:rgba(232,238,255,.55)";
+  dismiss.innerHTML =
+    `Press <b style="color:#fff5d6">esc</b> or click outside to dismiss.`;
+  panel.append(dismiss);
   helpEl.appendChild(panel);
   host.appendChild(helpEl);
   document.addEventListener("keydown", escClose, true);

@@ -1427,7 +1427,13 @@ fn fs_main(v : V) -> @location(0) vec4<f32> {
 var BASES = {
   axial: { uDir: [-1, 0, 0], vDir: [0, 1, 0], nDir: [0, 0, 1] },
   coronal: { uDir: [-1, 0, 0], vDir: [0, 0, 1], nDir: [0, 1, 0] },
-  sagittal: { uDir: [0, -1, 0], vDir: [0, 0, 1], nDir: [1, 0, 0] }
+  sagittal: { uDir: [0, -1, 0], vDir: [0, 0, 1], nDir: [1, 0, 0] },
+  // ~45° tilt of axial about R–L (default dental / reformat demo plane).
+  oblique: {
+    uDir: [-1, 0, 0],
+    vDir: [0, Math.SQRT1_2, Math.SQRT1_2],
+    nDir: [0, -Math.SQRT1_2, Math.SQRT1_2]
+  }
 };
 var dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 function ijkAxisForRasAxis(ijkToRAS, rasAxis) {
@@ -1496,7 +1502,8 @@ var SliceRenderer = class {
   viewState = {
     axial: { panU: 0, panV: 0, zoom: 1 },
     coronal: { panU: 0, panV: 0, zoom: 1 },
-    sagittal: { panU: 0, panV: 0, zoom: 1 }
+    sagittal: { panU: 0, panV: 0, zoom: 1 },
+    oblique: { panU: 0, panV: 0, zoom: 1 }
   };
   cX = [0, 0, 0];
   // in-plane centre of the LAST rendered frame (for viewToTex picking)
@@ -1983,8 +1990,10 @@ var NORMAL = {
   // sliceToRAS col2 = +S
   coronal: { axis: 1, sign: 1 },
   // sliceToRAS col2 = +A
-  sagittal: { axis: 0, sign: -1 }
+  sagittal: { axis: 0, sign: -1 },
   // sliceToRAS col2 = -R
+  // Default dental oblique nDir ≈ [0,-√½,√½] — nearest RAS axis is +S.
+  oblique: { axis: 2, sign: 1 }
 };
 function ijkAxisForRasAxis2(ijkToRAS, rasAxis) {
   let best = 0, bestMag = -1;
@@ -5144,6 +5153,9 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
       extraFields = fields;
       rebuild();
     },
+    volumeTexture: () => volumeField.volumeTexture(),
+    patientToTexture: () => volumeField.patientToTexture(),
+    normScale: () => volumeField.normScaleOf(),
     patchVolumeScalars(data2, zStart, zCount) {
       volumeField.updateScalars(data2, zStart, zCount);
     },
@@ -5265,20 +5277,23 @@ var uvOf = (canvas, e) => {
 var isShiftHover = (e) => e.shiftKey && e.buttons === 0;
 function mountCrosshair(cfg) {
   const state = createCrosshair(cfg.visible ?? true);
-  const slices = ["axial", "coronal", "sagittal"];
+  const slices = ["axial", "coronal", "sagittal", "oblique"].filter((k2) => k2 !== "oblique" || cfg.cells.oblique);
   const all = [...slices, "threeD"];
+  const cellOf = (cell) => cell === "threeD" ? cfg.cells.threeD : cfg.cells[cell];
   const ctx = {};
   for (const cell of all) {
+    const host = cellOf(cell);
     const o = document.createElement("canvas");
     o.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;border-radius:6px;background:transparent;";
-    cfg.cells[cell].parentElement.appendChild(o);
+    host.parentElement.appendChild(o);
     ctx[cell] = { c: o, g: o.getContext("2d") };
   }
   const redraw = () => {
     const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
     for (const cell of all) {
       const { c, g } = ctx[cell];
-      const w = cfg.cells[cell].clientWidth, h = cfg.cells[cell].clientHeight;
+      const host = cellOf(cell);
+      const w = host.clientWidth, h = host.clientHeight;
       if (!w || !h) continue;
       if (c.width !== Math.floor(w * dpr)) {
         c.width = Math.floor(w * dpr);
@@ -5319,9 +5334,10 @@ function mountCrosshair(cfg) {
     else pick3d(u, v2);
   });
   for (const cell of slices) {
-    cfg.cells[cell].addEventListener("pointermove", (e) => {
+    const host = cellOf(cell);
+    host.addEventListener("pointermove", (e) => {
       if (!isShiftHover(e)) return;
-      const { u, v: v2, aspect } = uvOf(cfg.cells[cell], e);
+      const { u, v: v2, aspect } = uvOf(host, e);
       const ras = cfg.getSlice().viewToRas(cell, cfg.getOffset(cell), u, v2, aspect);
       state.set(ras);
       cfg.onJump(ras);
@@ -7680,11 +7696,215 @@ async function loadSeries(entry, handlers = {}, opts) {
   return r;
 }
 
+// render/demos/ira/ira-vanishing.ts
+var VANISHING_NODE_ID = "_vanishing";
+var VANISHING_CMD = "vanishingStroke";
+var DEFAULT_VANISHING_TTL_MS = 3e3;
+var DEFAULT_VANISHING_FADE_MS = 1e3;
+var DEFAULT_VANISHING_WIDTH_PX = 3;
+var DEFAULT_VANISHING_COLOR = [1, 0.92, 0.2, 0.9];
+var VANISHING_PUBLISH_INTERVAL_MS = 100;
+function isVanishingStrokeOp(op) {
+  if (!op || typeof op !== "object") return false;
+  const o = op;
+  if (o.op !== "cmd" || o.id !== VANISHING_NODE_ID || o.cmd !== VANISHING_CMD) {
+    return false;
+  }
+  const args = o.args;
+  if (!args || typeof args !== "object") return false;
+  const a = args;
+  return typeof a.strokeId === "string" && Array.isArray(a.points);
+}
+function partitionVanishingOps(ops) {
+  const vanishing = [];
+  const rest = [];
+  for (const op of ops) {
+    if (isVanishingStrokeOp(op)) vanishing.push(op);
+    else rest.push(op);
+  }
+  return { vanishing, rest };
+}
+function filterSceneUpdateContextForVanishing(context) {
+  const out = [];
+  for (const item of context) {
+    if (!item || typeof item !== "object") continue;
+    const row = item;
+    const key = String(row.key || "").toLowerCase();
+    if (key !== "scene" && key !== "sceneupdate") continue;
+    const resource = row.resource;
+    if (!resource || typeof resource !== "object") continue;
+    const res = resource;
+    const ops = Array.isArray(res.ops) ? res.ops.filter(isVanishingStrokeOp) : [];
+    if (!ops.length) continue;
+    out.push({
+      key: row.key,
+      resource: { ...res, ops }
+    });
+  }
+  return out;
+}
+function buildVanishingStrokeOp(args) {
+  return {
+    op: "cmd",
+    id: VANISHING_NODE_ID,
+    cmd: VANISHING_CMD,
+    args: {
+      strokeId: args.strokeId,
+      points: args.points.map((p) => [
+        Number(p[0]),
+        Number(p[1]),
+        Number(p[2])
+      ]),
+      color: normalizeColor(args.color),
+      widthPx: typeof args.widthPx === "number" && Number.isFinite(args.widthPx) ? Math.max(1, args.widthPx) : DEFAULT_VANISHING_WIDTH_PX,
+      phase: args.phase === "end" ? "end" : "draw",
+      ttlMs: typeof args.ttlMs === "number" && Number.isFinite(args.ttlMs) ? Math.max(0, args.ttlMs) : DEFAULT_VANISHING_TTL_MS,
+      author: args.author,
+      plane: args.plane,
+      mm: typeof args.mm === "number" && Number.isFinite(args.mm) ? args.mm : void 0
+    }
+  };
+}
+function normalizeColor(color) {
+  if (!Array.isArray(color) || color.length < 3) {
+    return [...DEFAULT_VANISHING_COLOR];
+  }
+  const r = Number(color[0]);
+  const g = Number(color[1]);
+  const b = Number(color[2]);
+  const a = color.length > 3 ? Number(color[3]) : DEFAULT_VANISHING_COLOR[3];
+  return [
+    Number.isFinite(r) ? r : DEFAULT_VANISHING_COLOR[0],
+    Number.isFinite(g) ? g : DEFAULT_VANISHING_COLOR[1],
+    Number.isFinite(b) ? b : DEFAULT_VANISHING_COLOR[2],
+    Number.isFinite(a) ? a : DEFAULT_VANISHING_COLOR[3]
+  ];
+}
+function asVec3(p) {
+  if (!Array.isArray(p) || p.length < 3) return null;
+  const x2 = Number(p[0]);
+  const y = Number(p[1]);
+  const z2 = Number(p[2]);
+  if (![x2, y, z2].every(Number.isFinite)) return null;
+  return [x2, y, z2];
+}
+function newStrokeId() {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch {
+  }
+  return `vstroke-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+var VanishingStrokeStore = class {
+  strokes = /* @__PURE__ */ new Map();
+  raf = 0;
+  onChange = null;
+  fadeMs;
+  constructor(opts = {}) {
+    this.fadeMs = opts.fadeMs ?? DEFAULT_VANISHING_FADE_MS;
+    this.onChange = opts.onChange ?? null;
+  }
+  setOnChange(fn2) {
+    this.onChange = fn2;
+  }
+  clear() {
+    this.strokes.clear();
+    this.stopTick();
+    this.onChange?.();
+  }
+  list() {
+    return [...this.strokes.values()];
+  }
+  /** Alpha 0..1 for drawing (1 while live / early TTL; fades in the last fadeMs). */
+  alphaOf(stroke, now = performance.now()) {
+    if (stroke.expiresAt == null) return 1;
+    const remaining = stroke.expiresAt - now;
+    if (remaining <= 0) return 0;
+    if (remaining >= this.fadeMs) return 1;
+    return Math.max(0, remaining / this.fadeMs);
+  }
+  applyOp(op, now = performance.now()) {
+    const args = op.args;
+    const points = [];
+    for (const p of args.points || []) {
+      const v2 = asVec3(p);
+      if (v2) points.push(v2);
+    }
+    if (!args.strokeId || points.length < 1) return false;
+    const prev = this.strokes.get(args.strokeId);
+    const color = normalizeColor(args.color ?? prev?.color);
+    const widthPx = typeof args.widthPx === "number" && Number.isFinite(args.widthPx) ? Math.max(1, args.widthPx) : prev?.widthPx ?? DEFAULT_VANISHING_WIDTH_PX;
+    let expiresAt = prev?.expiresAt ?? null;
+    if (args.phase === "end") {
+      const ttl = typeof args.ttlMs === "number" && Number.isFinite(args.ttlMs) ? Math.max(0, args.ttlMs) : DEFAULT_VANISHING_TTL_MS;
+      expiresAt = now + ttl;
+    } else if (args.phase === "draw") {
+      expiresAt = null;
+    }
+    this.strokes.set(args.strokeId, {
+      strokeId: args.strokeId,
+      points,
+      color,
+      widthPx,
+      expiresAt,
+      plane: args.plane ?? prev?.plane,
+      mm: typeof args.mm === "number" ? args.mm : prev?.mm,
+      author: args.author ?? prev?.author
+    });
+    this.onChange?.();
+    this.ensureTick();
+    return true;
+  }
+  applyOps(ops) {
+    let any = false;
+    for (const op of ops) {
+      if (this.applyOp(op)) any = true;
+    }
+    return any;
+  }
+  ensureTick() {
+    if (this.raf) return;
+    const step = () => {
+      this.raf = 0;
+      const now = performance.now();
+      let changed = false;
+      let needTick = false;
+      for (const [id, s] of this.strokes) {
+        if (s.expiresAt == null) {
+          needTick = true;
+          continue;
+        }
+        if (s.expiresAt <= now) {
+          this.strokes.delete(id);
+          changed = true;
+          continue;
+        }
+        needTick = true;
+        if (s.expiresAt - now < this.fadeMs) changed = true;
+      }
+      if (changed) this.onChange?.();
+      if (needTick) {
+        this.raf = requestAnimationFrame(step);
+      }
+    };
+    this.raf = requestAnimationFrame(step);
+  }
+  stopTick() {
+    if (this.raf) {
+      cancelAnimationFrame(this.raf);
+      this.raf = 0;
+    }
+  }
+};
+
 // render/demos/ira/ira.ts
 var PLANE_COLOR = {
   axial: "#f05a5a",
   sagittal: "#f0d24a",
-  coronal: "#5ad07a"
+  coronal: "#5ad07a",
+  oblique: "#c9a0ff"
 };
 function displayClass() {
   const sw = globalThis.screen?.width ?? globalThis.innerWidth;
@@ -7818,6 +8038,10 @@ var ICONS = {
   crosshair: I(
     `<circle cx="12" cy="12" r="8"/><path d="M12 4v5M12 15v5M4 12h5M15 12h5" stroke-dasharray="3 2"/>`
   ),
+  // Freehand vanishing marker (conference whiteboard ink)
+  marker: I(
+    `<path d="M4 20l2.5-2.5 11-11 2.5 2.5-11 11L4 20z"/><path d="M15.5 6.5l2.5 2.5"/><path d="M5 19l1 1" stroke-width="2.2"/>`
+  ),
   // Cine controls
   play: I(`<path d="M7 5l12 7-12 7z" fill="currentColor"/>`),
   stop: I(`<rect x="6" y="6" width="12" height="12" fill="currentColor"/>`),
@@ -7882,6 +8106,63 @@ function mountIra(cfg) {
   const measurements = [];
   let pending = null;
   let layout = "fourUp";
+  let markerDraft = null;
+  let marker3dActive = false;
+  let marker3dPointerId = null;
+  const rgbaCss = (color, alphaScale = 1) => {
+    const r = Math.round(Math.max(0, Math.min(1, color[0] ?? 1)) * 255);
+    const g = Math.round(Math.max(0, Math.min(1, color[1] ?? 1)) * 255);
+    const b = Math.round(Math.max(0, Math.min(1, color[2] ?? 1)) * 255);
+    const a = Math.max(0, Math.min(1, (color[3] ?? 1) * alphaScale));
+    return `rgba(${r},${g},${b},${a})`;
+  };
+  const publishMarker = (phase, draft) => {
+    const args = {
+      strokeId: draft.strokeId,
+      points: draft.pts.map((p) => [p[0], p[1], p[2]]),
+      color: draft.color,
+      widthPx: draft.widthPx,
+      phase,
+      ttlMs: DEFAULT_VANISHING_TTL_MS,
+      author: cfg.vanishingAuthor?.(),
+      plane: draft.plane,
+      mm: draft.mm
+    };
+    const op = buildVanishingStrokeOp(args);
+    cfg.vanishingStore?.applyOp(op);
+    cfg.onVanishingStroke?.(op);
+    draft.lastPublishAt = performance.now();
+  };
+  const strokeNearPlane = (s, p) => {
+    if (s.plane && s.plane === p && typeof s.mm === "number") {
+      return Math.abs(s.mm - cfg.offsetMm(p)) <= cfg.spacing(p) / 2 + 1e-3;
+    }
+    const nAxis = {
+      sagittal: 0,
+      coronal: 1,
+      axial: 2
+    };
+    const ax = nAxis[p];
+    if (ax === void 0) return true;
+    const mm = cfg.offsetMm(p);
+    const tol = Math.max(cfg.spacing(p), 1) * 1.5;
+    return s.points.some((pt2) => Math.abs(pt2[ax] - mm) <= tol);
+  };
+  const drawStrokePoly = (ctx, p, points, w, h, color, widthPx, alpha) => {
+    if (points.length < 2 || alpha <= 0) return;
+    const px = points.map((r) => toPx(p, r, w, h));
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = rgbaCss(color, 1);
+    ctx.lineWidth = widthPx;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(px[0].x, px[0].y);
+    for (let i = 1; i < px.length; i++) ctx.lineTo(px[i].x, px[i].y);
+    ctx.stroke();
+    ctx.restore();
+  };
   const overlays = /* @__PURE__ */ new Map();
   for (const p of cfg.planes) {
     const cell = cfg.cellOf(p);
@@ -7893,11 +8174,26 @@ function mountIra(cfg) {
     cell.appendChild(c);
     overlays.set(p, c);
   }
+  let overlay3d = null;
+  {
+    const cell3 = cfg.cellOf("threeD");
+    if (cell3) {
+      cell3.querySelectorAll("canvas.ira-overlay").forEach((el) => el.remove());
+      overlay3d = document.createElement("canvas");
+      overlay3d.className = "ira-overlay";
+      overlay3d.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3;";
+      cell3.appendChild(overlay3d);
+    }
+  }
   const resizeOverlays = () => {
     const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
     for (const [, c] of overlays) {
       c.width = Math.max(1, Math.floor(c.clientWidth * dpr));
       c.height = Math.max(1, Math.floor(c.clientHeight * dpr));
+    }
+    if (overlay3d) {
+      overlay3d.width = Math.max(1, Math.floor(overlay3d.clientWidth * dpr));
+      overlay3d.height = Math.max(1, Math.floor(overlay3d.clientHeight * dpr));
     }
   };
   const rasOfClick = (p, u, v2, w, h) => cfg.slice().viewToRas(p, cfg.off01(p), u, v2, w / h);
@@ -7914,10 +8210,10 @@ function mountIra(cfg) {
     const w = c.width / dpr, h = c.height / dpr;
     ctx.clearRect(0, 0, w, h);
     if (!w || !h) return;
-    if (localizerOn) {
+    if (localizerOn && p !== "oblique") {
       const nAxis = { sagittal: 0, coronal: 1, axial: 2 };
       for (const q2 of cfg.planes) {
-        if (q2 === p) continue;
+        if (q2 === p || q2 === "oblique") continue;
         const free = [0, 1, 2].find((a2) => a2 !== nAxis[p] && a2 !== nAxis[q2]);
         const mk = (t) => {
           const r = [0, 0, 0];
@@ -7989,9 +8285,83 @@ function mountIra(cfg) {
         label(`${deg.toFixed(1)}\xB0`, px[3].x + 8, px[3].y - 8);
       }
     }
+    const now = performance.now();
+    const storeStrokes = cfg.vanishingStore?.list() ?? [];
+    for (const s of storeStrokes) {
+      if (markerDraft && s.strokeId === markerDraft.strokeId) continue;
+      if (!strokeNearPlane(s, p)) continue;
+      const alpha = cfg.vanishingStore?.alphaOf(s, now) ?? 1;
+      drawStrokePoly(ctx, p, s.points, w, h, s.color, s.widthPx, alpha);
+    }
+    if (markerDraft && markerDraft.plane === p) {
+      drawStrokePoly(
+        ctx,
+        p,
+        markerDraft.pts,
+        w,
+        h,
+        markerDraft.color,
+        markerDraft.widthPx,
+        1
+      );
+    }
+  };
+  const drawStrokePoly3d = (ctx, points, w, h, color, widthPx, alpha) => {
+    const v3 = cfg.vanishing3d;
+    if (!v3 || points.length < 2 || alpha <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = rgbaCss(color, 1);
+    ctx.lineWidth = widthPx;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    let started = false;
+    for (const ras of points) {
+      const pr2 = v3.worldToDisplay(ras, w, h);
+      if (!(pr2.depth > 0)) continue;
+      if (!started) {
+        ctx.moveTo(pr2.x, pr2.y);
+        started = true;
+      } else {
+        ctx.lineTo(pr2.x, pr2.y);
+      }
+    }
+    if (started) ctx.stroke();
+    ctx.restore();
+  };
+  const drawOverlay3d = () => {
+    if (!overlay3d || !cfg.vanishing3d) return;
+    const ctx = overlay3d.getContext("2d");
+    if (!ctx) return;
+    const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = overlay3d.width / dpr;
+    const h = overlay3d.height / dpr;
+    ctx.clearRect(0, 0, w, h);
+    if (!w || !h) return;
+    const now = performance.now();
+    const storeStrokes = cfg.vanishingStore?.list() ?? [];
+    for (const s of storeStrokes) {
+      if (markerDraft && s.strokeId === markerDraft.strokeId) continue;
+      const alpha = cfg.vanishingStore?.alphaOf(s, now) ?? 1;
+      drawStrokePoly3d(ctx, s.points, w, h, s.color, s.widthPx, alpha);
+    }
+    if (markerDraft && markerDraft.pts.length >= 2) {
+      drawStrokePoly3d(
+        ctx,
+        markerDraft.pts,
+        w,
+        h,
+        markerDraft.color,
+        markerDraft.widthPx,
+        1
+      );
+    }
   };
   const redrawOverlays = () => {
     for (const p of cfg.planes) drawOverlay(p);
+    drawOverlay3d();
   };
   const markSelected = () => {
     for (const p of cfg.planes) {
@@ -8063,6 +8433,7 @@ function mountIra(cfg) {
   layoutSel.style.cssText = "font:600 11px -apple-system,system-ui,sans-serif;color:#d6e2f2;background:#11141d;border:1px solid #33507e;border-radius:4px;padding:2px 4px;cursor:pointer;";
   for (const [v2, label] of [
     ["fourUp", "Four-Up (MPR + 3D)"],
+    ["dental", "Dental (MPR + 3D + Oblique)"],
     ["twoUp", "2 side-by-side"],
     ["single", "Single viewport"],
     ["browser", "Browser (patient/study/series)"]
@@ -8084,12 +8455,16 @@ function mountIra(cfg) {
     distance: "crosshair",
     angle: "crosshair",
     crosshair: "crosshair",
+    marker: "crosshair",
     select: "pointer",
     scroll: "default"
   };
   const setTool = (t) => {
     tool = t;
     pending = null;
+    if (t !== "marker" && markerDraft) {
+      markerDraft = null;
+    }
     for (const [id, tl] of [
       ["tool-scroll", "scroll"],
       ["tool-window", "wl"],
@@ -8098,9 +8473,12 @@ function mountIra(cfg) {
       ["tool-select", "select"],
       ["tool-distance", "distance"],
       ["tool-angle", "angle"],
-      ["tool-crosshair", "crosshair"]
+      ["tool-crosshair", "crosshair"],
+      ["tool-marker", "marker"]
     ]) buttons.get(id)?.classList.toggle("active", tool === tl);
     for (const p of cfg.planes) cfg.canvases[p].style.cursor = CURSORS[tool] ?? "default";
+    const c3 = cfg.vanishing3d?.canvas?.() ?? cfg.canvases["threeD"];
+    if (c3) c3.style.cursor = CURSORS[tool] ?? "default";
     cfg.onToolChange?.(tool);
     redrawOverlays();
   };
@@ -8112,6 +8490,12 @@ function mountIra(cfg) {
   btn("tool-distance", "distance", "Distance measurement (click start, click end) \u2014 D", () => setTool("distance"));
   btn("tool-angle", "angle", "Angle measurement (two segments, four clicks \u2014 Cobb) \u2014 A", () => setTool("angle"));
   btn("tool-crosshair", "crosshair", "Cross-hair (click to localize in all viewports) \u2014 J", () => setTool("crosshair"));
+  btn(
+    "tool-marker",
+    "marker",
+    "Vanishing marker (freehand on MPR or 3D; fades after a few seconds) \u2014 B (toggle)",
+    () => setTool(tool === "marker" ? "scroll" : "marker")
+  );
   sep();
   let presetPop = null;
   let presetOrigWL = null;
@@ -8300,6 +8684,7 @@ function mountIra(cfg) {
     cfg.wl.set(...cfg.wl.auto);
     measurements.length = 0;
     pending = null;
+    markerDraft = null;
     if (inverted) buttons.get("invert").click();
     cfg.redrawAll();
     redrawOverlays();
@@ -8324,16 +8709,30 @@ function mountIra(cfg) {
     const names = [...cfg.planes, "threeD"];
     if (l === "single") for (const n of names) show[n] = n === selectedPlane;
     else if (l === "twoUp") for (const n of names) show[n] = n === "axial" || n === "sagittal";
+    else if (l === "fourUp") for (const n of names) show[n] = n !== "oblique";
     else for (const n of names) show[n] = true;
     for (const n of names) {
       const cell = cfg.cellOf(n);
       if (cell) cell.style.display = show[n] ? "" : "none";
     }
-    cfg.grid.style.gridTemplateColumns = l === "single" ? "1fr" : "1fr 1fr";
-    cfg.grid.style.gridTemplateRows = l === "fourUp" ? "1fr 1fr" : "1fr";
+    cfg.grid.classList.toggle("layout-dental", l === "dental");
+    if (l === "dental") {
+      cfg.grid.style.gridTemplateColumns = "";
+      cfg.grid.style.gridTemplateRows = "";
+    } else if (l === "fourUp") {
+      cfg.grid.style.gridTemplateColumns = "1fr 1fr";
+      cfg.grid.style.gridTemplateRows = "1fr 1fr";
+    } else if (l === "twoUp") {
+      cfg.grid.style.gridTemplateColumns = "1fr 1fr";
+      cfg.grid.style.gridTemplateRows = "1fr";
+    } else {
+      cfg.grid.style.gridTemplateColumns = "1fr";
+      cfg.grid.style.gridTemplateRows = "1fr";
+    }
     layoutSel.value = l;
-    buttons.get("advanced").classList.toggle("active", l === "fourUp");
+    buttons.get("advanced").classList.toggle("active", l === "fourUp" || l === "dental");
     globalThis.dispatchEvent(new Event("resize"));
+    cfg.onLayoutChange?.(l);
   };
   let strip = null;
   if (cfg.strip?.length) {
@@ -8496,6 +8895,7 @@ function mountIra(cfg) {
       ["V", "Select viewport (click also selects)"],
       ["D / A", "Distance (2 clicks) / Angle (4 clicks, Cobb) measurements"],
       ["J", "Cross-hair \u2014 click localizes in all viewports"],
+      ["B", "Vanishing marker \u2014 toggle freehand on MPR or 3D (fades after a few seconds)"],
       ["O", "Localizer lines on/off"],
       ["I", "Annotations \u2014 full / minimal / off"],
       ["C", "Cine \u2014 plays immediately; controls appear in the toolbar"],
@@ -8526,6 +8926,7 @@ function mountIra(cfg) {
   };
   const onKey = (e) => {
     if (!document.body.contains(cfg.overlay)) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
     const t = e.target;
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(t?.tagName ?? "")) return;
     const k2 = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -8538,6 +8939,7 @@ function mountIra(cfg) {
       d: () => setTool("distance"),
       a: () => setTool("angle"),
       j: () => setTool("crosshair"),
+      b: () => setTool(tool === "marker" ? "scroll" : "marker"),
       o: () => buttons.get("localizer").click(),
       i: () => buttons.get("annotation").click(),
       c: () => cineToggle(),
@@ -8569,6 +8971,21 @@ function mountIra(cfg) {
         redrawOverlays();
         return true;
       }
+      if (tool === "marker") {
+        const ras = rasOfClick(p, u, v2, w, h);
+        markerDraft = {
+          strokeId: newStrokeId(),
+          plane: p,
+          mm: cfg.offsetMm(p),
+          pts: [ras],
+          color: [...DEFAULT_VANISHING_COLOR],
+          widthPx: DEFAULT_VANISHING_WIDTH_PX,
+          lastPublishAt: 0
+        };
+        publishMarker("draw", markerDraft);
+        drawOverlay(p);
+        return true;
+      }
       if (tool === "distance" || tool === "angle") {
         const ras = rasOfClick(p, u, v2, w, h);
         if (!pending || pending.plane !== p) {
@@ -8585,9 +9002,140 @@ function mountIra(cfg) {
         return true;
       }
       return false;
+    },
+    onLeftDrag: (u, v2, w, h) => {
+      if (tool !== "marker" || !markerDraft || markerDraft.plane !== p) return;
+      const ras = rasOfClick(p, u, v2, w, h);
+      const last = markerDraft.pts[markerDraft.pts.length - 1];
+      if (last && Math.hypot(ras[0] - last[0], ras[1] - last[1], ras[2] - last[2]) < 0.35) {
+        return;
+      }
+      markerDraft.pts.push(ras);
+      const now = performance.now();
+      if (now - markerDraft.lastPublishAt >= VANISHING_PUBLISH_INTERVAL_MS) {
+        publishMarker("draw", markerDraft);
+      }
+      drawOverlay(p);
+    },
+    onLeftDrop: () => {
+      if (tool !== "marker" || !markerDraft || markerDraft.plane !== p) return;
+      if (markerDraft.pts.length >= 2) {
+        publishMarker("end", markerDraft);
+      } else {
+        publishMarker("end", markerDraft);
+      }
+      markerDraft = null;
+      redrawOverlays();
     }
   });
+  const endMarker3d = () => {
+    marker3dActive = false;
+    marker3dPointerId = null;
+    if (markerDraft && markerDraft.plane === "threeD") {
+      publishMarker("end", markerDraft);
+      markerDraft = null;
+      redrawOverlays();
+    }
+  };
+  const onMarker3dDown = (e) => {
+    if (!cfg.vanishing3d || tool !== "marker" || e.button !== 0) return;
+    if (e.isPrimary === false) return;
+    if (e.defaultPrevented) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    selectViewport("threeD");
+    marker3dActive = true;
+    marker3dPointerId = e.pointerId;
+    const canvas = cfg.vanishing3d.canvas();
+    canvas.setPointerCapture?.(e.pointerId);
+    const r = canvas.getBoundingClientRect();
+    const u = (e.clientX - r.left) / Math.max(1, r.width);
+    const v2 = (e.clientY - r.top) / Math.max(1, r.height);
+    const strokeId = newStrokeId();
+    markerDraft = {
+      strokeId,
+      plane: "threeD",
+      mm: 0,
+      pts: [],
+      color: [...DEFAULT_VANISHING_COLOR],
+      widthPx: DEFAULT_VANISHING_WIDTH_PX,
+      lastPublishAt: 0
+    };
+    void cfg.vanishing3d.pick(u, v2).then((ras) => {
+      if (!marker3dActive || !markerDraft || markerDraft.strokeId !== strokeId) return;
+      if (!ras) {
+        markerDraft = null;
+        marker3dActive = false;
+        marker3dPointerId = null;
+        drawOverlay3d();
+        return;
+      }
+      const cw = Math.max(1, canvas.clientWidth);
+      const ch = Math.max(1, canvas.clientHeight);
+      const pr2 = cfg.vanishing3d.worldToDisplay(ras, cw, ch);
+      markerDraft.pts = [ras];
+      markerDraft.depth = pr2.depth > 0 ? pr2.depth : void 0;
+      publishMarker("draw", markerDraft);
+      drawOverlay3d();
+    });
+  };
+  const onMarker3dMove = (e) => {
+    if (!cfg.vanishing3d || !marker3dActive || e.pointerId !== marker3dPointerId) return;
+    if (!markerDraft || markerDraft.plane !== "threeD") return;
+    if (typeof markerDraft.depth !== "number") return;
+    e.stopPropagation();
+    const canvas = cfg.vanishing3d.canvas();
+    const r = canvas.getBoundingClientRect();
+    const x2 = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    const cw = Math.max(1, r.width);
+    const ch = Math.max(1, r.height);
+    const ras = cfg.vanishing3d.displayToWorldAtDepth(
+      x2,
+      y,
+      markerDraft.depth,
+      cw,
+      ch
+    );
+    const last = markerDraft.pts[markerDraft.pts.length - 1];
+    if (last && Math.hypot(ras[0] - last[0], ras[1] - last[1], ras[2] - last[2]) < 0.35) {
+      return;
+    }
+    markerDraft.pts.push(ras);
+    const now = performance.now();
+    if (now - markerDraft.lastPublishAt >= VANISHING_PUBLISH_INTERVAL_MS) {
+      publishMarker("draw", markerDraft);
+    }
+    drawOverlay3d();
+  };
+  const onMarker3dUp = (e) => {
+    if (!marker3dActive || e.pointerId !== marker3dPointerId) return;
+    e.stopPropagation();
+    try {
+      cfg.vanishing3d?.canvas().releasePointerCapture?.(e.pointerId);
+    } catch {
+    }
+    endMarker3d();
+  };
+  if (cfg.vanishing3d) {
+  }
   resizeOverlays();
+  const attachVanishing3dInput = () => {
+    if (!cfg.vanishing3d) return () => {
+    };
+    const c3 = cfg.vanishing3d.canvas();
+    c3.addEventListener("pointerdown", onMarker3dDown, true);
+    c3.addEventListener("pointermove", onMarker3dMove, true);
+    c3.addEventListener("pointerup", onMarker3dUp, true);
+    c3.addEventListener("pointercancel", onMarker3dUp, true);
+    return () => {
+      c3.removeEventListener("pointerdown", onMarker3dDown, true);
+      c3.removeEventListener("pointermove", onMarker3dMove, true);
+      c3.removeEventListener("pointerup", onMarker3dUp, true);
+      c3.removeEventListener("pointercancel", onMarker3dUp, true);
+    };
+  };
+  let detachVanishing3d = null;
   return {
     tool: () => tool,
     setTool,
@@ -8595,6 +9143,11 @@ function mountIra(cfg) {
     leftMode: () => tool === "wl" || tool === "zoom" || tool === "pan" ? tool : "scroll",
     hooks,
     drawOverlay,
+    drawOverlay3d,
+    attachVanishing3dInput: () => {
+      detachVanishing3d?.();
+      detachVanishing3d = attachVanishing3dInput();
+    },
     resize: () => {
       resizeOverlays();
       redrawOverlays();
@@ -8605,10 +9158,132 @@ function mountIra(cfg) {
     detachKeys: () => {
       document.removeEventListener("keydown", onKey);
       cineStop();
+      detachVanishing3d?.();
+      detachVanishing3d = null;
     },
     capturePngFullSize
   };
 }
+
+// render/slice-plane-field.ts
+var SlicePlaneField = class {
+  kind = "slice";
+  bindingCount = 1;
+  // shared volume texture (3d)
+  clippable = false;
+  // a dropped slice isn't cropped by ROI clip planes
+  providesSkip = true;
+  volTex;
+  o;
+  halfThick;
+  normScale;
+  constructor(volTex, opts) {
+    this.volTex = volTex;
+    this.o = opts;
+    this.halfThick = opts.halfThick ?? 0.5;
+    this.normScale = opts.normScale ?? 1;
+  }
+  /** Hot update: re-place the plane (scroll/pan/zoom) and/or re-window. Repacked on the next syncUniforms(). */
+  setPlane(opts) {
+    this.o = { ...this.o, ...opts };
+    if (opts.halfThick !== void 0) this.halfThick = opts.halfThick;
+  }
+  setClim(lo, hi2) {
+    this.o.clim = [lo, hi2];
+  }
+  uniformFloats() {
+    return 36;
+  }
+  // mat4(16) + origin/thick(4) + normal(4) + uAxis/extU(4) + vAxis/extV(4) + clim(4)
+  sampleStep() {
+    return Math.max(0.25, this.halfThick);
+  }
+  aabb() {
+    const { origin: c, uAxis: u, vAxis: v2, normal: n, halfExtU: hu, halfExtV: hv } = this.o;
+    const t = this.halfThick;
+    const lo = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
+    for (const su of [-1, 1]) for (const sv of [-1, 1]) for (const sn2 of [-1, 1]) {
+      for (let a = 0; a < 3; a++) {
+        const p = c[a] + su * hu * u[a] + sv * hv * v2[a] + sn2 * t * n[a];
+        if (p < lo[a]) lo[a] = p;
+        if (p > hi2[a]) hi2[a] = p;
+      }
+    }
+    return [lo, hi2];
+  }
+  structMembers(s) {
+    return [
+      `  slice${s}_p2t : mat4x4<f32>,`,
+      `  slice${s}_origin : vec4<f32>,`,
+      // ox,oy,oz, halfThick
+      `  slice${s}_normal : vec4<f32>,`,
+      // nx,ny,nz, _
+      `  slice${s}_u : vec4<f32>,`,
+      // ux,uy,uz, halfExtU
+      `  slice${s}_v : vec4<f32>,`,
+      // vx,vy,vz, halfExtV
+      `  slice${s}_clim : vec4<f32>,`
+      // lo, hi, _, _
+    ].join("\n");
+  }
+  declareBindings(s, base) {
+    return `@group(0) @binding(${base}) var t_vol_slice${s} : texture_3d<f32>;`;
+  }
+  skipWGSL(s) {
+    return (
+      /* wgsl */
+      `
+fn skip_slice${s}(wp : vec3<f32>) -> f32 {
+  let d = abs(dot(wp - u_material.slice${s}_origin.xyz, u_material.slice${s}_normal.xyz)) - u_material.slice${s}_origin.w;
+  return max(d, 0.0);
+}`
+    );
+  }
+  samplingWGSL(s) {
+    return (
+      /* wgsl */
+      `
+fn sample_field_slice${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
+  let rel = wp - u_material.slice${s}_origin.xyz;
+  if (abs(dot(rel, u_material.slice${s}_normal.xyz)) > u_material.slice${s}_origin.w) { return vec4<f32>(0.0); }
+  let pu = dot(rel, u_material.slice${s}_u.xyz);
+  let pv = dot(rel, u_material.slice${s}_v.xyz);
+  if (abs(pu) > u_material.slice${s}_u.w || abs(pv) > u_material.slice${s}_v.w) { return vec4<f32>(0.0); }
+  let t4 = u_material.slice${s}_p2t * vec4<f32>(wp, 1.0);
+  if (any(t4.xyz < vec3<f32>(0.0)) || any(t4.xyz > vec3<f32>(1.0))) { return vec4<f32>(0.0); }
+  let val = textureSampleLevel(t_vol_slice${s}, s_lin, t4.xyz, 0.0).r;
+  let lo = u_material.slice${s}_clim.x; let hi = u_material.slice${s}_clim.y;
+  let g = clamp((val - lo) / max(hi - lo, 1e-6), 0.0, 1.0);
+  let lin = srgb2physical(vec3<f32>(g, g, g));   // opaque grayscale slice
+  return vec4<f32>(lin, 1.0);
+}`
+    );
+  }
+  fillUniforms(out, off) {
+    const { p2t, origin: c, normal: n, uAxis: u, vAxis: v2, halfExtU: hu, halfExtV: hv, clim } = this.o;
+    out.set(p2t, off);
+    out[off + 16] = c[0];
+    out[off + 17] = c[1];
+    out[off + 18] = c[2];
+    out[off + 19] = this.halfThick;
+    out[off + 20] = n[0];
+    out[off + 21] = n[1];
+    out[off + 22] = n[2];
+    out[off + 24] = u[0];
+    out[off + 25] = u[1];
+    out[off + 26] = u[2];
+    out[off + 27] = hu;
+    out[off + 28] = v2[0];
+    out[off + 29] = v2[1];
+    out[off + 30] = v2[2];
+    out[off + 31] = hv;
+    out[off + 32] = clim[0] / this.normScale;
+    out[off + 33] = clim[1] / this.normScale;
+  }
+  bindEntries(_s, base) {
+    return [{ binding: base, resource: this.volTex.createView() }];
+  }
+};
 
 // render/demos/idc-share.ts
 function studyShareURL(src) {
@@ -9819,7 +10494,7 @@ function Re(e) {
 function xe(e, t) {
   return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? t === 0 ? "nifti-send.nii.gz" : `nifti-send-${t + 1}.nii.gz` : t === 0 ? "dicom-send.dcm" : `dicom-send-${t + 1}.dcm`;
 }
-function Oe(e) {
+function Pe(e) {
   return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? "application/octet-stream" : "application/dicom";
 }
 function Ue(e) {
@@ -9836,7 +10511,7 @@ function Ue(e) {
       const d = c.resource;
       if (d && typeof d == "object" && d.data != null) {
         const f = { ...d };
-        (typeof f.fileName != "string" || !f.fileName.trim()) && (f.fileName = xe(n, o)), (typeof f.mimeType != "string" || !f.mimeType.trim()) && (f.mimeType = Oe(n)), s.push(f);
+        (typeof f.fileName != "string" || !f.fileName.trim()) && (f.fileName = xe(n, o)), (typeof f.mimeType != "string" || !f.mimeType.trim()) && (f.mimeType = Pe(n)), s.push(f);
       }
     }
   }
@@ -9907,14 +10582,14 @@ async function In(e, t = "", n = 0) {
   }
   if (i == null && r) {
     const o = { ...e };
-    return delete o.data, delete o.binaryTransfer, delete o.payloadId, delete o.payloadIds, delete o.chunkByteLengths, delete o.expiresAt, (typeof o.fileName != "string" || !o.fileName.trim()) && (o.fileName = xe(t, n)), (typeof o.mimeType != "string" || !o.mimeType.trim()) && (o.mimeType = Oe(t)), o;
+    return delete o.data, delete o.binaryTransfer, delete o.payloadId, delete o.payloadIds, delete o.chunkByteLengths, delete o.expiresAt, (typeof o.fileName != "string" || !o.fileName.trim()) && (o.fileName = xe(t, n)), (typeof o.mimeType != "string" || !o.mimeType.trim()) && (o.mimeType = Pe(t)), o;
   }
   if (i == null)
     throw new Error(
       "CastClient: binary batch publish requires files[].data or files[].byteLength"
     );
   const s = { ...e };
-  return delete s.data, delete s.binaryTransfer, r || delete s.url, delete s.payloadId, delete s.payloadIds, delete s.chunkByteLengths, delete s.expiresAt, s.byteLength = i, (typeof s.fileName != "string" || !s.fileName.trim()) && (s.fileName = xe(t, n)), (typeof s.mimeType != "string" || !s.mimeType.trim()) && (s.mimeType = Oe(t)), s;
+  return delete s.data, delete s.binaryTransfer, r || delete s.url, delete s.payloadId, delete s.payloadIds, delete s.chunkByteLengths, delete s.expiresAt, s.byteLength = i, (typeof s.fileName != "string" || !s.fileName.trim()) && (s.fileName = xe(t, n)), (typeof s.mimeType != "string" || !s.mimeType.trim()) && (s.mimeType = Pe(t)), s;
 }
 async function _n(e) {
   if (!e.event || typeof e.event != "object")
@@ -10092,10 +10767,10 @@ function _t(e) {
 function xn(e) {
   return typeof e != "string" ? false : e.endsWith(V);
 }
-function On(e) {
+function Pn(e) {
   return typeof e != "string" ? false : e.endsWith(J);
 }
-function Pn(e) {
+function On(e) {
   return typeof e != "string" ? "" : e.endsWith(V) ? e.slice(0, -V.length) : e.endsWith(J) ? e.slice(0, -J.length) : "";
 }
 function Dn(e) {
@@ -10243,7 +10918,7 @@ function Wn(e, t) {
 function Vn(e) {
   delete e.binaryTransfer, delete e.url, delete e.payloadId, delete e.payloadIds, delete e.chunkByteLengths, delete e.expiresAt;
 }
-function Ot(e, t) {
+function Pt(e, t) {
   const n = e.reduce((s, o) => s + o.byteLength, 0);
   if (typeof t == "number" && t >= 0 && n !== t)
     throw new Error(
@@ -10259,7 +10934,7 @@ function pt(e, t, n) {
   const r = e && e.event, i = r && r.context, s = i && i.files, o = s && s[t];
   return !o || typeof o != "object" ? false : (Vn(o), o.data = n, o.byteLength = n.byteLength, true);
 }
-async function Pt(e, t, { hubEndpoint: n, accessToken: r }) {
+async function Ot(e, t, { hubEndpoint: n, accessToken: r }) {
   const i = Wn(e, n);
   if (!i)
     throw new Error("CastClient.fetchPayload: missing or invalid payloadId");
@@ -10307,12 +10982,12 @@ async function Jn(e, t) {
       i + F
     ), c = await Promise.all(
       s.map(
-        (d, f) => Pt(d, o[f] ?? null, t)
+        (d, f) => Ot(d, o[f] ?? null, t)
       )
     );
     r.push(...c);
   }
-  return Ot(
+  return Pt(
     r,
     typeof e.byteLength == "number" ? e.byteLength : null
   );
@@ -10325,7 +11000,7 @@ async function Yn(e, t, n = F) {
   async function o() {
     for (; s < e.length; ) {
       const d = s++, f = e[d];
-      i[d] = await Pt(
+      i[d] = await Ot(
         f.payloadId,
         f.expectedLength ?? null,
         t
@@ -10393,7 +11068,7 @@ function Kn(e) {
       }
       const b = yt(n);
       for (const [u, h] of a) {
-        const m = b.event.context.files[u], y = typeof m.byteLength == "number" ? m.byteLength : null, S = Ot(h, y);
+        const m = b.event.context.files[u], y = typeof m.byteLength == "number" ? m.byteLength : null, S = Pt(h, y);
         if (!pt(b, u, S))
           throw new Error("CastClient.fetchAllPayloads: attach failed");
       }
@@ -10708,7 +11383,7 @@ function ar(e) {
       )
     ).map((p) => String(p.value || "").trim()).filter(Boolean) : [];
   }
-  function O(p, I2) {
+  function P2(p, I2) {
     if (m) {
       if (m.replaceChildren(), !p.length) {
         const T = document.createElement("p");
@@ -10749,7 +11424,7 @@ function ar(e) {
   async function oe() {
     const p = L();
     if (!p.hubEndpoint || !p.connected)
-      return O([], p.topic), lt(null), w(null), null;
+      return P2([], p.topic), lt(null), w(null), null;
     const [I2, T] = await Promise.all([
       Bt(p.hubEndpoint),
       K(p.hubEndpoint)
@@ -10758,7 +11433,7 @@ function ar(e) {
       p.subscriberName,
       T
     ), A = Qe(p, N);
-    return N || O(I2, p.topic), lt(A), w(A), A;
+    return N || P2(I2, p.topic), lt(A), w(A), A;
   }
   async function hn() {
     if (o)
@@ -10788,7 +11463,7 @@ function ar(e) {
         I2,
         T,
         p.userName
-      ), await oe(), P2();
+      ), await oe(), O();
     } catch (N) {
       E(
         "error",
@@ -10822,7 +11497,7 @@ function ar(e) {
         A ? "Conference ended." : "Left conference."
       ), await new Promise((U) => {
         setTimeout(U, Dt);
-      }), P2();
+      }), O();
     } catch (U) {
       E(
         "error",
@@ -10836,11 +11511,11 @@ function ar(e) {
     E("", ""), l && (l.value = "Test conference"), h && (h.value = ""), u && (u.hidden = true), c.hidden = false, d instanceof HTMLElement && d.focus({ preventScroll: true }), oe().catch(() => {
     });
   }
-  function P2() {
+  function O() {
     c.hidden = true, E("", "");
   }
   function yn() {
-    P2(), c.remove();
+    O(), c.remove();
   }
   return l == null || l.addEventListener("change", () => {
     u && (u.hidden = String(l.value || "") !== "other");
@@ -10851,12 +11526,12 @@ function ar(e) {
     mn().catch(() => {
     });
   }), c.querySelectorAll("[data-cast-conference-close]").forEach((p) => {
-    p.addEventListener("click", () => P2());
+    p.addEventListener("click", () => O());
   }), c.addEventListener("click", (p) => {
-    p.target === c && P2();
+    p.target === c && O();
   }), {
     open: pn,
-    close: P2,
+    close: O,
     destroy: yn,
     refresh: oe,
     getView: () => s,
@@ -10865,13 +11540,13 @@ function ar(e) {
     }
   };
 }
-var Pe = "ID";
+var Oe = "ID";
 function cr(e = {}) {
   const t = Array.isArray(e.selfActors) ? e.selfActors.map((s) => String(s || "").trim()).filter(Boolean) : [], n = Array.isArray(e.connectedActors) ? e.connectedActors.map((s) => String(s || "").trim()).filter(Boolean) : [];
   return t.some(
-    (s) => s === Pe || s.toUpperCase() === "ID"
+    (s) => s === Oe || s.toUpperCase() === "ID"
   ) ? true : !n.some(
-    (s) => s === Pe || s.toUpperCase() === "ID"
+    (s) => s === Oe || s.toUpperCase() === "ID"
   );
 }
 function qt(e) {
@@ -11031,7 +11706,7 @@ function ur(e) {
       ), h = u.context && typeof u.context == "object" ? u.context : {}, m = String(h.leaveTopic || "").trim();
       return !m || m === l ? (s.close(), i == null || i(false), r == null || r(null)) : o(), true;
     }
-    return l && a.hostTopic && (l === a.hostTopic || l.toLowerCase() === a.hostTopic.toLowerCase()) ? (i == null || i(true), o(), true) : n() ? (s.open(a), o(), true) : (o(), true);
+    return l && a.hostTopic && (l === a.hostTopic || l.toLowerCase() === a.hostTopic.toLowerCase()) ? (i == null || i(false), o(), true) : n() ? (s.open(a), o(), true) : (o(), true);
   }
   return {
     handleHubMessage: d,
@@ -11686,10 +12361,10 @@ function xr(e, t, n) {
   return new File([r], i, { type: s });
 }
 var wt = 4e3;
-var Or = 480;
+var Pr = 480;
 var le = "[binary/redacted]";
 function fe(e, t) {
-  return t > 8 ? "[max-depth]" : e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? le : typeof e == "string" ? e.length > Or ? `${e.slice(0, 160)}\u2026 (${e.length} chars)` : e : Array.isArray(e) ? e.map((n) => fe(n, t + 1)) : e && typeof e == "object" ? Object.entries(e).reduce((n, [r, i]) => (r.toLowerCase() === "data" && typeof i == "string" && i.length > 200 ? n[r] = le : n[r] = fe(i, t + 1), n), {}) : e;
+  return t > 8 ? "[max-depth]" : e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? le : typeof e == "string" ? e.length > Pr ? `${e.slice(0, 160)}\u2026 (${e.length} chars)` : e : Array.isArray(e) ? e.map((n) => fe(n, t + 1)) : e && typeof e == "object" ? Object.entries(e).reduce((n, [r, i]) => (r.toLowerCase() === "data" && typeof i == "string" && i.length > 200 ? n[r] = le : n[r] = fe(i, t + 1), n), {}) : e;
 }
 function je(e) {
   try {
@@ -11719,7 +12394,7 @@ function en(e, t) {
   const n = e === "dicom-send" || e === "nifti-send" ? "image" : "object", r = t === 1 ? n : `${n}s`;
   return `${e} (${t} ${r})`;
 }
-function Pr(e) {
+function Or(e) {
   const t = e != null && e.event && typeof e.event == "object" ? e.event : void 0, r = se(t) || "publish", i = st(t);
   return { label: en(r, i), detail: "" };
 }
@@ -11877,67 +12552,69 @@ var Xr = "Lung Screening";
 var Zr = "Toronto, Canada";
 var Qr = "CT lung screening (dicom-send / nifti-send). Returns a screening result line.";
 var ei = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/lung_screening.py";
-var ti = "dicom-send";
-var ni = {
+var ti = "https://projectweek.na-mic.org/PW45_2026_Boston/Projects/ExtractingDeepLearningFeaturesFromCtImagesOfTheThoracicRegionForLungCancerApplications/";
+var ni = "dicom-send";
+var ri = {
   id: Yr,
   product: Kr,
   title: Xr,
   location: Zr,
   summary: Qr,
   githubUrl: ei,
-  hubEvent: ti
+  websiteUrl: ti,
+  hubEvent: ni
 };
-var ri = "totalseg";
-var ii = "TOTALSEG";
-var si = "Total Segmentator";
-var oi = "Frankfurt, Germany";
-var ai = "Whole-body CT/MR multi-organ segmentation (dicom-send / nifti-send jobs). Returns DICOM SEG via dicom-send.";
-var ci = "https://github.com/wasserth/TotalSegmentator";
-var ui = "https://totalsegmentator.com/";
-var li = "dicom-send";
-var fi = {
-  id: ri,
-  product: ii,
-  title: si,
-  location: oi,
-  summary: ai,
-  githubUrl: ci,
-  websiteUrl: ui,
-  hubEvent: li
+var ii = "totalseg";
+var si = "TOTALSEG";
+var oi = "Total Segmentator";
+var ai = "Frankfurt, Germany";
+var ci = "Whole-body CT/MR multi-organ segmentation (dicom-send / nifti-send jobs). Returns DICOM SEG via dicom-send.";
+var ui = "https://github.com/wasserth/TotalSegmentator";
+var li = "https://totalsegmentator.com/";
+var fi = "dicom-send";
+var di = {
+  id: ii,
+  product: si,
+  title: oi,
+  location: ai,
+  summary: ci,
+  githubUrl: ui,
+  websiteUrl: li,
+  hubEvent: fi
 };
-var di = "neuro";
-var bi = "NEURO_SEG";
-var hi = "Subcortical segmentation";
-var mi = "Montreal, Canada";
-var pi = "Neuro / subcortical segmentation (nifti-send). Prefers a NIfTI volume input.";
-var yi = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/neuro_seg.py";
-var gi = "nifti-send";
-var Si = {
-  id: di,
-  product: bi,
-  title: hi,
-  location: mi,
-  summary: pi,
-  githubUrl: yi,
-  hubEvent: gi
+var bi = "neuro";
+var hi = "NEURO_SEG";
+var mi = "Subcortical segmentation";
+var pi = "Montreal, Canada";
+var yi = "Neuro / subcortical segmentation (nifti-send). Prefers a NIfTI volume input.";
+var gi = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/neuro_seg.py";
+var Si = "nifti-send";
+var Ci = {
+  id: bi,
+  product: hi,
+  title: mi,
+  location: pi,
+  summary: yi,
+  githubUrl: gi,
+  hubEvent: Si
 };
-var Ci = "dental";
-var wi = "DENTAL_SEG";
-var Ei = "Dental Segmentator";
-var Ti = "Paris, France";
-var Ni = "Fully automatic CT/CBCT dental segmentation (maxilla, mandible, upper/lower teeth, mandibular canal). Accepts dicom-send / nifti-send.";
-var Ai = "https://github.com/gaudot/SlicerDentalSegmentator";
-var vi = "https://www.kitware.com/dental-segmentator/";
-var Li = "dicom-send";
-var Ii = {
-  id: Ci,
-  product: wi,
-  title: Ei,
-  location: Ti,
-  summary: Ni,
-  githubUrl: Ai,
-  websiteUrl: vi,
-  hubEvent: Li
+var wi = "dental";
+var Ei = "DENTAL_SEG";
+var Ti = "Dental Segmentator";
+var Ni = "Paris, France";
+var Ai = "Fully automatic CT/CBCT dental segmentation (maxilla, mandible, upper/lower teeth, mandibular canal). Accepts dicom-send / nifti-send.";
+var vi = "https://github.com/gaudot/SlicerDentalSegmentator";
+var Li = "https://www.kitware.com/dental-segmentator/";
+var Ii = "dicom-send";
+var _i = {
+  id: wi,
+  product: Ei,
+  title: Ti,
+  location: Ni,
+  summary: Ai,
+  githubUrl: vi,
+  websiteUrl: Li,
+  hubEvent: Ii
 };
 function ae(e) {
   const t = String(e.summary || e.capabilities || "").trim(), n = e.hubEvent === "nifti-send" ? "nifti-send" : "dicom-send", r = {
@@ -11956,15 +12633,15 @@ function ae(e) {
   return o && (r.buyMeACoffeeUrl = o), r;
 }
 var x = Object.freeze([
-  ae(ni),
-  ae(fi),
-  ae(Si),
-  ae(Ii)
+  ae(ri),
+  ae(di),
+  ae(Ci),
+  ae(_i)
 ]);
 function W(e) {
   return String(e ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function _i(e) {
+function ki(e) {
   if (!e || typeof e != "object") return "";
   const t = W(e.title), n = W(e.summary || e.capabilities), r = [
     '<div class="cast-inference-info-card">',
@@ -11984,7 +12661,7 @@ function _i(e) {
     `<a class="cast-inference-info-coffee" href="${W(o)}" target="_blank" rel="noopener noreferrer" title="Buy Me a Coffee"><span aria-hidden="true">\u2615</span> Buy me a coffee</a>`
   ), r.push("</div></div>"), r.join("");
 }
-function ki(e, t) {
+function $i(e, t) {
   if (!e || typeof e != "object")
     return "";
   const n = [
@@ -12023,7 +12700,7 @@ var un = Object.freeze({
   dental: (e) => e === "DENTAL_SEG" || e.startsWith("DENTAL_SEG") || e === "DENTALSEG" || e.startsWith("DENTALSEG") || e === "DENTALSEGMENTATOR" || e.startsWith("DENTALSEGMENTATOR"),
   reporting: (e) => e === "CAST-RPT" || e.startsWith("CAST-RPT")
 });
-function $i(e, t) {
+function Ui(e, t) {
   const n = un[t];
   return n ? n(cn(e)) : false;
 }
@@ -12090,7 +12767,7 @@ async function ct(e, t) {
     }
   });
 }
-async function Ui(e, t) {
+async function Ri(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
     return { ok: false, status: 0, data: { error: "No Cast client" } };
@@ -12110,7 +12787,7 @@ async function Ui(e, t) {
     }
   });
 }
-async function Ri(e, t) {
+async function xi(e, t) {
   const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
     return { online: false, items: [], error: "No Cast client" };
@@ -12135,7 +12812,7 @@ async function Ri(e, t) {
     };
   }
 }
-function xi(e, t) {
+function Pi(e, t) {
   if (!e) return false;
   const n = an(e);
   return n && n.id === t.id ? true : t.id === "totalseg" ? ve(e) : t.id === "lung" ? Le(e) : t.id === "neuro" ? Ie(e) : t.id === "dental" ? _e(e) : false;
@@ -12161,7 +12838,7 @@ function dn(e) {
   return x.map((r) => {
     for (const i of n) {
       const s = ke(i);
-      if (!xi(s, r)) continue;
+      if (!Pi(s, r)) continue;
       const o = i.data;
       return {
         server: r,
@@ -12206,7 +12883,7 @@ async function Oi(e, t) {
     }));
   }
 }
-async function Pi(e, t) {
+async function Di(e, t) {
   const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.hubEvent) || "").trim(), i = String((t == null ? void 0 : t.subscriberName) || "").trim(), s = String((t == null ? void 0 : t.topic) || "").trim(), o = Array.isArray(t == null ? void 0 : t.files) ? t.files : [];
   if (!(e != null && e.publish))
     return { ok: false, detail: "No Cast client" };
@@ -12253,7 +12930,7 @@ async function Pi(e, t) {
     };
   }
 }
-var Di = 1e4;
+var Mi = 1e4;
 var Et = 5e3;
 var Tt = {
   config: {
@@ -12272,7 +12949,7 @@ var Tt = {
   onMessageCallback: null,
   onConnectionStateChangeCallback: null
 };
-function Mi(e, t) {
+function Bi(e, t) {
   t.classHierarchy.push("vtkCastClient");
   function n(a, b) {
     t.onConnectionStateChangeCallback && t.onConnectionStateChangeCallback(a, b);
@@ -12666,8 +13343,8 @@ function Mi(e, t) {
     };
     if (a.event && typeof a.event == "object") {
       m.event = { ...a.event };
-      const O = t.session.topic && String(t.session.topic).trim();
-      O && !m.event["hub.topic"] && (m.event["hub.topic"] = O);
+      const P2 = t.session.topic && String(t.session.topic).trim();
+      P2 && !m.event["hub.topic"] && (m.event["hub.topic"] = P2);
     } else
       throw new Error(
         'CastClient.request: "event" with hub.event is required.'
@@ -12732,7 +13409,7 @@ function Mi(e, t) {
     Array.isArray(t.session.actors) && t.session.actors.length > 0 && (y.actor = t.session.actors[0]), t.hub.websocket.send(JSON.stringify(y));
   }, t.config.autoReconnect && (t.reconnectInterval = setInterval(
     d,
-    Di
+    Mi
   ));
 }
 function bn(e, t, n = {}) {
@@ -12745,11 +13422,11 @@ function bn(e, t, n = {}) {
     ...Fn(),
     ...t.config.hub || {},
     ...qn()
-  }, gn(e, t), Sn(e, t, ["config"]), Mi(e, t);
+  }, gn(e, t), Sn(e, t, ["config"]), Bi(e, t);
 }
-var Bi = wn(bn, "vtkCastClient");
-var Fi = {
-  newInstance: Bi,
+var Fi = wn(bn, "vtkCastClient");
+var ji = {
+  newInstance: Fi,
   extend: bn,
   applyCastPublishEnvelopeFields: jr,
   batchContextFiles: Xt,
@@ -12769,7 +13446,7 @@ var Fi = {
   CAST_CONFERENCE_TITLE_PRESETS: Mt,
   CAST_DEFAULT_SUBSCRIBER_ACTOR: Ne,
   createCastConferenceDialog: ar,
-  CAST_IMAGE_DISPLAY_ACTOR: Pe,
+  CAST_IMAGE_DISPLAY_ACTOR: Oe,
   createCastConferenceInviteController: ur,
   createCastConferenceInviteDialog: zt,
   parseConferenceInviteFromMessage: qt,
@@ -12801,7 +13478,7 @@ var Fi = {
   conferenceHostTopic: ne,
   countEventContextObjects: st,
   createCastConference: Ft,
-  dataTypeFromEventName: Pn,
+  dataTypeFromEventName: On,
   decodeBase64ToArrayBuffer: Kt,
   DEFAULT_CAST_PUBLISH_ENVELOPE_FIELDS: Br,
   deleteCastConference: Ze,
@@ -12835,7 +13512,7 @@ var Fi = {
   isCastConferenceParticipant: Xe,
   isHubEndpointInCloud: It,
   isRequestEvent: xn,
-  isResponseEvent: On,
+  isResponseEvent: Pn,
   isRunningInCloud: Lt,
   isStatusPayloadOnline: at,
   isStatusRequestDataType: Jr,
@@ -12850,15 +13527,15 @@ var Fi = {
   normalizeProductToken: qe,
   CAST_INFERENCE_SERVERS: x,
   findInferenceServerByProduct: an,
-  inferenceServerInfoText: ki,
-  renderInferenceServerInfoCardHtml: _i,
+  inferenceServerInfoText: $i,
+  renderInferenceServerInfoCardHtml: ki,
   CAST_PRODUCT_MATCHERS: un,
-  matchesCastProduct: $i,
+  matchesCastProduct: Ui,
   normalizeCastProductName: cn,
   parseProductStatusProbe: fn,
-  publishCastUrlSend: Pi,
-  requestCastLiveScene: Ui,
-  requestCastProductStatus: Ri,
+  publishCastUrlSend: Di,
+  requestCastLiveScene: Ri,
+  requestCastProductStatus: xi,
   requestCastStatus: ct,
   mapInferenceServersFromStatusResult: dn,
   probeCastInferenceServers: Oi,
@@ -12897,7 +13574,7 @@ var Fi = {
   statusItemValue: ot,
   stringifyForLog: je,
   summarizeInboundCastMessage: Dr,
-  summarizeOutboundCastPublish: Pr,
+  summarizeOutboundCastPublish: Or,
   TOTAL_SEGMENTATOR_PRODUCT_ALIASES: nn,
   LUNG_SCREENING_PRODUCT_ALIASES: rn,
   NEURO_SEG_PRODUCT_ALIASES: sn,
@@ -13723,6 +14400,7 @@ var connection = "idle";
 var connectionDetail = "Not connected";
 var conference = null;
 var conferenceFollowHost = false;
+var conferenceFollowChoice = null;
 var lastImagingStudyOpenContext = [];
 var lastLiveScene = null;
 var lastSegCatalog = EMPTY_SEG_CATALOG;
@@ -13791,14 +14469,43 @@ function getIraCastSessionInfo() {
   };
 }
 function setIraConferenceView(view) {
+  const wasHost = conference?.selfRole === "leading";
   conference = view;
   if (!view) {
     conferenceFollowHost = false;
+    conferenceFollowChoice = null;
+  } else if (view.selfRole === "leading") {
+    conferenceFollowHost = false;
+    conferenceFollowChoice = null;
+  } else if (view.selfRole === "following") {
+    if (conferenceFollowChoice === null) {
+      conferenceFollowChoice = true;
+      conferenceFollowHost = true;
+    } else {
+      conferenceFollowHost = conferenceFollowChoice;
+    }
+  }
+  const nowHost = conference?.selfRole === "leading";
+  if (nowHost && !wasHost) {
+    console.info(`${LOG} conference host active \u2014 scene-update publish armed`);
+    onConferenceHost?.();
   }
   onStatus?.(connection, connectionDetail);
 }
 function setIraConferenceFollowHost(followHost) {
-  conferenceFollowHost = Boolean(followHost);
+  conferenceFollowChoice = Boolean(followHost);
+  if (conference?.selfRole === "leading") {
+    conferenceFollowHost = false;
+    return;
+  }
+  conferenceFollowHost = conferenceFollowChoice;
+}
+function isIraConferenceHost() {
+  return conference?.selfRole === "leading";
+}
+var onConferenceHost = null;
+function setIraConferenceHostHandler(fn2) {
+  onConferenceHost = fn2;
 }
 var conferenceHubHandler = null;
 function setIraConferenceHubHandler(fn2) {
@@ -13822,11 +14529,23 @@ async function syncIraConferenceView() {
   }
 }
 function handleConferenceHubEvent(message) {
-  if (conferenceHubHandler?.(message)) {
-    return true;
-  }
   const event = message?.event;
   const hubEvent = se(event);
+  const inviteHandled = Boolean(conferenceHubHandler?.(message));
+  if (inviteHandled) {
+    if (hubEvent === "conference-start") {
+      void syncIraConferenceView();
+    } else if (hubEvent === "conference-end") {
+      const context = event?.context && typeof event.context === "object" ? event.context : {};
+      const leaveTopic = String(context.leaveTopic ?? "").trim();
+      if (!leaveTopic || leaveTopic === topic) {
+        setIraConferenceView(null);
+      } else {
+        void syncIraConferenceView();
+      }
+    }
+    return true;
+  }
   if (hubEvent === "conference-start") {
     void syncIraConferenceView();
     return true;
@@ -14043,6 +14762,42 @@ var onSceneUpdate = null;
 function setIraSceneUpdateHandler(fn2) {
   onSceneUpdate = fn2;
 }
+async function publishIraSceneUpdate(ops) {
+  if (!client || connection !== "connected" || !topic) {
+    console.warn(`${LOG} scene-update: not connected`);
+    return false;
+  }
+  if (!Array.isArray(ops) || !ops.length) {
+    console.info(`${LOG} scene-update skip: no ops`);
+    return false;
+  }
+  try {
+    const res = await client.publish({
+      event: {
+        "hub.topic": topic,
+        "hub.event": "scene-update",
+        context: [{ key: "scene", resource: { ops } }]
+      },
+      actor: ID_ACTOR,
+      // Fan-out like ImagingStudy so all topic peers (IRA ID actors) receive it.
+      "target.actor": "*",
+      "target.product.name": "*"
+    });
+    const ok = Boolean(res && res.ok);
+    if (!ok) {
+      console.warn(
+        `${LOG} scene-update failed`,
+        res ? `HTTP ${res.status}` : "No response"
+      );
+    } else {
+      console.info(`${LOG} published scene-update ops=`, ops.length);
+    }
+    return ok;
+  } catch (err) {
+    console.error(`${LOG} scene-update exception`, err);
+    return false;
+  }
+}
 var onPngCapture = null;
 function setIraPngFullSizeCaptureHandler(fn2) {
   onPngCapture = fn2;
@@ -14052,7 +14807,14 @@ function handleSceneUpdateMessage(message) {
   if (se(event) !== "scene-update") return false;
   const context = Er(message);
   const items = Array.isArray(context) ? context : [];
-  void Promise.resolve(onSceneUpdate?.(items)).catch(
+  const deliver = conference && !conferenceFollowHost && !isIraConferenceHost() ? filterSceneUpdateContextForVanishing(items) : items;
+  if (!deliver.length) {
+    if (conference && !conferenceFollowHost && !isIraConferenceHost()) {
+      console.info(`${LOG} scene-update ignored (not following host; no vanishing ops)`);
+    }
+    return true;
+  }
+  void Promise.resolve(onSceneUpdate?.(deliver)).catch(
     (err) => console.error(`${LOG} scene-update handler failed`, err)
   );
   return true;
@@ -14065,7 +14827,7 @@ async function publishInferenceJob(opts) {
   if (!subscriber) return { ok: false, detail: "No subscriber name" };
   if (!topic) return { ok: false, detail: "No Cast topic" };
   if (!opts.files.length) return { ok: false, detail: "No volume files" };
-  return Pi(client, {
+  return Di(client, {
     targetProductName: opts.product,
     hubEvent: opts.hubEvent,
     files: opts.files,
@@ -14149,6 +14911,8 @@ function setConnection(next, detail) {
   connectionDetail = detail;
   if (wasConnected && next !== "connected") {
     conference = null;
+    conferenceFollowHost = false;
+    conferenceFollowChoice = null;
     clearReportingConnectedApps();
     worklistClientWindow = null;
   }
@@ -14173,7 +14937,7 @@ function clearReportingConnectedApps() {
 function isReportingPresencePeer(productName, actor) {
   const actorKey = actor.trim().toUpperCase();
   if (actorKey === REPORTING_ACTOR) return true;
-  return $i(productName, "reporting");
+  return Ui(productName, "reporting");
 }
 function markReportingConnectedApp(message) {
   const subscriber = Tr(message);
@@ -14209,11 +14973,12 @@ function handleSubscriptionRemoved(message) {
 function stripCastParamsFromUrl() {
   if (!globalThis.history?.replaceState) return;
   const url = new URL(globalThis.location.href);
-  if (!url.searchParams.has("topic") && !url.searchParams.has("id-token")) {
+  if (!url.searchParams.has("topic") && !url.searchParams.has("id-token") && !url.searchParams.has("followHost")) {
     return;
   }
   url.searchParams.delete("topic");
   url.searchParams.delete("id-token");
+  url.searchParams.delete("followHost");
   globalThis.history.replaceState(null, "", url.toString());
 }
 function extractActorKeywords(actor) {
@@ -14572,6 +15337,12 @@ async function connectIraCast() {
   const params = new URLSearchParams(globalThis.location.search);
   topic = params.get("topic")?.trim() || "";
   let urlToken = params.get("id-token")?.trim() || "";
+  const followHostParam = params.get("followHost")?.trim().toLowerCase() || "";
+  if (followHostParam === "1" || followHostParam === "true") {
+    setIraConferenceFollowHost(true);
+  } else if (followHostParam === "0" || followHostParam === "false") {
+    setIraConferenceFollowHost(false);
+  }
   if (!topic && !urlToken) {
     setConnection("idle", "Not connected");
     return;
@@ -14580,7 +15351,7 @@ async function connectIraCast() {
   setConnection("connecting", "Connecting to Cast hub\u2026");
   subscriberName = He("IRA");
   const hub = resolveHubConfig();
-  client = Fi.newInstance({
+  client = ji.newInstance({
     hub,
     session: {
       subscriberName,
@@ -14773,6 +15544,49 @@ function applyOp(nodes, op) {
 // render/demos/ira/ira-live-scene-bridge.ts
 var IRA_VOL_NODE_ID = "vol1";
 var IRA_SEG_NODE_ID = "seg1";
+var IRA_CAM_NODE_ID = "cam1";
+var IRA_SLICE_LAYOUT_BY_PLANE = {
+  axial: "Red",
+  sagittal: "Yellow",
+  coronal: "Green",
+  oblique: "Oblique"
+};
+var IRA_SLICE_PLANE_BY_LAYOUT = {
+  Red: "axial",
+  Yellow: "sagittal",
+  Green: "coronal",
+  Oblique: "oblique"
+};
+var IRA_SLICE_ORIENTATION_BY_PLANE = {
+  axial: "Axial",
+  sagittal: "Sagittal",
+  coronal: "Coronal",
+  oblique: "Oblique"
+};
+function iraSliceNodeId(layout) {
+  return `iraSlice-${layout}`;
+}
+var IRA_SLICE_NODE_IDS = Object.keys(IRA_SLICE_PLANE_BY_LAYOUT).map(iraSliceNodeId);
+function sliceToRASFromBasis(uDir, vDir, nDir, center) {
+  return [
+    uDir[0],
+    vDir[0],
+    nDir[0],
+    center[0],
+    uDir[1],
+    vDir[1],
+    nDir[1],
+    center[1],
+    uDir[2],
+    vDir[2],
+    nDir[2],
+    center[2],
+    0,
+    0,
+    0,
+    1
+  ];
+}
 function cloneNodes(nodes) {
   const out = {};
   if (!nodes || typeof nodes !== "object") return out;
@@ -14821,6 +15635,7 @@ function buildIraLiveSceneDoc(input) {
       };
     });
     const prev = nodes[IRA_SEG_NODE_ID];
+    const segOpacity = typeof input.opacity === "number" && Number.isFinite(input.opacity) ? Math.max(0, Math.min(1, input.opacity)) : typeof prev?.opacity === "number" ? Number(prev.opacity) : 1;
     nodes[IRA_SEG_NODE_ID] = {
       ...prev || {},
       type: "segmentation",
@@ -14831,7 +15646,7 @@ function buildIraLiveSceneDoc(input) {
       ijkToRAS: [...input.ijkToRAS],
       refs: { source: [IRA_VOL_NODE_ID] },
       visible: true,
-      opacity: typeof prev?.opacity === "number" ? prev.opacity : 1,
+      opacity: segOpacity,
       labelsVisible: input.labelsVisible,
       fill2D: prev?.fill2D || { visible: true, opacity: 0.5 },
       outline2D: prev?.outline2D || { visible: true, opacity: 1 },
@@ -14840,10 +15655,125 @@ function buildIraLiveSceneDoc(input) {
   } else {
     delete nodes[IRA_SEG_NODE_ID];
   }
+  if (input.camera) {
+    const prevCam = nodes[IRA_CAM_NODE_ID];
+    const c = input.camera;
+    nodes[IRA_CAM_NODE_ID] = {
+      ...prevCam || {},
+      type: "camera",
+      id: IRA_CAM_NODE_ID,
+      name: String(prevCam?.name || "Camera"),
+      position: [...c.position],
+      focalPoint: [...c.focalPoint],
+      viewUp: [...c.viewUp],
+      viewAngle: Number.isFinite(c.viewAngle) ? c.viewAngle : 30
+    };
+  }
+  if (Array.isArray(input.slices)) {
+    for (const frame of input.slices) {
+      if (!frame?.layoutName || !Array.isArray(frame.sliceToRAS)) continue;
+      const id = iraSliceNodeId(frame.layoutName);
+      const prevSlice = nodes[id];
+      const fov = frame.fieldOfView;
+      nodes[id] = {
+        ...prevSlice || {},
+        type: "view",
+        kind: "slice",
+        id,
+        name: frame.layoutName,
+        layoutName: frame.layoutName,
+        orientation: String(frame.orientation || "").trim() || frame.layoutName,
+        sliceToRAS: [...frame.sliceToRAS],
+        fieldOfView: [
+          Number(fov?.[0]) || 0,
+          Number(fov?.[1]) || 0,
+          Number(fov?.[2]) || 0
+        ]
+      };
+    }
+  }
   return {
     ...input.base || {},
     blobBase: String(input.base?.blobBase || "").trim() || "ira://local/",
     nodes
+  };
+}
+function vec3From(value) {
+  if (!Array.isArray(value) || value.length < 3) return null;
+  const a = Number(value[0]);
+  const b = Number(value[1]);
+  const c = Number(value[2]);
+  if (![a, b, c].every(Number.isFinite)) return null;
+  return [a, b, c];
+}
+function norm3(v2) {
+  const l = Math.hypot(v2[0], v2[1], v2[2]) || 1;
+  return [v2[0] / l, v2[1] / l, v2[2] / l];
+}
+function layoutNameFromSliceNode(node) {
+  const raw = String(node.layoutName || node.name || "").trim();
+  if (raw === "Red" || raw === "Yellow" || raw === "Green" || raw === "Oblique") {
+    return raw;
+  }
+  const id = String(node.id || "");
+  if (id.endsWith("-Red")) return "Red";
+  if (id.endsWith("-Yellow")) return "Yellow";
+  if (id.endsWith("-Green")) return "Green";
+  if (id.endsWith("-Oblique")) return "Oblique";
+  const orient = String(node.orientation || "").trim().toLowerCase();
+  if (orient === "axial") return "Red";
+  if (orient === "sagittal") return "Yellow";
+  if (orient === "coronal") return "Green";
+  if (orient === "oblique") return "Oblique";
+  return null;
+}
+function sliceIntentFromNode(node) {
+  if (!node || node.type !== "view" || node.kind !== "slice") return null;
+  const layoutName = layoutNameFromSliceNode(node);
+  if (!layoutName) return null;
+  const m = node.sliceToRAS;
+  if (!Array.isArray(m) || m.length < 16) return null;
+  const nums = m.map((x2) => Number(x2));
+  if (!nums.every(Number.isFinite)) return null;
+  const col = (c) => [
+    nums[c],
+    nums[4 + c],
+    nums[8 + c]
+  ];
+  const centerRAS = col(3);
+  const uDir = norm3(col(0));
+  const vDir = norm3(col(1));
+  const nDir = norm3(col(2));
+  const fovRaw = node.fieldOfView;
+  let fieldOfView;
+  if (Array.isArray(fovRaw) && fovRaw.length >= 2) {
+    const fx = Number(fovRaw[0]);
+    const fy = Number(fovRaw[1]);
+    const fz = Number(fovRaw[2]);
+    if (Number.isFinite(fx) && Number.isFinite(fy) && fx > 0 && fy > 0) {
+      fieldOfView = [fx, fy, Number.isFinite(fz) ? fz : 0];
+    }
+  }
+  return {
+    layoutName,
+    plane: IRA_SLICE_PLANE_BY_LAYOUT[layoutName],
+    centerRAS,
+    fieldOfView,
+    basis: { uDir, vDir, nDir }
+  };
+}
+function cameraPoseFromNode(node) {
+  if (!node || node.type !== "camera") return void 0;
+  const position = vec3From(node.position);
+  const focalPoint = vec3From(node.focalPoint);
+  const viewUp = vec3From(node.viewUp);
+  if (!position || !focalPoint || !viewUp) return void 0;
+  const viewAngle = Number(node.viewAngle);
+  return {
+    position,
+    focalPoint,
+    viewUp,
+    viewAngle: Number.isFinite(viewAngle) ? viewAngle : 30
   };
 }
 function applySceneUpdateOps(doc, ops) {
@@ -14859,6 +15789,8 @@ function applySceneUpdateOps(doc, ops) {
   let volumePreset;
   let cropEnabled;
   let roiVisible;
+  let camera;
+  const slicesByLayout = /* @__PURE__ */ new Map();
   for (const op of ops) {
     if (!op || typeof op !== "object" || !op.op || !op.id) continue;
     const before = map.get(op.id);
@@ -14866,6 +15798,16 @@ function applySceneUpdateOps(doc, ops) {
     if (res.changed) changed = true;
     const after = map.get(op.id);
     if (!after) continue;
+    if (after.type === "camera") {
+      const pose = cameraPoseFromNode(after);
+      if (pose) camera = pose;
+      continue;
+    }
+    if (after.type === "view" && after.kind === "slice") {
+      const intent = sliceIntentFromNode(after);
+      if (intent) slicesByLayout.set(intent.layoutName, intent);
+      continue;
+    }
     if (after.type === "volume") {
       const volOp = Number(after.opacity);
       if (Number.isFinite(volOp)) {
@@ -14929,6 +15871,8 @@ function applySceneUpdateOps(doc, ops) {
       volumePreset,
       cropEnabled,
       roiVisible,
+      camera,
+      slices: [...slicesByLayout.values()],
       changed
     }
   };
@@ -14987,6 +15931,164 @@ function opsFromSceneUpdateContext(context) {
           value: disp.opacity
         });
       }
+    }
+  }
+  return ops;
+}
+function primarySegNodeId(doc) {
+  if (!doc?.nodes || typeof doc.nodes !== "object") return null;
+  if (doc.nodes[IRA_SEG_NODE_ID]) return IRA_SEG_NODE_ID;
+  for (const [id, n] of Object.entries(doc.nodes)) {
+    if (n && typeof n === "object" && n.type === "segmentation") {
+      return id;
+    }
+  }
+  return null;
+}
+function primaryVolNodeId(doc) {
+  if (!doc?.nodes || typeof doc.nodes !== "object") return null;
+  if (doc.nodes[IRA_VOL_NODE_ID]) return IRA_VOL_NODE_ID;
+  for (const [id, n] of Object.entries(doc.nodes)) {
+    if (n && typeof n === "object" && n.type === "volume") {
+      return id;
+    }
+  }
+  return null;
+}
+function stableJson(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+function displayFieldChanged(prevNode, nextNode, key) {
+  if (!prevNode) return nextNode != null && key in nextNode;
+  return stableJson(prevNode[key]) !== stableJson(nextNode?.[key]);
+}
+function buildIraDisplaySceneUpdateOps(doc, prev) {
+  if (!doc?.nodes || typeof doc.nodes !== "object") return [];
+  const ops = [];
+  const full = !prev?.nodes;
+  const segId = primarySegNodeId(doc) || IRA_SEG_NODE_ID;
+  const seg = doc.nodes[segId];
+  const prevSeg = prev?.nodes?.[segId];
+  if (seg && typeof seg === "object" && seg.type === "segmentation") {
+    if (full || displayFieldChanged(prevSeg, seg, "segments")) {
+      if (Array.isArray(seg.segments)) {
+        ops.push({
+          op: "patch",
+          id: segId,
+          path: "#/segments",
+          value: structuredClone(seg.segments)
+        });
+      }
+    }
+    if (full || displayFieldChanged(prevSeg, seg, "labelsVisible")) {
+      if (typeof seg.labelsVisible === "boolean") {
+        ops.push({
+          op: "patch",
+          id: segId,
+          path: "#/labelsVisible",
+          value: seg.labelsVisible
+        });
+      }
+    }
+    if (full || displayFieldChanged(prevSeg, seg, "opacity")) {
+      const o = Number(seg.opacity);
+      if (Number.isFinite(o)) {
+        ops.push({
+          op: "patch",
+          id: segId,
+          path: "#/opacity",
+          value: Math.max(0, Math.min(1, o))
+        });
+      }
+    }
+  }
+  const volId = primaryVolNodeId(doc) || IRA_VOL_NODE_ID;
+  const vol = doc.nodes[volId];
+  const prevVol = prev?.nodes?.[volId];
+  if (vol && typeof vol === "object" && vol.type === "volume") {
+    if (full || displayFieldChanged(prevVol, vol, "opacity")) {
+      const o = Number(vol.opacity);
+      if (Number.isFinite(o)) {
+        ops.push({
+          op: "patch",
+          id: volId,
+          path: "#/opacity",
+          value: Math.max(0, Math.min(1, o))
+        });
+      }
+    }
+    if (full || displayFieldChanged(prevVol, vol, "shift")) {
+      const s = Number(vol.shift);
+      if (Number.isFinite(s)) {
+        ops.push({
+          op: "patch",
+          id: volId,
+          path: "#/shift",
+          value: s
+        });
+      }
+    }
+    if (full || displayFieldChanged(prevVol, vol, "preset")) {
+      ops.push({
+        op: "patch",
+        id: volId,
+        path: "#/preset",
+        value: String(vol.preset ?? "").trim()
+      });
+    }
+    if (full || displayFieldChanged(prevVol, vol, "cropEnabled")) {
+      if (typeof vol.cropEnabled === "boolean") {
+        ops.push({
+          op: "patch",
+          id: volId,
+          path: "#/cropEnabled",
+          value: vol.cropEnabled
+        });
+      }
+    }
+    if (full || displayFieldChanged(prevVol, vol, "roiVisible")) {
+      if (typeof vol.roiVisible === "boolean") {
+        ops.push({
+          op: "patch",
+          id: volId,
+          path: "#/roiVisible",
+          value: vol.roiVisible
+        });
+      }
+    }
+  }
+  const camId = IRA_CAM_NODE_ID;
+  const cam = doc.nodes[camId];
+  const prevCam = prev?.nodes?.[camId];
+  if (cam && typeof cam === "object" && cam.type === "camera") {
+    const camChanged = full || !prevCam || displayFieldChanged(prevCam, cam, "position") || displayFieldChanged(prevCam, cam, "focalPoint") || displayFieldChanged(prevCam, cam, "viewUp") || displayFieldChanged(prevCam, cam, "viewAngle");
+    if (camChanged) {
+      ops.push({
+        op: "put",
+        id: camId,
+        node: structuredClone(cam)
+      });
+    }
+  }
+  for (const layout of Object.keys(
+    IRA_SLICE_PLANE_BY_LAYOUT
+  )) {
+    const id = iraSliceNodeId(layout);
+    const slice = doc.nodes[id];
+    const prevSlice = prev?.nodes?.[id];
+    if (!slice || typeof slice !== "object" || slice.type !== "view") continue;
+    if (slice.kind !== "slice") continue;
+    const sliceChanged = full || !prevSlice || displayFieldChanged(prevSlice, slice, "sliceToRAS") || displayFieldChanged(prevSlice, slice, "fieldOfView") || displayFieldChanged(prevSlice, slice, "orientation") || displayFieldChanged(prevSlice, slice, "layoutName");
+    if (sliceChanged) {
+      ops.push({
+        op: "put",
+        id,
+        node: structuredClone(slice)
+      });
     }
   }
   return ops;
@@ -16719,7 +17821,7 @@ function updateDetail() {
     }
   }
   detail.className = "ira-inference-detail ira-inference-detail-card";
-  detail.innerHTML = _i(row.def) + (opLines.length ? `<pre class="ira-inference-op-notes">${opLines.map(
+  detail.innerHTML = ki(row.def) + (opLines.length ? `<pre class="ira-inference-op-notes">${opLines.map(
     (l) => l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   ).join("\n")}</pre>` : "");
   const info = getIraCastSessionInfo();
@@ -17776,7 +18878,7 @@ var status = (msg, err = false) => {
   }
 };
 var cvEl = (id) => document.getElementById(id);
-var PLANES = ["axial", "coronal", "sagittal"];
+var PLANES = ["axial", "coronal", "sagittal", "oblique"];
 var SEG_FILL = 0.5;
 var CT_WL_PRESETS = [
   { name: "Soft Tissue", win: 400, lev: 40 },
@@ -17872,7 +18974,7 @@ async function main() {
   const gpu = await initDevice();
   const preferred = navigator.gpu.getPreferredCanvasFormat();
   const srgb = preferred + "-srgb";
-  const names = ["axial", "threeD", "coronal", "sagittal"];
+  const names = ["axial", "threeD", "coronal", "sagittal", "oblique"];
   const cv = {}, cx = {};
   for (const n of names) {
     cv[n] = cvEl("c-" + n);
@@ -18327,13 +19429,149 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   const off = {
     axial: slicerDefaultOffset01("axial", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
     coronal: slicerDefaultOffset01("coronal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
-    sagittal: slicerDefaultOffset01("sagittal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi)
+    sagittal: slicerDefaultOffset01("sagittal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi),
+    oblique: slicerDefaultOffset01("oblique", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi)
   };
   let sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
   const camera = framedCamera(sc.center, sc.radius);
   const wl = { win: sc.win, lev: sc.lev };
   let ira = null;
+  const vanishingStore = new VanishingStrokeStore({
+    onChange: () => {
+      if (!ira) return;
+      for (const p of PLANES) ira.drawOverlay(p);
+      ira.drawOverlay3d();
+    }
+  });
   let xhair = null;
+  let obliqueIn3D = null;
+  let dentalLayout = false;
+  const dot32 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross3 = (a, b) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0]
+  ];
+  const norm32 = (v2) => {
+    const L = Math.hypot(v2[0], v2[1], v2[2]) || 1;
+    return [v2[0] / L, v2[1] / L, v2[2] / L];
+  };
+  const rotAxis = (v2, k2, ang) => {
+    const c = Math.cos(ang), s = Math.sin(ang);
+    const d = dot32(k2, v2);
+    const x2 = cross3(k2, v2);
+    return [
+      v2[0] * c + x2[0] * s + k2[0] * d * (1 - c),
+      v2[1] * c + x2[1] * s + k2[1] * d * (1 - c),
+      v2[2] * c + x2[2] * s + k2[2] * d * (1 - c)
+    ];
+  };
+  const tiltBasis = (b, dPitch, dYaw) => {
+    let u = b.uDir, v2 = b.vDir, n = b.nDir;
+    n = rotAxis(n, u, dPitch);
+    v2 = rotAxis(v2, u, dPitch);
+    n = rotAxis(n, v2, dYaw);
+    u = rotAxis(u, v2, dYaw);
+    n = norm32(n);
+    u = norm32([u[0] - n[0] * dot32(u, n), u[1] - n[1] * dot32(u, n), u[2] - n[2] * dot32(u, n)]);
+    v2 = cross3(u, n);
+    return { uDir: u, vDir: v2, nDir: n };
+  };
+  const extentAlong = (d) => {
+    let lo = Infinity, hi2 = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      const c = [
+        i & 1 ? sc.rasHi[0] : sc.rasLo[0],
+        i & 2 ? sc.rasHi[1] : sc.rasLo[1],
+        i & 4 ? sc.rasHi[2] : sc.rasLo[2]
+      ];
+      const t = dot32(c, d);
+      if (t < lo) lo = t;
+      if (t > hi2) hi2 = t;
+    }
+    return { lo, hi: hi2 };
+  };
+  const obliqueCenterRAS = () => {
+    const b = sc.slice.basisOf("oblique");
+    const origin = [
+      (sc.rasLo[0] + sc.rasHi[0]) / 2,
+      (sc.rasLo[1] + sc.rasHi[1]) / 2,
+      (sc.rasLo[2] + sc.rasHi[2]) / 2
+    ];
+    const nx = extentAlong(b.nDir);
+    const want = nx.lo + Math.max(0, Math.min(1, off.oblique)) * (nx.hi - nx.lo);
+    const have = dot32(origin, b.nDir);
+    origin[0] += b.nDir[0] * (want - have);
+    origin[1] += b.nDir[1] * (want - have);
+    origin[2] += b.nDir[2] * (want - have);
+    return origin;
+  };
+  const tiltObliqueByPx = (dxPx, dyPx) => {
+    const sens = 5e-3;
+    const center = obliqueCenterRAS();
+    const next = tiltBasis(sc.slice.basisOf("oblique"), dyPx * sens, -dxPx * sens);
+    sc.slice.setBasis("oblique", next);
+    off.oblique = sc.slice.offset01Along("oblique", center);
+    drawSlice("oblique");
+    xhair?.redraw();
+    syncLiveScene();
+  };
+  const obliquePlaneOpts = () => {
+    const b = sc.slice.basisOf("oblique");
+    const origin = obliqueCenterRAS();
+    let hu = 0, hv = 0;
+    for (const sx of [sc.rasLo[0], sc.rasHi[0]]) {
+      for (const sy of [sc.rasLo[1], sc.rasHi[1]]) {
+        for (const sz of [sc.rasLo[2], sc.rasHi[2]]) {
+          const r = [sx - origin[0], sy - origin[1], sz - origin[2]];
+          hu = Math.max(hu, Math.abs(dot32(r, b.uDir)));
+          hv = Math.max(hv, Math.abs(dot32(r, b.vDir)));
+        }
+      }
+    }
+    const halfWin = wl.win / 2;
+    return {
+      p2t: sc.patientToTexture(),
+      origin,
+      normal: b.nDir,
+      uAxis: b.uDir,
+      vAxis: b.vDir,
+      halfExtU: hu,
+      halfExtV: hv,
+      clim: [wl.lev - halfWin, wl.lev + halfWin],
+      halfThick: Math.max(0.25, sliceIx.spacing("oblique") / 2),
+      normScale: sc.normScale()
+    };
+  };
+  const ensureObliqueIn3D = () => {
+    const opts = obliquePlaneOpts();
+    if (!obliqueIn3D) obliqueIn3D = new SlicePlaneField(sc.volumeTexture(), opts);
+    else obliqueIn3D.setPlane(opts);
+    return obliqueIn3D;
+  };
+  const setDentalObliqueVisible = (on2) => {
+    dentalLayout = on2;
+    if (on2) {
+      sc.setExtraFields([ensureObliqueIn3D()]);
+      draw3d();
+    } else {
+      sc.setExtraFields([]);
+      draw3d();
+    }
+  };
+  const refreshObliqueIn3D = () => {
+    if (!dentalLayout || !obliqueIn3D) return;
+    obliqueIn3D.setPlane(obliquePlaneOpts());
+    sc.scene.syncUniforms();
+    draw3d();
+  };
+  const invalidateObliqueIn3D = () => {
+    if (dentalLayout) sc.setExtraFields([]);
+    obliqueIn3D = null;
+    if (dentalLayout) {
+      sc.setExtraFields([ensureObliqueIn3D()]);
+    }
+  };
   const drawSlice = (p) => {
     if (studyDisposed) return;
     ira?.drawOverlay(p);
@@ -18341,12 +19579,14 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     sc.slice.setPlane(p, off[p]);
     sc.slice.renderToView(cx[p].getCurrentTexture().createView({ format: srgb }), cv[p].width, cv[p].height);
     updateReadout(p);
+    if (p === "oblique") refreshObliqueIn3D();
   };
   const draw3d = () => {
     if (studyDisposed) return;
     if (!cv.threeD.width) return;
     sc.scene.setCamera(camera.position, camera.focalPoint, camera.viewUp, camera.viewAngle, cv.threeD.width, cv.threeD.height);
     sc.scene.renderToView(cx.threeD.getCurrentTexture().createView({ format: srgb }), cv.threeD.width, cv.threeD.height);
+    ira?.drawOverlay3d();
     if (!labelsOn) return;
     const now = performance.now();
     const dt2 = (now - cardDt) / 1e3;
@@ -18367,6 +19607,30 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     }
   };
   let syncLiveScene = () => {
+  };
+  const collectSliceFrames = () => {
+    const slices = [];
+    for (const p of PLANES) {
+      const plane = p;
+      const layoutName = IRA_SLICE_LAYOUT_BY_PLANE[plane];
+      const aspect = cv[p].width / Math.max(1, cv[p].height);
+      const center = sc.slice.viewToRas(p, off[p], 0.5, 0.5, aspect);
+      const { fovX, fovY } = sc.slice.mirrorFrame(p, aspect);
+      const slab = sliceIx.spacing(p);
+      const b = sc.slice.basisOf(p);
+      slices.push({
+        layoutName,
+        orientation: IRA_SLICE_ORIENTATION_BY_PLANE[plane],
+        sliceToRAS: sliceToRASFromBasis(
+          [b.uDir[0], b.uDir[1], b.uDir[2]],
+          [b.vDir[0], b.vDir[1], b.vDir[2]],
+          [b.nDir[0], b.nDir[1], b.nDir[2]],
+          center
+        ),
+        fieldOfView: [fovX, fovY, slab]
+      });
+    }
+    return slices;
   };
   let drawAll = () => {
     for (const p of PLANES) drawSlice(p);
@@ -18421,10 +19685,103 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   let applyVrPresetFn = (name) => {
     vrPreset = name;
   };
+  let applyingRemoteSceneUpdate = false;
+  let hostScenePublishRaf = 0;
+  let hostScenePublishPending = null;
+  let hostScenePublishPrev = null;
+  const scheduleHostScenePublish = (doc, prev, opts) => {
+    if (applyingRemoteSceneUpdate || !isIraConferenceHost()) return;
+    hostScenePublishPending = doc;
+    if (opts?.full) hostScenePublishPrev = null;
+    else if (!hostScenePublishPrev) hostScenePublishPrev = prev;
+    if (hostScenePublishRaf) return;
+    hostScenePublishRaf = requestAnimationFrame(() => {
+      hostScenePublishRaf = 0;
+      const next = hostScenePublishPending;
+      const from = hostScenePublishPrev;
+      hostScenePublishPending = null;
+      hostScenePublishPrev = null;
+      if (!next || applyingRemoteSceneUpdate || !isIraConferenceHost()) {
+        console.info("[ira] scene-update publish skip: raf gate", {
+          hasNext: Boolean(next),
+          applyingRemoteSceneUpdate,
+          host: isIraConferenceHost(),
+          role: getIraCastSessionInfo().conference?.selfRole ?? null
+        });
+        return;
+      }
+      const ops = buildIraDisplaySceneUpdateOps(next, from);
+      if (!ops.length) {
+        console.info("[ira] scene-update publish skip: empty ops diff");
+        return;
+      }
+      console.info(
+        "[ira] scene-update publishing ops=",
+        ops.length,
+        ops.map((o) => `${o.id}${o.path || ""}`)
+      );
+      void publishIraSceneUpdate(ops);
+    });
+  };
   syncLiveScene = () => {
     if (studyDisposed) return;
-    setIraLiveScene(
-      buildIraLiveSceneDoc({
+    const prev = getIraLiveScene();
+    const doc = buildIraLiveSceneDoc({
+      base: prev,
+      dims: sc.dims,
+      ijkToRAS: sc.ijkToRAS,
+      modality: ct2.modality,
+      volumeName: source.sd || ct2.modality || "Volume",
+      volumeOpacity: sc.volumeOpacity(),
+      volumeShift: sc.volumeShift(),
+      volumePreset: vrPreset,
+      cropEnabled: roiEnabled,
+      roiVisible,
+      segments: sc.segments.map((s) => ({
+        num: s.num,
+        name: s.name,
+        color: s.color,
+        visible: sc.isSegmentVisible(s.num),
+        opacity: sc.segmentOpacity(s.num)
+      })),
+      labelsVisible: labelsOn,
+      opacity: sc.segOpacity(),
+      hasSeg: sc.hasSeg,
+      camera: {
+        position: [camera.position[0], camera.position[1], camera.position[2]],
+        focalPoint: [camera.focalPoint[0], camera.focalPoint[1], camera.focalPoint[2]],
+        viewUp: [camera.viewUp[0], camera.viewUp[1], camera.viewUp[2]],
+        viewAngle: camera.viewAngle
+      },
+      slices: collectSliceFrames()
+    });
+    setIraLiveScene(doc);
+    scheduleHostScenePublish(doc, prev);
+  };
+  syncLiveScene();
+  if (seg) setIraSegCatalog(buildSegCatalog(seg, sc.ijkToRAS));
+  else setIraSegCatalog(EMPTY_SEG_CATALOG);
+  setIraConferenceHostHandler(() => {
+    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
+    syncLiveScene();
+    const doc = getIraLiveScene();
+    if (doc) scheduleHostScenePublish(doc, null, { full: true });
+  });
+  if (isIraConferenceHost()) {
+    const doc = getIraLiveScene();
+    if (doc) scheduleHostScenePublish(doc, null, { full: true });
+  }
+  setIraSceneUpdateHandler((context) => {
+    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
+    const allOps = opsFromSceneUpdateContext(context);
+    const { vanishing, rest } = partitionVanishingOps(allOps);
+    if (vanishing.length) {
+      vanishingStore.applyOps(vanishing);
+    }
+    if (!rest.length) return;
+    applyingRemoteSceneUpdate = true;
+    try {
+      const base = buildIraLiveSceneDoc({
         base: getIraLiveScene(),
         dims: sc.dims,
         ijkToRAS: sc.ijkToRAS,
@@ -18443,78 +19800,77 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
           opacity: sc.segmentOpacity(s.num)
         })),
         labelsVisible: labelsOn,
-        hasSeg: sc.hasSeg
-      })
-    );
-  };
-  syncLiveScene();
-  if (seg) setIraSegCatalog(buildSegCatalog(seg, sc.ijkToRAS));
-  else setIraSegCatalog(EMPTY_SEG_CATALOG);
-  setIraSceneUpdateHandler((context) => {
-    if (studyDisposed || thisCastMountId !== castNiftiMountId) return;
-    const ops = opsFromSceneUpdateContext(context);
-    if (!ops.length) return;
-    const base = buildIraLiveSceneDoc({
-      base: getIraLiveScene(),
-      dims: sc.dims,
-      ijkToRAS: sc.ijkToRAS,
-      modality: ct2.modality,
-      volumeName: source.sd || ct2.modality || "Volume",
-      volumeOpacity: sc.volumeOpacity(),
-      volumeShift: sc.volumeShift(),
-      volumePreset: vrPreset,
-      cropEnabled: roiEnabled,
-      roiVisible,
-      segments: sc.segments.map((s) => ({
-        num: s.num,
-        name: s.name,
-        color: s.color,
-        visible: sc.isSegmentVisible(s.num),
-        opacity: sc.segmentOpacity(s.num)
-      })),
-      labelsVisible: labelsOn,
-      hasSeg: sc.hasSeg || sc.segments.length > 0
-    });
-    const { doc, result } = applySceneUpdateOps(base, ops);
-    setIraLiveScene(doc);
-    if (typeof result.labelsVisible === "boolean") {
-      labelsOn = result.labelsVisible;
-    }
-    for (const [num2, op] of result.segmentOpacity) {
-      sc.setSegmentOpacity(num2, op);
-    }
-    for (const [num2, visible] of result.segmentVisibility) {
-      sc.setSegmentVisible(num2, visible);
-    }
-    if (typeof result.opacity === "number" && Number.isFinite(result.opacity)) {
-      sc.setSegOpacity(result.opacity);
-      sc.slice.setOverlayOpacity(result.opacity * SEG_FILL);
-    }
-    if (typeof result.volumeOpacity === "number" && Number.isFinite(result.volumeOpacity)) {
-      sc.setVolumeOpacity(result.volumeOpacity);
-    }
-    if (typeof result.volumeShift === "number" && Number.isFinite(result.volumeShift)) {
-      vrShift = result.volumeShift;
-      sc.setVolumeShift(result.volumeShift);
-    }
-    if (typeof result.volumePreset === "string") {
-      applyVrPresetFn(result.volumePreset || null);
-    }
-    if (typeof result.cropEnabled === "boolean") {
-      roiEnabled = result.cropEnabled;
-      if (result.cropEnabled && roiFirstEnable) {
-        roiVisible = true;
-        roiFirstEnable = false;
+        opacity: sc.segOpacity(),
+        hasSeg: sc.hasSeg || sc.segments.length > 0,
+        camera: {
+          position: [camera.position[0], camera.position[1], camera.position[2]],
+          focalPoint: [camera.focalPoint[0], camera.focalPoint[1], camera.focalPoint[2]],
+          viewUp: [camera.viewUp[0], camera.viewUp[1], camera.viewUp[2]],
+          viewAngle: camera.viewAngle
+        },
+        slices: collectSliceFrames()
+      });
+      const { doc, result } = applySceneUpdateOps(base, rest);
+      setIraLiveScene(doc);
+      if (typeof result.labelsVisible === "boolean") {
+        labelsOn = result.labelsVisible;
       }
-      sc.setRoiEnabled(roiEnabled);
-      sc.setRoiVisible(roiVisible);
+      for (const [num2, op] of result.segmentOpacity) {
+        sc.setSegmentOpacity(num2, op);
+      }
+      for (const [num2, visible] of result.segmentVisibility) {
+        sc.setSegmentVisible(num2, visible);
+      }
+      if (typeof result.opacity === "number" && Number.isFinite(result.opacity)) {
+        sc.setSegOpacity(result.opacity);
+        sc.slice.setOverlayOpacity(result.opacity * SEG_FILL);
+      }
+      if (typeof result.volumeOpacity === "number" && Number.isFinite(result.volumeOpacity)) {
+        sc.setVolumeOpacity(result.volumeOpacity);
+      }
+      if (typeof result.volumeShift === "number" && Number.isFinite(result.volumeShift)) {
+        vrShift = result.volumeShift;
+        sc.setVolumeShift(result.volumeShift);
+      }
+      if (typeof result.volumePreset === "string") {
+        applyVrPresetFn(result.volumePreset || null);
+      }
+      if (typeof result.cropEnabled === "boolean") {
+        roiEnabled = result.cropEnabled;
+        if (result.cropEnabled && roiFirstEnable) {
+          roiVisible = true;
+          roiFirstEnable = false;
+        }
+        sc.setRoiEnabled(roiEnabled);
+        sc.setRoiVisible(roiVisible);
+      }
+      if (typeof result.roiVisible === "boolean") {
+        roiVisible = result.roiVisible;
+        sc.setRoiVisible(roiVisible);
+      }
+      if (result.camera) {
+        camera.position = [...result.camera.position];
+        camera.focalPoint = [...result.camera.focalPoint];
+        camera.viewUp = [...result.camera.viewUp];
+        camera.viewAngle = result.camera.viewAngle;
+      }
+      for (const intent of result.slices) {
+        const p = intent.plane;
+        if (p === "oblique") {
+          sc.slice.setBasis("oblique", intent.basis);
+        }
+        off[p] = sc.slice.offset01Along(p, intent.centerRAS);
+        sc.slice.setPlane(p, off[p]);
+        const fov = intent.fieldOfView;
+        if (fov && fov[0] > 0 && fov[1] > 0) {
+          sc.slice.setMirrorFrame(p, intent.centerRAS, fov[0], fov[1]);
+        }
+      }
+      drawAll();
+      syncLiveScene();
+    } finally {
+      applyingRemoteSceneUpdate = false;
     }
-    if (typeof result.roiVisible === "boolean") {
-      roiVisible = result.roiVisible;
-      sc.setRoiVisible(roiVisible);
-    }
-    drawAll();
-    syncLiveScene();
   });
   const refreshSegChrome = (labmap) => {
     seg = labmap;
@@ -18614,7 +19970,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       off.axial = slicerDefaultOffset01("axial", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
       off.coronal = slicerDefaultOffset01("coronal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
       off.sagittal = slicerDefaultOffset01("sagittal", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
+      off.oblique = slicerDefaultOffset01("oblique", sc.dims, sc.ijkToRAS, sc.rasLo, sc.rasHi);
       sampleRange();
+      invalidateObliqueIn3D();
       drawAll();
     };
     sceneStream = {
@@ -18654,10 +20012,14 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       M2[8] * ijk[0] + M2[9] * ijk[1] + M2[10] * ijk[2] + M2[11]
     ];
     for (const p of PLANES) {
-      const axis = p === "axial" ? 2 : p === "coronal" ? 1 : 0;
-      const span = sc.rasHi[axis] - sc.rasLo[axis];
-      off[p] = span === 0 ? 0.5 : (ras[axis] - sc.rasLo[axis]) / span;
-      off[p] = Math.max(0, Math.min(1, off[p]));
+      if (p === "oblique") {
+        off[p] = sc.slice.offset01Along("oblique", ras);
+      } else {
+        const axis = p === "axial" ? 2 : p === "coronal" ? 1 : 0;
+        const span = sc.rasHi[axis] - sc.rasLo[axis];
+        off[p] = span === 0 ? 0.5 : (ras[axis] - sc.rasLo[axis]) / span;
+        off[p] = Math.max(0, Math.min(1, off[p]));
+      }
     }
     drawAll();
   };
@@ -18720,6 +20082,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     wl.lev = lev;
     sc.slice.setWindowLevel(win, lev);
     for (const p of PLANES) drawSlice(p);
+    refreshObliqueIn3D();
     xhair?.redraw();
     syncWl();
     updateAnnWL();
@@ -18742,10 +20105,15 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   const nAxisOf = { axial: 2, coronal: 1, sagittal: 0 };
   const jumpAll = (ras) => {
     for (const p of PLANES) {
-      const a = nAxisOf[p];
-      off[p] = Math.max(0, Math.min(1, (ras[a] - sc.rasLo[a]) / (sc.rasHi[a] - sc.rasLo[a])));
+      if (p === "oblique") {
+        off[p] = sc.slice.offset01Along("oblique", ras);
+      } else {
+        const a = nAxisOf[p];
+        off[p] = Math.max(0, Math.min(1, (ras[a] - sc.rasLo[a]) / (sc.rasHi[a] - sc.rasLo[a])));
+      }
     }
     drawAll();
+    syncLiveScene();
   };
   const sliceControls = [];
   const listAllStudySeries = source.st ? async () => {
@@ -18776,8 +20144,13 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       if (p === "threeD") draw3d();
       else drawSlice(p);
       xhair?.redraw();
+      syncLiveScene();
     },
-    redrawAll: drawAll,
+    redrawAll: () => {
+      drawAll();
+      syncLiveScene();
+    },
+    onLayoutChange: (l) => setDentalObliqueVisible(l === "dental"),
     readViewportRgba: async (plane) => {
       const canvas = cv[plane];
       const w = canvas?.width || 0;
@@ -18814,7 +20187,21 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     resetViews: () => sliceControls.forEach((c) => c.resetView()),
     close: () => status("This is the SlicerLive Basic Image Review demo \u2014 reload to restart."),
     jumpAll,
-    modality: ct2.modality,
+    modality: ct2.modality || "",
+    vanishingStore,
+    onVanishingStroke: (op) => {
+      void publishIraSceneUpdate([op]);
+    },
+    vanishingAuthor: () => {
+      const info = getIraCastSessionInfo();
+      return info.userName || info.subscriberName || void 0;
+    },
+    vanishing3d: {
+      canvas: () => cv.threeD,
+      pick: (u, v2) => sc.scene.pick(u, v2),
+      worldToDisplay: (ras, w, h) => camera.worldToDisplay(ras, w, h),
+      displayToWorldAtDepth: (x2, y, depth, w, h) => camera.displayToWorldAtDepth(x2, y, depth, w, h)
+    },
     extraTools: [
       {
         id: "idc-share",
@@ -18878,6 +20265,46 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   };
   for (const p of PLANES) {
     const hooks = ira.hooks(p);
+    let obliqueTilt = null;
+    const obliqueHooks = p === "oblique" ? {
+      onLeftGrab: (u, v2, w, h) => {
+        if (hooks.onLeftGrab(u, v2, w, h)) return true;
+        if (ira.leftMode() !== "scroll") return false;
+        obliqueTilt = { u, v: v2, w, h };
+        cv.oblique.style.cursor = "move";
+        return true;
+      },
+      onLeftDrag: (u, v2, w, h) => {
+        if (obliqueTilt) {
+          const dx = (u - obliqueTilt.u) * obliqueTilt.w;
+          const dy = (v2 - obliqueTilt.v) * obliqueTilt.h;
+          obliqueTilt = { u, v: v2, w, h };
+          tiltObliqueByPx(dx, dy);
+          return;
+        }
+        hooks.onLeftDrag?.(u, v2, w, h);
+      },
+      onLeftDrop: (movedPx) => {
+        if (obliqueTilt) {
+          obliqueTilt = null;
+          cv.oblique.style.cursor = "";
+          return;
+        }
+        hooks.onLeftDrop?.(movedPx);
+      },
+      onDoubleClick: () => {
+        viewGrid.toggleMax(p);
+        return true;
+      }
+    } : {
+      onLeftGrab: hooks.onLeftGrab,
+      onLeftDrag: hooks.onLeftDrag,
+      onLeftDrop: hooks.onLeftDrop,
+      onDoubleClick: () => {
+        viewGrid.toggleMax(p);
+        return true;
+      }
+    };
     sliceControls.push(attachSliceControls(cv[p], {
       orient: p,
       getSlice: () => sc.slice,
@@ -18885,6 +20312,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       redraw: () => {
         drawSlice(p);
         xhair?.redraw();
+        syncLiveScene();
       },
       wl: {
         enabled: () => ira.tool() === "wl",
@@ -18894,19 +20322,16 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         reset: () => setWL(sc.win, sc.lev)
       },
       leftMode: () => ira.leftMode(),
-      hooks: {
-        onLeftGrab: hooks.onLeftGrab,
-        onDoubleClick: () => {
-          viewGrid.toggleMax(p);
-          return true;
-        }
-      }
+      hooks: obliqueHooks
     }));
   }
-  attachCameraControls(cv.threeD, camera, { onChange: () => {
-    draw3d();
-    xhair?.redraw();
-  } });
+  attachCameraControls(cv.threeD, camera, {
+    onChange: () => {
+      draw3d();
+      xhair?.redraw();
+      syncLiveScene();
+    }
+  });
   let roiBox0 = null;
   attachWidgetControls(cv.threeD, camera, {
     getHandles: () => sc.roiVisible() ? sc.roi.handleList().map((h) => ({ id: h.id, world: h.world, data: h.data, cursor: h.cursor })) : [],
@@ -18929,8 +20354,15 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     },
     onChange: () => draw3d()
   });
+  ira.attachVanishing3dInput();
   xhair = mountCrosshair({
-    cells: { axial: cv.axial, coronal: cv.coronal, sagittal: cv.sagittal, threeD: cv.threeD },
+    cells: {
+      axial: cv.axial,
+      coronal: cv.coronal,
+      sagittal: cv.sagittal,
+      threeD: cv.threeD,
+      oblique: cv.oblique
+    },
     getScene: () => sc.scene,
     getSlice: () => sc.slice,
     getCamera: () => camera,
@@ -19037,6 +20469,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       setOpacity: (o) => {
         sc.setSegOpacity(o);
         sc.slice.setOverlayOpacity(o * SEG_FILL);
+        syncLiveScene();
         drawAll();
       },
       disabled: () => !sc.hasSeg,
@@ -19076,6 +20509,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         }
         sc.setRoiEnabled(roiEnabled);
         sc.setRoiVisible(roiVisible);
+        syncLiveScene();
         draw3d();
         xhair?.redraw();
       },
@@ -19087,6 +20521,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       set: (on2) => {
         roiVisible = on2;
         sc.setRoiVisible(on2);
+        syncLiveScene();
         draw3d();
         xhair?.redraw();
       }
@@ -19126,6 +20561,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       return {
         dispose: () => {
           studyDisposed = true;
+          vanishingStore.clear();
           setIraSegCatalog(EMPTY_SEG_CATALOG);
           labelsOn = false;
           try {
@@ -19166,6 +20602,13 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   return {
     dispose: () => {
       studyDisposed = true;
+      vanishingStore.clear();
+      dentalLayout = false;
+      obliqueIn3D = null;
+      try {
+        sc.setExtraFields([]);
+      } catch {
+      }
       if (thisCastMountId === castNiftiMountId) {
         applyCastNiftiSeg = null;
         applyCastDicomSeg = null;
@@ -19173,6 +20616,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       setIraSegCatalog(EMPTY_SEG_CATALOG);
       labelsOn = false;
       setIraSceneUpdateHandler(null);
+      setIraConferenceHostHandler(null);
       setIraPngFullSizeCaptureHandler(null);
       globalThis.removeEventListener("resize", resize);
       for (const ro of resizeObservers) ro.disconnect();
