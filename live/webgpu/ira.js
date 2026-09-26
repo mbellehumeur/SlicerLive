@@ -7,9 +7,9 @@ async function initDevice() {
   const want = ["float32-filterable", "timestamp-query", "shader-f16"].filter((f) => adapter.features.has(f));
   const lim = adapter.limits;
   const requiredLimits = {};
-  const raise = (k2) => {
-    const v2 = lim[k2];
-    if (typeof v2 === "number") requiredLimits[k2] = v2;
+  const raise = (k) => {
+    const v = lim[k];
+    if (typeof v === "number") requiredLimits[k] = v;
   };
   raise("maxBufferSize");
   raise("maxStorageBufferBindingSize");
@@ -29,7 +29,7 @@ function multiply(a, b) {
   for (let c = 0; c < 4; c++) {
     for (let r = 0; r < 4; r++) {
       let s = 0;
-      for (let k2 = 0; k2 < 4; k2++) s += a[k2 * 4 + r] * b[c * 4 + k2];
+      for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
       o[c * 4 + r] = s;
     }
   }
@@ -45,10 +45,10 @@ function perspectiveZO(fovy, aspect, near, far) {
   m[14] = far * near / (near - far);
   return m;
 }
-function perspectiveZOTile(fovy, viewW, viewH, x2, y, w, h, near, far) {
+function perspectiveZOTile(fovy, viewW, viewH, x, y, w, h, near, far) {
   const t = near * Math.tan(fovy / 2), b = -t;
   const r = t * (viewW / viewH), l = -r;
-  const l2 = l + (r - l) * x2 / viewW, r2 = l + (r - l) * (x2 + w) / viewW;
+  const l2 = l + (r - l) * x / viewW, r2 = l + (r - l) * (x + w) / viewW;
   const t2 = t - (t - b) * y / viewH, b2 = t - (t - b) * (y + h) / viewH;
   const m = new Float32Array(16);
   m[0] = 2 * near / (r2 - l2);
@@ -155,23 +155,23 @@ function texToRASFromIjkToRAS(ijkToRAS, dims) {
 }
 function volumeAABBFromIjkToRAS(ijkToRAS, dims) {
   const t2r = texToRASFromIjkToRAS(ijkToRAS, dims);
-  const lo = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
+  const lo2 = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
   for (let c = 0; c < 8; c++) {
-    const u = c & 1, v2 = c >> 1 & 1, w = c >> 2 & 1;
+    const u = c & 1, v = c >> 1 & 1, w = c >> 2 & 1;
     for (let r = 0; r < 3; r++) {
-      const p = t2r[r] * u + t2r[4 + r] * v2 + t2r[8 + r] * w + t2r[12 + r];
-      if (p < lo[r]) lo[r] = p;
+      const p = t2r[r] * u + t2r[4 + r] * v + t2r[8 + r] * w + t2r[12 + r];
+      if (p < lo2[r]) lo2[r] = p;
       if (p > hi2[r]) hi2[r] = p;
     }
   }
-  return [lo, hi2];
+  return [lo2, hi2];
 }
 function applyMat4(m, p) {
-  const x2 = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+  const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
   const y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
   const z2 = m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14];
   const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15] || 1;
-  return [x2 / w, y / w, z2 / w];
+  return [x / w, y / w, z2 / w];
 }
 function spacingFromIjkToRAS(ijkToRAS) {
   const col = (c) => Math.hypot(ijkToRAS[c], ijkToRAS[4 + c], ijkToRAS[8 + c]);
@@ -230,16 +230,16 @@ function writeScalarTexture3DRegion(dev, texture, data, dims, xStart, yStart, zS
 }
 
 // render/fields.ts
-function transformedAABB(m, lo, hi2) {
-  const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+function transformedAABB(m, lo2, hi2) {
+  const mn2 = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < 8; i++) {
-    const c = applyMat4(m, [i & 1 ? hi2[0] : lo[0], i & 2 ? hi2[1] : lo[1], i & 4 ? hi2[2] : lo[2]]);
+    const c = applyMat4(m, [i & 1 ? hi2[0] : lo2[0], i & 2 ? hi2[1] : lo2[1], i & 4 ? hi2[2] : lo2[2]]);
     for (let a = 0; a < 3; a++) {
-      mn[a] = Math.min(mn[a], c[a]);
+      mn2[a] = Math.min(mn2[a], c[a]);
       mx[a] = Math.max(mx[a], c[a]);
     }
   }
-  return [mn, mx];
+  return [mn2, mx];
 }
 var ImageField = class {
   kind = "img";
@@ -345,8 +345,8 @@ var ImageField = class {
   }
   /** The scalar range the LUT spans — window/level for the volume rendering. Re-packed into
    *  the material uniform on the next syncUniforms()/render, so no pipeline rebuild. */
-  setClim(lo, hi2) {
-    this.clim = [lo, hi2];
+  setClim(lo2, hi2) {
+    this.clim = [lo2, hi2];
   }
   getClim() {
     return [this.clim[0], this.clim[1]];
@@ -380,8 +380,8 @@ var ImageField = class {
   }
   /** Centre of the volume in world (RAS) at identity — a natural pivot for a transform widget. */
   worldCenter() {
-    const [lo, hi2] = this.origBox ?? this.box;
-    return [(lo[0] + hi2[0]) / 2, (lo[1] + hi2[1]) / 2, (lo[2] + hi2[2]) / 2];
+    const [lo2, hi2] = this.origBox ?? this.box;
+    return [(lo2[0] + hi2[0]) / 2, (lo2[1] + hi2[1]) / 2, (lo2[2] + hi2[2]) / 2];
   }
   /** Place the volume in the world by a rigid transform M (worldFromLocal): the ray samples
    *  at p2t·M⁻¹·wp, so the volume appears moved/rotated. A Tier-A interactive update — caller
@@ -907,7 +907,7 @@ async function assembleZarr(blobBase, z2, Ctor, opts) {
   } else {
     out = new Ctor(expected);
   }
-  let lo = Infinity, hi2 = -Infinity;
+  let lo2 = Infinity, hi2 = -Infinity;
   const onBytes = opts.onBytes;
   const onSlab = opts.onSlab;
   const onChunk = opts.onChunk;
@@ -953,10 +953,10 @@ async function assembleZarr(blobBase, z2, Ctor, opts) {
           const src = (zz * cy + yy) * cx;
           const dst = ((z0 + zz) * ny + (y0 + yy)) * nx + x0;
           for (let xx = 0; xx < xw; xx++) {
-            const v2 = chunk[src + xx];
-            out[dst + xx] = v2;
-            if (v2 < lo) lo = v2;
-            if (v2 > hi2) hi2 = v2;
+            const v = chunk[src + xx];
+            out[dst + xx] = v;
+            if (v < lo2) lo2 = v;
+            if (v > hi2) hi2 = v;
           }
         }
       }
@@ -984,7 +984,7 @@ async function assembleZarr(blobBase, z2, Ctor, opts) {
     }
   };
   await Promise.all(Array.from({ length: Math.min(opts.concurrency, jobs.length) }, worker));
-  return { data: out, dtype: z2.dtype, dims, range: [lo, hi2] };
+  return { data: out, dtype: z2.dtype, dims, range: [lo2, hi2] };
 }
 
 // render/mrson.ts
@@ -1199,8 +1199,8 @@ async function parseSceneJson(sceneSource, opts = {}) {
   let lut, clim, shade;
   if (vp?.attrs?.color && vp?.attrs?.scalarOpacity) {
     const colorTF = vp.attrs.color, opacityTF = vp.attrs.scalarOpacity;
-    const lo = colorTF[0][0], hi2 = colorTF[colorTF.length - 1][0];
-    clim = [lo, hi2];
+    const lo2 = colorTF[0][0], hi2 = colorTF[colorTF.length - 1][0];
+    clim = [lo2, hi2];
     lut = lutFromTransferFunctions(colorTF, opacityTF, clim);
     shade = vp.attrs.shade ? [0.25, 0.75, 0.5, 24] : [1, 0, 0, 1];
   } else {
@@ -1225,9 +1225,9 @@ async function parseSceneJson(sceneSource, opts = {}) {
   };
 }
 function sceneVolumeFromParts(field, voxels, dims, parsed, range, ijkToRAS = parsed.ijkToRAS) {
-  const [lo, hi2] = field.aabb();
-  const center = [(lo[0] + hi2[0]) / 2, (lo[1] + hi2[1]) / 2, (lo[2] + hi2[2]) / 2];
-  const radius = Math.hypot(hi2[0] - lo[0], hi2[1] - lo[1], hi2[2] - lo[2]) / 2;
+  const [lo2, hi2] = field.aabb();
+  const center = [(lo2[0] + hi2[0]) / 2, (lo2[1] + hi2[1]) / 2, (lo2[2] + hi2[2]) / 2];
+  const radius = Math.hypot(hi2[0] - lo2[0], hi2[1] - lo2[1], hi2[2] - lo2[2]) / 2;
   return {
     field,
     voxels,
@@ -1298,6 +1298,263 @@ async function loadSceneVolumeFieldProgressive(dev, sceneSource, handlers = {}, 
     handlers.onUpgrade?.(current);
   }
   return current;
+}
+
+// render/labelmap-resample.ts
+function invAffineRowMajor(m) {
+  const a = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
+  const t = [m[3], m[7], m[11]];
+  const det = a[0] * (a[4] * a[8] - a[5] * a[7]) - a[1] * (a[3] * a[8] - a[5] * a[6]) + a[2] * (a[3] * a[7] - a[4] * a[6]);
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-12) {
+    throw new Error("ijkToRAS is singular \u2014 cannot resample onto CT");
+  }
+  const id = 1 / det;
+  const r = [
+    (a[4] * a[8] - a[5] * a[7]) * id,
+    (a[2] * a[7] - a[1] * a[8]) * id,
+    (a[1] * a[5] - a[2] * a[4]) * id,
+    (a[5] * a[6] - a[3] * a[8]) * id,
+    (a[0] * a[8] - a[2] * a[6]) * id,
+    (a[2] * a[3] - a[0] * a[5]) * id,
+    (a[3] * a[7] - a[4] * a[6]) * id,
+    (a[1] * a[6] - a[0] * a[7]) * id,
+    (a[0] * a[4] - a[1] * a[3]) * id
+  ];
+  return [
+    r[0],
+    r[1],
+    r[2],
+    -(r[0] * t[0] + r[1] * t[1] + r[2] * t[2]),
+    r[3],
+    r[4],
+    r[5],
+    -(r[3] * t[0] + r[4] * t[1] + r[5] * t[2]),
+    r[6],
+    r[7],
+    r[8],
+    -(r[6] * t[0] + r[7] * t[1] + r[8] * t[2]),
+    0,
+    0,
+    0,
+    1
+  ];
+}
+function applyRowMajor(m, i, j2, k) {
+  return [
+    m[0] * i + m[1] * j2 + m[2] * k + m[3],
+    m[4] * i + m[5] * j2 + m[6] * k + m[7],
+    m[8] * i + m[9] * j2 + m[10] * k + m[11]
+  ];
+}
+function resampleLabelmapToCt(src, srcDims, srcIjkToRas, ctDims, ctIjkToRas) {
+  const [snx, sny, snz] = srcDims;
+  const [nx, ny, nz] = ctDims;
+  const rasToSrc = invAffineRowMajor(srcIjkToRas);
+  const lab = new Uint8Array(nx * ny * nz);
+  const present = /* @__PURE__ */ new Set();
+  let clipped = 0;
+  for (let k = 0; k < nz; k++) {
+    const plane = k * nx * ny;
+    for (let j2 = 0; j2 < ny; j2++) {
+      const row = plane + j2 * nx;
+      for (let i = 0; i < nx; i++) {
+        const [rx, ry, rz] = applyRowMajor(ctIjkToRas, i, j2, k);
+        const [si2, sj, sk] = applyRowMajor(rasToSrc, rx, ry, rz);
+        const ii2 = Math.round(si2);
+        const jj = Math.round(sj);
+        const kk = Math.round(sk);
+        if (ii2 < 0 || jj < 0 || kk < 0 || ii2 >= snx || jj >= sny || kk >= snz) {
+          continue;
+        }
+        let v = Math.round(Number(src[kk * snx * sny + jj * snx + ii2]));
+        if (!Number.isFinite(v) || v <= 0) continue;
+        if (v > 255) {
+          clipped++;
+          v = 255;
+        }
+        lab[row + i] = v;
+        present.add(v);
+      }
+    }
+  }
+  return { lab, present, clipped };
+}
+
+// render/scene-seg.ts
+var DTYPE = {
+  float32: Float32Array,
+  "<f4": Float32Array,
+  float64: Float64Array,
+  "<f8": Float64Array,
+  uint8: Uint8Array,
+  "|u1": Uint8Array,
+  int16: Int16Array,
+  "<i2": Int16Array,
+  uint16: Uint16Array,
+  "<u2": Uint16Array,
+  int32: Int32Array,
+  "<i4": Int32Array,
+  uint32: Uint32Array,
+  "<u4": Uint32Array
+};
+async function gunzip(bytes) {
+  const body = new Response(bytes).body;
+  if (!body) throw new Error("empty labelmap response body");
+  return new Response(body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+}
+function isGzip(bytes) {
+  return bytes.length >= 2 && bytes[0] === 31 && bytes[1] === 139;
+}
+async function resolveSceneWrapper(sceneSource) {
+  const pageBase = globalThis.location?.href ?? "file:///";
+  let raw;
+  let sceneAbs;
+  if (typeof sceneSource === "string") {
+    raw = await (await fetch(sceneSource)).json();
+    sceneAbs = new URL(sceneSource, pageBase).href;
+  } else {
+    raw = sceneSource;
+    const hint = typeof sceneSource.url === "string" ? sceneSource.url.trim() : "";
+    const blobHint = String(sceneSource.blobBase || "").trim();
+    if (/^https?:\/\//i.test(blobHint) || blobHint.startsWith("blob:")) {
+      sceneAbs = hint || blobHint || pageBase;
+    } else {
+      sceneAbs = hint || pageBase;
+    }
+  }
+  const wrapper = raw.nodes ? raw : { nodes: raw };
+  const nodes = wrapper.nodes;
+  if (!nodes || typeof nodes !== "object") {
+    throw new Error("LiveScene has no nodes");
+  }
+  const blobBase = new URL(wrapper.blobBase ?? "./blobs/", sceneAbs).href;
+  return { nodes, blobBase };
+}
+function blobUrl(blobBase, hash) {
+  const h = String(hash || "").trim();
+  if (/^https?:\/\//i.test(h) || h.startsWith("blob:")) return h;
+  return new URL(h, blobBase).href;
+}
+function asDims3(v) {
+  if (!Array.isArray(v) || v.length < 3) return null;
+  const a = [Number(v[0]), Number(v[1]), Number(v[2])];
+  if (!a.every((n) => Number.isFinite(n) && n > 0)) return null;
+  return [a[0], a[1], a[2]];
+}
+function asMat16(v) {
+  if (!Array.isArray(v) || v.length < 12) return null;
+  const m = v.map(Number);
+  if (!m.every((n) => Number.isFinite(n))) return null;
+  while (m.length < 16) m.push(m.length % 5 === 0 ? 1 : 0);
+  return m.slice(0, 16);
+}
+function buildColorsAndNames(attrs, present) {
+  const colors = [];
+  const names = {};
+  const rawColors = attrs.segmentColors;
+  if (Array.isArray(rawColors)) {
+    for (const row of rawColors) {
+      if (!Array.isArray(row) || row.length < 4) continue;
+      const num2 = Math.round(Number(row[0]));
+      if (!num2 || !present.has(num2)) continue;
+      colors.push([num2, Number(row[1]), Number(row[2]), Number(row[3])]);
+    }
+  }
+  const segments = attrs.segments;
+  if (Array.isArray(segments) && Array.isArray(rawColors)) {
+    for (let i = 0; i < segments.length && i < rawColors.length; i++) {
+      const row = rawColors[i];
+      const seg = segments[i];
+      if (!Array.isArray(row) || !seg) continue;
+      const num2 = Math.round(Number(row[0]));
+      if (!num2 || !present.has(num2)) continue;
+      const name = String(seg.name || "").trim();
+      if (name) names[num2] = name;
+    }
+  }
+  for (const id of present) {
+    if (!colors.some(([n]) => n === id)) {
+      colors.push([id, 0.7, 0.7, 0.7]);
+    }
+    if (!names[id]) names[id] = `Segment ${id}`;
+  }
+  colors.sort((a, b) => a[0] - b[0]);
+  return { colors, names };
+}
+async function loadSceneSegLabelmap(sceneSource, ctDims, ctIjkToRas, opts = {}) {
+  let nodes;
+  let blobBase;
+  try {
+    ({ nodes, blobBase } = await resolveSceneWrapper(sceneSource));
+  } catch (err) {
+    return { ok: false, error: err?.message ?? String(err) };
+  }
+  const segNode = Object.values(nodes).find(
+    (n) => n.class === "vtkMRMLSegmentationNode" && n.blobs && typeof n.blobs === "object" && n.blobs.labelmap
+  );
+  if (!segNode) {
+    return { ok: false, error: "no vtkMRMLSegmentationNode with labelmap blob" };
+  }
+  const attrs = segNode.attrs ?? {};
+  const meta = segNode.blobs.labelmap;
+  const hash = String(meta.hash || "").trim();
+  if (!hash) return { ok: false, error: "segmentation labelmap blob missing hash" };
+  const dims = asDims3(attrs.labelmapDims);
+  if (!dims) return { ok: false, error: "segmentation missing labelmapDims" };
+  const srcIjk = asMat16(attrs.labelmapIjkToRAS);
+  if (!srcIjk) return { ok: false, error: "segmentation missing labelmapIjkToRAS" };
+  const url = blobUrl(blobBase, hash);
+  const res = await fetch(url, { signal: opts.signal });
+  if (!res.ok) {
+    return { ok: false, error: `labelmap fetch failed (${res.status}) ${url}` };
+  }
+  let raw = new Uint8Array(await res.arrayBuffer());
+  if (isGzip(raw)) {
+    raw = new Uint8Array(await gunzip(raw.buffer));
+  }
+  const Ctor = DTYPE[String(meta.dtype || "float32").toLowerCase()] ?? Float32Array;
+  const needed = dims[0] * dims[1] * dims[2] * Ctor.BYTES_PER_ELEMENT;
+  if (raw.byteLength < needed) {
+    return {
+      ok: false,
+      error: `labelmap buffer too short (${raw.byteLength} < ${needed})`
+    };
+  }
+  const src = new Ctor(raw.buffer, raw.byteOffset, dims[0] * dims[1] * dims[2]);
+  let lab;
+  let present;
+  let clipped;
+  try {
+    ({ lab, present, clipped } = resampleLabelmapToCt(
+      src,
+      dims,
+      srcIjk,
+      ctDims,
+      ctIjkToRas
+    ));
+  } catch (err) {
+    return {
+      ok: false,
+      error: `scene labelmap\u2192CT resample failed: ${err?.message ?? err}`
+    };
+  }
+  if (clipped) {
+    console.warn(`[scene-seg] ${clipped} voxel(s) had label >255; clamped to 255`);
+  }
+  if (!present.size) {
+    return { ok: false, error: "scene labelmap empty after RAS resample onto CT" };
+  }
+  const { colors, names } = buildColorsAndNames(attrs, present);
+  return {
+    ok: true,
+    seg: {
+      lab,
+      colors,
+      names,
+      fileName: segNode.name || "LiveScene segmentation",
+      modality: "SEG"
+    }
+  };
 }
 
 // render/slice-renderer.ts
@@ -1629,8 +1886,8 @@ var SliceRenderer = class {
    *  centre, a crosshair) can address the same slice for anatomical AND oblique bases. */
   offset01Along(orient, ras) {
     const n = this.basisOf(orient).nDir;
-    const { lo, hi: hi2 } = this.extentAlong(n);
-    return Math.max(0, Math.min(1, (dot3(ras, n) - lo) / Math.max(hi2 - lo, 1e-6)));
+    const { lo: lo2, hi: hi2 } = this.extentAlong(n);
+    return Math.max(0, Math.min(1, (dot3(ras, n) - lo2) / Math.max(hi2 - lo2, 1e-6)));
   }
   basisOf(orient) {
     return this.basisOverride[orient] ?? BASES[orient];
@@ -1639,7 +1896,7 @@ var SliceRenderer = class {
    *  of "rasHi[axis] - rasLo[axis]" to an oblique axis. Reduces to exactly that for the
    *  anatomical bases, since projecting an axis-aligned box on its own axis is the axis span. */
   extentAlong(d) {
-    let lo = Infinity, hi2 = -Infinity;
+    let lo2 = Infinity, hi2 = -Infinity;
     for (let i = 0; i < 8; i++) {
       const c = [
         i & 1 ? this.rasHi[0] : this.rasLo[0],
@@ -1647,10 +1904,10 @@ var SliceRenderer = class {
         i & 4 ? this.rasHi[2] : this.rasLo[2]
       ];
       const t = dot3(c, d);
-      if (t < lo) lo = t;
+      if (t < lo2) lo2 = t;
       if (t > hi2) hi2 = t;
     }
-    return { lo, hi: hi2 };
+    return { lo: lo2, hi: hi2 };
   }
   /** Volume geometry: patientToTexture (RAS->tex[0,1], encodes ijkToRAS) + the RAS
    *  bounding box (for plane extents/scrub range). Get both from the ImageField. */
@@ -1725,8 +1982,8 @@ var SliceRenderer = class {
    *  A-extent, horizontal follows viewport aspect.) */
   viewSpanMm() {
     const b = this.basisOf(this.orient);
-    const u = this.extentAlong(b.uDir), v2 = this.extentAlong(b.vDir);
-    return Math.max(u.hi - u.lo, v2.hi - v2.lo);
+    const u = this.extentAlong(b.uDir), v = this.extentAlong(b.vDir);
+    return Math.max(u.hi - u.lo, v.hi - v.lo);
   }
   /** The fitted in-plane extent (mm) used for a given orientation — the value directly
    *  comparable to a Slicer slice node's fitted fieldOfView. */
@@ -1744,8 +2001,8 @@ var SliceRenderer = class {
    *  under-zoomed whenever the larger extent wasn't on the viewport's limiting axis. */
   fitUV(orient, aspectWH) {
     const b = this.basisOf(orient);
-    const u = this.extentAlong(b.uDir), v2 = this.extentAlong(b.vDir);
-    const uExt = u.hi - u.lo, vExt = v2.hi - v2.lo;
+    const u = this.extentAlong(b.uDir), v = this.extentAlong(b.vDir);
+    const uExt = u.hi - u.lo, vExt = v.hi - v.lo;
     const uS0 = Math.max(uExt, vExt * aspectWH);
     return { uS0, vS0: uS0 / aspectWH };
   }
@@ -1802,9 +2059,9 @@ var SliceRenderer = class {
   }
   /** Restore a (possibly partial) snapshot from getViewState(). */
   setViewState(vs) {
-    for (const k2 of Object.keys(vs)) {
-      const v2 = vs[k2];
-      if (v2 && Number.isFinite(v2.zoom) && v2.zoom > 0) this.viewState[k2] = { ...v2 };
+    for (const k of Object.keys(vs)) {
+      const v = vs[k];
+      if (v && Number.isFinite(v.zoom) && v.zoom > 0) this.viewState[k] = { ...v };
     }
   }
   /** Mirror Slicer's in-plane navigation for an orientation: drive pan + zoom from the slice
@@ -1842,15 +2099,15 @@ var SliceRenderer = class {
   /** Map a view (u,v) in [0,1] (y down) to normalized texture coords for the current
    *  plane — for click picking. Returns the tex coord; the caller converts to IJK via
    *  ijk = tex*dims - 0.5. Anisotropy/rotation are handled by the same p2t the shader uses. */
-  viewToTex(u, v2) {
+  viewToTex(u, v) {
     const b = this.basisOf(this.orient);
     const uS = this.uSpanMm || this.viewSpanMm();
     const vS = this.vSpanMm || this.viewSpanMm();
     const c = this.cX;
     const ras = [
-      c[0] + b.uDir[0] * (u - 0.5) * uS + b.vDir[0] * (0.5 - v2) * vS,
-      c[1] + b.uDir[1] * (u - 0.5) * uS + b.vDir[1] * (0.5 - v2) * vS,
-      c[2] + b.uDir[2] * (u - 0.5) * uS + b.vDir[2] * (0.5 - v2) * vS
+      c[0] + b.uDir[0] * (u - 0.5) * uS + b.vDir[0] * (0.5 - v) * vS,
+      c[1] + b.uDir[1] * (u - 0.5) * uS + b.vDir[1] * (0.5 - v) * vS,
+      c[2] + b.uDir[2] * (u - 0.5) * uS + b.vDir[2] * (0.5 - v) * vS
     ];
     return applyMat4(this.p2t, ras);
   }
@@ -1862,15 +2119,15 @@ var SliceRenderer = class {
     const { b, c, uS, vS } = this.frameFor(orient, offset01, aspectWH);
     const d = [ras[0] - c[0], ras[1] - c[1], ras[2] - c[2]];
     const u = 0.5 + (d[0] * b.uDir[0] + d[1] * b.uDir[1] + d[2] * b.uDir[2]) / uS;
-    const v2 = 0.5 - (d[0] * b.vDir[0] + d[1] * b.vDir[1] + d[2] * b.vDir[2]) / vS;
-    return { u, v: v2, distMm: dot3(d, b.nDir) };
+    const v = 0.5 - (d[0] * b.vDir[0] + d[1] * b.vDir[1] + d[2] * b.vDir[2]) / vS;
+    return { u, v, distMm: dot3(d, b.nDir) };
   }
   /** Map a view (u,v in [0,1], y down) on a plane back to a RAS point ON that plane —
    *  the exact inverse of rasToView (same pan/zoom/aspect). Used to drag a 2D markup:
    *  the point lands on the current slice (its out-of-plane coord becomes the plane offset). */
-  viewToRas(orient, offset01, u, v2, aspectWH) {
+  viewToRas(orient, offset01, u, v, aspectWH) {
     const { b, c, uS, vS } = this.frameFor(orient, offset01, aspectWH);
-    const du = (u - 0.5) * uS, dv = (0.5 - v2) * vS;
+    const du = (u - 0.5) * uS, dv = (0.5 - v) * vS;
     return [
       c[0] + b.uDir[0] * du + b.vDir[0] * dv,
       c[1] + b.uDir[1] * du + b.vDir[1] * dv,
@@ -2044,8 +2301,8 @@ var SliceInteractor = class {
     const { rasLo, rasHi } = this.geom;
     const cur = offset01ToMm(orient, offset01, rasLo, rasHi);
     const next = cur + deltaMm;
-    const [lo, hi2] = this.bounds(orient);
-    if (next < lo || next > hi2) return offset01;
+    const [lo2, hi2] = this.bounds(orient);
+    if (next < lo2 || next > hi2) return offset01;
     return mmToOffset01(orient, next, rasLo, rasHi);
   }
   incrementSlice(orient, offset01) {
@@ -2534,17 +2791,17 @@ fn fs_resolve(v : RV) -> @location(0) vec4<f32> {
     if (this.accumTex[0] && this.accumW === width && this.accumH === height) return;
     this.accumW = width;
     this.accumH = height;
-    for (let k2 = 0; k2 < 2; k2++) {
-      this.accumTex[k2]?.destroy();
-      this.accumTex[k2] = this.dev.createTexture({ size: [width, height], format: "rgba32float", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
-      this.accumView[k2] = this.accumTex[k2].createView();
+    for (let k = 0; k < 2; k++) {
+      this.accumTex[k]?.destroy();
+      this.accumTex[k] = this.dev.createTexture({ size: [width, height], format: "rgba32float", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
+      this.accumView[k] = this.accumTex[k].createView();
     }
-    for (let k2 = 0; k2 < 2; k2++) {
-      this.accumBind[k2] = this.dev.createBindGroup({
+    for (let k = 0; k < 2; k++) {
+      this.accumBind[k] = this.dev.createBindGroup({
         layout: this.accumPipeline.getBindGroupLayout(0),
         entries: [
           { binding: 0, resource: this.traceView },
-          { binding: 1, resource: this.accumView[k2] },
+          { binding: 1, resource: this.accumView[k] },
           { binding: 2, resource: { buffer: this.accumUniformBuf } }
         ]
       });
@@ -2672,12 +2929,12 @@ ${body}
 }`;
     }).join("\n");
     const fieldFns = receivers.map((p) => p.field.samplingWGSL(p.slot)).join("\n");
-    const wf = (v2) => (Number.isFinite(v2) ? v2 : 0).toFixed(6);
+    const wf = (v) => (Number.isFinite(v) ? v : 0).toFixed(6);
     const boxSkipWGSL = (p) => {
-      const [lo, hi2] = p.field.aabb();
+      const [lo2, hi2] = p.field.aabb();
       return `
 fn skip_${p.field.kind}${p.slot}(wp : vec3<f32>) -> f32 {
-  let q = max(vec3<f32>(${wf(lo[0])}, ${wf(lo[1])}, ${wf(lo[2])}) - wp,
+  let q = max(vec3<f32>(${wf(lo2[0])}, ${wf(lo2[1])}, ${wf(lo2[2])}) - wp,
               wp - vec3<f32>(${wf(hi2[0])}, ${wf(hi2[1])}, ${wf(hi2[2])}));
   return length(max(q, vec3<f32>(0.0)));   // 0 inside the box, exact distance outside
 }`;
@@ -2942,31 +3199,31 @@ ${pickDispatch}
     this.mat[this.clipOff + 32] = 0;
   }
   /** Axis-aligned RAS crop box [lo,hi] → 6 inward planes. offset = -dot(faceOrigin, n). */
-  setClipBox(lo, hi2) {
+  setClipBox(lo2, hi2) {
     this.setClipPlanes([
-      [1, 0, 0, -lo[0]],
+      [1, 0, 0, -lo2[0]],
       [-1, 0, 0, hi2[0]],
       // keep lo.x <= x <= hi.x
-      [0, 1, 0, -lo[1]],
+      [0, 1, 0, -lo2[1]],
       [0, -1, 0, hi2[1]],
-      [0, 0, 1, -lo[2]],
+      [0, 0, 1, -lo2[2]],
       [0, 0, -1, hi2[2]]
     ]);
   }
   /** Scene AABB = union of field AABBs; also picks a default sample step from the smallest field extent. */
   recomputeBounds() {
     if (!this.placed.length) return;
-    let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    let mn2 = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
     for (const p of this.placed) {
       const [a, b] = p.field.aabb();
       for (let i = 0; i < 3; i++) {
-        mn[i] = Math.min(mn[i], a[i]);
+        mn2[i] = Math.min(mn2[i], a[i]);
         mx[i] = Math.max(mx[i], b[i]);
       }
     }
-    this.mat[0] = mn[0];
-    this.mat[1] = mn[1];
-    this.mat[2] = mn[2];
+    this.mat[0] = mn2[0];
+    this.mat[1] = mn2[1];
+    this.mat[2] = mn2[2];
     this.mat[4] = mx[0];
     this.mat[5] = mx[1];
     this.mat[6] = mx[2];
@@ -3062,11 +3319,11 @@ ${pickDispatch}
    *  RAS point where front-to-back opacity first reaches 50% — Slicer's 3D volume pick. Traces
    *  whatever renders (DVR volumes, SegmentField iso shells, RGBA), EXCLUDING ghost handles.
    *  Uses the camera set by the last setCamera(); returns null if the ray never reaches 50%. */
-  async pick(u, v2) {
+  async pick(u, v) {
     if (!this.pickPipeline || !this.pickBind || !this.placed.length) return null;
     return this.serialise(async () => {
       this.mat[this.pickOff] = u * 2 - 1;
-      this.mat[this.pickOff + 1] = 1 - v2 * 2;
+      this.mat[this.pickOff + 1] = 1 - v * 2;
       this.mat[this.pickOff + 11] = 0;
       this.flush();
       return await this.tracePick();
@@ -3445,6 +3702,360 @@ var ColorizeBaker = class {
   }
 };
 
+// render/cine-field.ts
+var _f32 = new Float32Array(1);
+var _u32 = new Uint32Array(_f32.buffer);
+function f32tof16(v) {
+  _f32[0] = v;
+  const u = _u32[0];
+  const sign = u >>> 16 & 32768;
+  let exp = (u >>> 23 & 255) - 127 + 15;
+  const man = u & 8388607;
+  if (exp <= 0) return sign;
+  if (exp >= 31) return sign | 31744;
+  return sign | exp << 10 | man >>> 13;
+}
+function toF16Array(src) {
+  const out = new Uint16Array(src.length);
+  for (let i = 0; i < src.length; i++) out[i] = f32tof16(src[i]);
+  return out;
+}
+
+// render/colorize-field.ts
+var COLORIZE_CT_BYTES_PER_VOXEL = 2;
+var ColorizeField = class {
+  kind = "clz";
+  bindingCount = 3;
+  // ct (3d f32) + labels (3d u32) + luts (2d)
+  clippable;
+  dev;
+  ctTex;
+  labTex;
+  lutTex;
+  // 256x2: row 0 = CT transfer function, row 1 = palette
+  p2t;
+  box;
+  stepMm;
+  dims;
+  clim;
+  shade;
+  unit;
+  context;
+  ctMod;
+  /** rgba8 palette rows kept CPU-side so a single segment's alpha can be patched cheaply. */
+  palette = new Uint8Array(256 * 4);
+  constructor(dev, ct2, labels, dims, ctLut, opts) {
+    this.dev = dev;
+    this.dims = dims;
+    const size = dims;
+    this.ctTex = dev.createTexture({
+      size,
+      dimension: "3d",
+      format: "r16float",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    });
+    if (ct2) this.setCT(ct2);
+    this.labTex = dev.createTexture({
+      size,
+      dimension: "3d",
+      format: "r8uint",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    });
+    let lab8;
+    if (labels instanceof Uint8Array) {
+      lab8 = labels;
+    } else {
+      lab8 = new Uint8Array(labels.length);
+      for (let i = 0; i < labels.length; i++) lab8[i] = labels[i];
+    }
+    dev.queue.writeTexture(
+      { texture: this.labTex },
+      lab8,
+      { bytesPerRow: dims[0], rowsPerImage: dims[1] },
+      size
+    );
+    this.lutTex = dev.createTexture({
+      size: [256, 2],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    });
+    this.setCtLUT(ctLut);
+    if (opts.ijkToRAS) {
+      this.p2t = patientToTextureFromIjkToRAS(opts.ijkToRAS, dims);
+      this.box = volumeAABBFromIjkToRAS(opts.ijkToRAS, dims);
+      this.stepMm = Math.min(...spacingFromIjkToRAS(opts.ijkToRAS));
+    } else {
+      const sp = opts.spacing ?? [1, 1, 1];
+      this.p2t = patientToTexture(dims, sp, opts.center ?? [0, 0, 0]);
+      this.box = volumeAABB(dims, sp, opts.center ?? [0, 0, 0]);
+      this.stepMm = Math.min(...sp);
+    }
+    this.clim = opts.clim;
+    this.shade = opts.shade ?? [0.25, 0.8, 0.3, 18];
+    this.unit = opts.opacityUnitDistance ?? this.stepMm;
+    this.clippable = opts.clippable ?? true;
+    this.context = opts.contextOpacity ?? 1;
+    this.ctMod = opts.ctModulation ?? 0.55;
+  }
+  /** Upload (or replace) the CT scalars. Separated from the constructor so the label volume —
+   *  which compresses to under a megabyte — can be shown as flat coloured surfaces while the
+   *  60 MB CT is still streaming. */
+  setCT(ct2) {
+    this.dev.queue.writeTexture(
+      { texture: this.ctTex },
+      toF16Array(ct2),
+      { bytesPerRow: this.dims[0] * COLORIZE_CT_BYTES_PER_VOXEL, rowsPerImage: this.dims[1] },
+      this.dims
+    );
+    this.hasCt = true;
+  }
+  /** Patch a z-range from a full-volume Float32Array (progressive zarr / LOD slabs). */
+  updateScalars(data, zStart, zCount) {
+    const [nx, ny] = this.dims;
+    const slice = data.subarray(zStart * nx * ny, (zStart + zCount) * nx * ny);
+    this.dev.queue.writeTexture(
+      { texture: this.ctTex, origin: [0, 0, zStart] },
+      toF16Array(slice),
+      { bytesPerRow: nx * COLORIZE_CT_BYTES_PER_VOXEL, rowsPerImage: ny },
+      [nx, ny, zCount]
+    );
+    this.hasCt = true;
+  }
+  /** Remap patient geometry after progressive load finalizes true ijkToRAS. */
+  setIjkToRAS(ijkToRAS) {
+    this.p2t = patientToTextureFromIjkToRAS(ijkToRAS, this.dims);
+    this.box = volumeAABBFromIjkToRAS(ijkToRAS, this.dims);
+    this.stepMm = Math.min(...spacingFromIjkToRAS(ijkToRAS));
+  }
+  /** Free GPU textures (call when leaving colorize mode or replacing the field). */
+  destroy() {
+    this.ctTex.destroy();
+    this.labTex.destroy();
+    this.lutTex.destroy();
+  }
+  hasCt = false;
+  get ctLoaded() {
+    return this.hasCt;
+  }
+  /** 0 = flat segment colour (surface look), 1 = full CT brightness modulation. */
+  setCtModulation(m) {
+    this.ctMod = m;
+  }
+  /** The 256x2 palette texture (row 1 = segment colour + opacity), shared with the 2D slice
+   *  overlay so one group slider governs both views. */
+  paletteTexture() {
+    return this.lutTex;
+  }
+  /** Swap the CT transfer function (row 0). Segment colours and opacities are untouched. */
+  setCtLUT(lut) {
+    this.dev.queue.writeTexture({ texture: this.lutTex, origin: [0, 0] }, lut, { bytesPerRow: 256 * 4 }, [256, 1]);
+  }
+  /** Set a segment's display colour (0..1 rgb). Call flushPalette() after a batch. */
+  setSegmentColor(num2, rgb) {
+    const o = num2 * 4;
+    this.palette[o] = Math.round(rgb[0] * 255);
+    this.palette[o + 1] = Math.round(rgb[1] * 255);
+    this.palette[o + 2] = Math.round(rgb[2] * 255);
+  }
+  /** Set a segment's opacity (0..1) — this is what a group slider drives. */
+  setSegmentOpacity(num2, a) {
+    this.palette[num2 * 4 + 3] = Math.round(Math.max(0, Math.min(1, a)) * 255);
+  }
+  getSegmentOpacity(num2) {
+    return this.palette[num2 * 4 + 3] / 255;
+  }
+  /** Upload the palette row. One 1 KB write — cheap enough to call on every slider tick. */
+  flushPalette() {
+    this.dev.queue.writeTexture({ texture: this.lutTex, origin: [0, 1] }, this.palette, { bytesPerRow: 256 * 4 }, [256, 1]);
+  }
+  setContextOpacity(v) {
+    this.context = v;
+  }
+  getContextOpacity() {
+    return this.context;
+  }
+  setClim(lo2, hi2) {
+    this.clim = [lo2, hi2];
+  }
+  getClim() {
+    return [this.clim[0], this.clim[1]];
+  }
+  setShade(s) {
+    this.shade = s;
+  }
+  /** The CT scalar texture, so a SliceRenderer can show the same voxels in the 2D views. */
+  volumeTexture() {
+    return this.ctTex;
+  }
+  /** RAS(patient) -> texture[0,1], the same matrix the 2D slice renderer needs. */
+  patientToTexture() {
+    return this.p2t;
+  }
+  labelTexture() {
+    return this.labTex;
+  }
+  uniformFloats() {
+    return 32;
+  }
+  // mat4(16) + clim(4) + shade(4) + params(4) + dims(4)
+  aabb() {
+    return this.box;
+  }
+  sampleStep() {
+    return this.stepMm;
+  }
+  structMembers(s) {
+    return [
+      `  clz${s}_p2t : mat4x4<f32>,`,
+      `  clz${s}_clim : vec4<f32>,`,
+      // lo, hi, _, _
+      `  clz${s}_shade : vec4<f32>,`,
+      // ka, kd, ks, shininess
+      `  clz${s}_params : vec4<f32>,`,
+      // opacity_unit_distance, contextOpacity, ctModulation, _
+      `  clz${s}_dims : vec4<f32>,`
+      // nx, ny, nz, _
+    ].join("\n");
+  }
+  declareBindings(s, base) {
+    return [
+      `@group(0) @binding(${base}) var t_ct_clz${s} : texture_3d<f32>;`,
+      `@group(0) @binding(${base + 1}) var t_lab_clz${s} : texture_3d<u32>;`,
+      `@group(0) @binding(${base + 2}) var t_lut_clz${s} : texture_2d<f32>;`
+    ].join("\n");
+  }
+  samplingWGSL(s) {
+    return (
+      /* wgsl */
+      `
+fn tex_clz${s}(wp : vec3<f32>) -> vec3<f32> {
+  let t4 = u_material.clz${s}_p2t * vec4<f32>(transform_point_clz${s}(wp), 1.0);
+  return t4.xyz;
+}
+fn ct_clz${s}(wp : vec3<f32>) -> f32 {
+  let t = clamp(tex_clz${s}(wp), vec3<f32>(0.0), vec3<f32>(1.0));
+  return textureSampleLevel(t_ct_clz${s}, s_lin, t, 0.0).r;
+}
+/** Normalised CT position in the LUT, 0..1 across clim. */
+fn ctnorm_clz${s}(hu : f32) -> f32 {
+  let lo = u_material.clz${s}_clim.x; let hi = u_material.clz${s}_clim.y;
+  return clamp((hu - lo) / max(hi - lo, 1e-6), 0.0, 1.0);
+}
+/** The scalar used for the shading gradient: the normalised CT itself.
+ *
+ *  NOT the LUT alpha. Most CT presets are near step functions in opacity (CT-Soft-Tissue is
+ *  flat 1.0 above -160 HU), so the alpha gradient is zero through the whole interior and
+ *  enormous on one noisy isosurface \u2014 shading then flips between ambient-only and fully lit
+ *  from voxel to voxel and the volume renders as banded moire. The CT scalar is smooth
+ *  everywhere and its gradient is the real anatomical surface normal. */
+fn galpha_clz${s}(wp : vec3<f32>) -> f32 {
+  return ctnorm_clz${s}(ct_clz${s}(wp));
+}
+/** Trilinear occupancy of the given segment around a texture coordinate: the fraction of the eight
+ *  surrounding voxels carrying that label, weighted as trilinear interpolation would.
+ *
+ *  Labels cannot be interpolated by the hardware (blending 5 and 40 gives 22), so the label
+ *  fetch is NEAREST \u2014 which makes every organ boundary a voxel staircase. At 1.25 mm slice
+ *  spacing a rib is only a few voxels thick, and marching a ray through hard 0/1 opacity across
+ *  those steps produces the moire banding you see on thin structures. Interpolating the
+ *  INDICATOR of the nearest label instead is exact at voxel centres, smooth in between, and
+ *  antialiases the surface without ever inventing a label that is not there. */
+fn occupancy_clz${s}(tex : vec3<f32>, d : vec3<f32>, lab : i32) -> f32 {
+  let p = tex * d - vec3<f32>(0.5);
+  let b = floor(p);
+  let f = p - b;
+  var occ = 0.0;
+  for (var i = 0; i < 8; i = i + 1) {
+    let c = vec3<f32>(f32(i & 1), f32((i >> 1) & 1), f32((i >> 2) & 1));
+    let w = ((1.0 - c.x) + (2.0 * c.x - 1.0) * f.x)
+          * ((1.0 - c.y) + (2.0 * c.y - 1.0) * f.y)
+          * ((1.0 - c.z) + (2.0 * c.z - 1.0) * f.z);
+    let vi = vec3<i32>(clamp(b + c, vec3<f32>(0.0), d - vec3<f32>(1.0)));
+    if (i32(textureLoad(t_lab_clz${s}, vi, 0).r) == lab) { occ = occ + w; }
+  }
+  return occ;
+}
+fn sample_field_clz${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
+  let tex = tex_clz${s}(wp);
+  if (any(tex < vec3<f32>(0.0)) || any(tex > vec3<f32>(1.0))) { return vec4<f32>(0.0); }
+  let hu = textureSampleLevel(t_ct_clz${s}, s_lin, tex, 0.0).r;
+  let tn = ctnorm_clz${s}(hu);
+  let ctc = textureSampleLevel(t_lut_clz${s}, s_lin, vec2<f32>(tn, 0.25), 0.0);
+
+  // NEAREST label fetch. textureLoad takes voxel indices, so scale out of [0,1].
+  let d = u_material.clz${s}_dims.xyz;
+  let vi = vec3<i32>(clamp(floor(tex * d), vec3<f32>(0.0), d - vec3<f32>(1.0)));
+  let lab = i32(textureLoad(t_lab_clz${s}, vi, 0).r);
+
+  var rgb : vec3<f32>;
+  var dens : f32;
+  if (lab > 0) {
+    let pal = textureLoad(t_lut_clz${s}, vec2<i32>(lab, 1), 0);
+    // CT modulates BRIGHTNESS so organs keep their internal texture, but not opacity \u2014 the
+    // group slider alone owns that, so it still works under a bone-only transfer function.
+    let m = u_material.clz${s}_params.z;
+    rgb = pal.rgb * ((1.0 - m) + m * (0.35 + 1.30 * tn));
+    dens = pal.a * occupancy_clz${s}(tex, d, lab);
+  } else {
+    rgb = ctc.rgb;
+    dens = ctc.a * u_material.clz${s}_params.y;
+  }
+  if (dens <= 0.001) { return vec4<f32>(0.0); }
+
+  let step = u_material.scene.x;
+  let unit = max(u_material.clz${s}_params.x, 1e-3);
+  let opacity = clamp(1.0 - pow(1.0 - clamp(dens, 0.0, 1.0), step / unit), 0.0, 1.0);
+  if (opacity <= 0.001) { return vec4<f32>(0.0); }
+
+  let h = step * 2.0;
+  let g = vec3<f32>(
+    galpha_clz${s}(wp + vec3<f32>(h,0,0)) - galpha_clz${s}(wp - vec3<f32>(h,0,0)),
+    galpha_clz${s}(wp + vec3<f32>(0,h,0)) - galpha_clz${s}(wp - vec3<f32>(0,h,0)),
+    galpha_clz${s}(wp + vec3<f32>(0,0,h)) - galpha_clz${s}(wp - vec3<f32>(0,0,h))) / (2.0 * h);
+  let glen = length(g);
+  let ka = u_material.clz${s}_shade.x; let kd = u_material.clz${s}_shade.y;
+  let ks = u_material.clz${s}_shade.z; let sh = u_material.clz${s}_shade.w;
+  var lit_srgb = rgb * ka;
+  if (glen > 1e-6) {
+    var n = g / glen;
+    if (dot(n, -rd) < 0.0) { n = -n; }
+    let view_dir = normalize(-rd);
+    let ldotn = dot(view_dir, n);
+    if (ldotn > 0.0) {
+      let refl = normalize(2.0 * ldotn * n - view_dir);
+      let rdotv = max(0.0, dot(refl, view_dir));
+      lit_srgb = rgb * (ka + kd * ldotn) + vec3<f32>(ks * pow(rdotv, sh));
+    }
+  }
+  let lit = srgb2physical(clamp(lit_srgb, vec3<f32>(0.0), vec3<f32>(1.0)));
+  return vec4<f32>(lit * opacity, opacity);
+}`
+    );
+  }
+  fillUniforms(out, off) {
+    out.set(this.p2t, off);
+    out[off + 16] = this.clim[0];
+    out[off + 17] = this.clim[1];
+    out[off + 20] = this.shade[0];
+    out[off + 21] = this.shade[1];
+    out[off + 22] = this.shade[2];
+    out[off + 23] = this.shade[3];
+    out[off + 24] = this.unit;
+    out[off + 25] = this.context;
+    out[off + 26] = this.ctMod;
+    out[off + 28] = this.dims[0];
+    out[off + 29] = this.dims[1];
+    out[off + 30] = this.dims[2];
+  }
+  bindEntries(_s, base) {
+    return [
+      { binding: base, resource: this.ctTex.createView() },
+      { binding: base + 1, resource: this.labTex.createView() },
+      { binding: base + 2, resource: this.lutTex.createView() }
+    ];
+  }
+};
+
 // render/fiducial-field.ts
 var MAX = 64;
 var FiducialField = class {
@@ -3514,23 +4125,23 @@ var FiducialField = class {
   }
   aabb() {
     if (this.n === 0) return [[-1, -1, -1], [1, 1, 1]];
-    const lo = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
+    const lo2 = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
     for (let i = 0; i < this.n; i++) {
       const r = this.screen ? 0 : this.spheres[i * 4 + 3];
       for (let a = 0; a < 3; a++) {
-        lo[a] = Math.min(lo[a], this.spheres[i * 4 + a] - r);
+        lo2[a] = Math.min(lo2[a], this.spheres[i * 4 + a] - r);
         hi2[a] = Math.max(hi2[a], this.spheres[i * 4 + a] + r);
       }
     }
     if (this.screen) {
-      const diag = Math.hypot(hi2[0] - lo[0], hi2[1] - lo[1], hi2[2] - lo[2]);
+      const diag = Math.hypot(hi2[0] - lo2[0], hi2[1] - lo2[1], hi2[2] - lo2[2]);
       const m = Math.max(40, diag * 0.15);
       for (let a = 0; a < 3; a++) {
-        lo[a] -= m;
+        lo2[a] -= m;
         hi2[a] += m;
       }
     }
-    return [lo, hi2];
+    return [lo2, hi2];
   }
   structMembers(s) {
     return [
@@ -3772,12 +4383,12 @@ fn sample_field_roi${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
 };
 
 // render/demos/roi-widget.ts
-function createRoiWidget(lo, hi2, opts = {}) {
+function createRoiWidget(lo2, hi2, opts = {}) {
   const MIN_HALF = opts.minHalfMm ?? 5;
   const cov = opts.coverage ?? 0.35;
-  const center = [(lo[0] + hi2[0]) / 2, (lo[1] + hi2[1]) / 2, (lo[2] + hi2[2]) / 2];
-  const half = [(hi2[0] - lo[0]) * cov, (hi2[1] - lo[1]) * cov, (hi2[2] - lo[2]) * cov];
-  const hR = Math.max(3, Math.hypot(hi2[0] - lo[0], hi2[1] - lo[1], hi2[2] - lo[2]) * 0.012);
+  const center = [(lo2[0] + hi2[0]) / 2, (lo2[1] + hi2[1]) / 2, (lo2[2] + hi2[2]) / 2];
+  const half = [(hi2[0] - lo2[0]) * cov, (hi2[1] - lo2[1]) * cov, (hi2[2] - lo2[2]) * cov];
+  const hR = Math.max(3, Math.hypot(hi2[0] - lo2[0], hi2[1] - lo2[1], hi2[2] - lo2[2]) * 0.012);
   const bar = Math.max(1.2, hR * 0.35);
   const box = new RoiBoxField(center, half, { color: [1, 0.85, 0.25], barHalfMm: bar });
   const handles = new FiducialField([], { shininess: 60, kSpecular: 0.4, clippable: false, screenSpace: true, ghost: true });
@@ -3859,21 +4470,21 @@ function createRoiWidget(lo, hi2, opts = {}) {
 // algorithms/geom.ts
 function labelmapHasInternalBoundary(lab, dims) {
   const [nx, ny, nz] = dims;
-  const at2 = (x2, y, z2) => lab[(z2 * ny + y) * nx + x2];
-  for (let z2 = 0; z2 < nz; z2++) for (let y = 0; y < ny; y++) for (let x2 = 0; x2 < nx; x2++) {
-    const v2 = at2(x2, y, z2);
-    if (v2 === 0) continue;
-    if (x2 + 1 < nx) {
-      const n = at2(x2 + 1, y, z2);
-      if (n !== 0 && n !== v2) return true;
+  const at2 = (x, y, z2) => lab[(z2 * ny + y) * nx + x];
+  for (let z2 = 0; z2 < nz; z2++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+    const v = at2(x, y, z2);
+    if (v === 0) continue;
+    if (x + 1 < nx) {
+      const n = at2(x + 1, y, z2);
+      if (n !== 0 && n !== v) return true;
     }
     if (y + 1 < ny) {
-      const n = at2(x2, y + 1, z2);
-      if (n !== 0 && n !== v2) return true;
+      const n = at2(x, y + 1, z2);
+      if (n !== 0 && n !== v) return true;
     }
     if (z2 + 1 < nz) {
-      const n = at2(x2, y, z2 + 1);
-      if (n !== 0 && n !== v2) return true;
+      const n = at2(x, y, z2 + 1);
+      if (n !== 0 && n !== v) return true;
     }
   }
   return false;
@@ -3882,7 +4493,7 @@ function resampleIsotropic(lab, dims, ijkToRAS, maxDim, maxVoxels = Infinity) {
   const sp = spacingFromIjkToRAS2(ijkToRAS);
   const ext = [dims[0] * sp[0], dims[1] * sp[1], dims[2] * sp[2]];
   let vox = Math.max(...ext) / maxDim;
-  const count = (v2) => Math.max(1, Math.round(ext[0] / v2)) * Math.max(1, Math.round(ext[1] / v2)) * Math.max(1, Math.round(ext[2] / v2));
+  const count = (v) => Math.max(1, Math.round(ext[0] / v)) * Math.max(1, Math.round(ext[1] / v)) * Math.max(1, Math.round(ext[2] / v));
   let coarsened = false;
   if (count(vox) > maxVoxels) {
     vox = Math.cbrt(ext[0] * ext[1] * ext[2] / maxVoxels);
@@ -3899,9 +4510,9 @@ function resampleIsotropic(lab, dims, ijkToRAS, maxDim, maxVoxels = Infinity) {
     const sz = Math.min(nz - 1, Math.floor((z2 + 0.5) * nz / cz));
     for (let y = 0; y < cy; y++) {
       const sy = Math.min(ny - 1, Math.floor((y + 0.5) * ny / cy));
-      for (let x2 = 0; x2 < cx; x2++) {
-        const sx = Math.min(nx - 1, Math.floor((x2 + 0.5) * nx / cx));
-        out[(z2 * cy + y) * cx + x2] = lab[(sz * ny + sy) * nx + sx];
+      for (let x = 0; x < cx; x++) {
+        const sx = Math.min(nx - 1, Math.floor((x + 0.5) * nx / cx));
+        out[(z2 * cy + y) * cx + x] = lab[(sz * ny + sy) * nx + sx];
       }
     }
   }
@@ -3970,9 +4581,9 @@ var EditableSegmentation = class {
   /** Region-limited labelmap write (`lo`/`size` in label-grid ijk; data x-fastest, tightly packed).
    *  Deliberately NO dirty notification: the caller pairs it with a region-limited rebake
    *  (SegmentationLogic.rebakeShellRegion) — an onDirty full rebake would defeat the point. */
-  writeLabelRegion(data, lo, size) {
+  writeLabelRegion(data, lo2, size) {
     this.device.queue.writeTexture(
-      { texture: this.labelTex, origin: lo },
+      { texture: this.labelTex, origin: lo2 },
       data,
       { bytesPerRow: size[0] * 4, rowsPerImage: size[1] },
       size
@@ -3993,7 +4604,7 @@ var EditableSegmentation = class {
     const out = new Uint32Array(dx * dy * dz);
     for (let z2 = 0; z2 < dz; z2++) for (let y = 0; y < dy; y++) {
       const src = (z2 * dy + y) * rowU32, dst = (z2 * dy + y) * dx;
-      for (let x2 = 0; x2 < dx; x2++) out[dst + x2] = padded[src + x2];
+      for (let x = 0; x < dx; x++) out[dst + x] = padded[src + x];
     }
     buf.unmap();
     buf.destroy();
@@ -4331,8 +4942,8 @@ var JfaSdfBaker = class {
       return s * Math.pow(2, e - 15) * (1 + f / 1024);
     };
     const out = new Float32Array(dx * dy * dz);
-    for (let z2 = 0; z2 < dz; z2++) for (let y = 0; y < dy; y++) for (let x2 = 0; x2 < dx; x2++) {
-      out[(z2 * dy + y) * dx + x2] = h2f(u162[(z2 * dy + y) * rowU16 + x2 * 4 + 3]);
+    for (let z2 = 0; z2 < dz; z2++) for (let y = 0; y < dy; y++) for (let x = 0; x < dx; x++) {
+      out[(z2 * dy + y) * dx + x] = h2f(u162[(z2 * dy + y) * rowU16 + x * 4 + 3]);
     }
     buf.unmap();
     buf.destroy();
@@ -4392,17 +5003,17 @@ var JfaSdfBaker = class {
    *  ≫band away from any visible shell — invisible, and the next full sweep cleans them. */
   refineRegion(regionIjk) {
     const dev = this.dev, [dx, dy, dz] = this.dims;
-    const lo = [Math.max(0, regionIjk.lo[0]), Math.max(0, regionIjk.lo[1]), Math.max(0, regionIjk.lo[2])];
+    const lo2 = [Math.max(0, regionIjk.lo[0]), Math.max(0, regionIjk.lo[1]), Math.max(0, regionIjk.lo[2])];
     const hi2 = [Math.min(dx, regionIjk.hi[0]), Math.min(dy, regionIjk.hi[1]), Math.min(dz, regionIjk.hi[2])];
-    const [rx, ry, rz] = [hi2[0] - lo[0], hi2[1] - lo[1], hi2[2] - lo[2]];
+    const [rx, ry, rz] = [hi2[0] - lo2[0], hi2[1] - lo2[1], hi2[2] - lo2[2]];
     if (rx <= 0 || ry <= 0 || rz <= 0) return;
     const g = [Math.ceil(rx / 4), Math.ceil(ry / 4), Math.ceil(rz / 4)];
-    const region = { lo, hi: hi2 };
+    const region = { lo: lo2, hi: hi2 };
     let src = this.lastSeed;
     let enc2 = dev.createCommandEncoder();
     enc2.copyTextureToTexture({ texture: this.seed[src] }, { texture: this.seed[src ^ 1] }, this.dims);
     dev.queue.submit([enc2.finish()]);
-    this.writeUni(0, lo);
+    this.writeUni(0, lo2);
     enc2 = dev.createCommandEncoder();
     {
       const b = dev.createBindGroup({ layout: this.initPipe.getBindGroupLayout(0), entries: [
@@ -4422,7 +5033,7 @@ var JfaSdfBaker = class {
     for (let s = 1 << Math.floor(Math.log2(Math.max(2, maxDim - 1))); s >= 1; s >>= 1) steps.push(s);
     steps.push(2, 1);
     for (const step of steps) {
-      this.writeUni(step, lo);
+      this.writeUni(step, lo2);
       const dst = src ^ 1;
       enc2 = dev.createCommandEncoder();
       const b = dev.createBindGroup({ layout: this.jfaPipe.getBindGroupLayout(0), entries: [
@@ -4439,7 +5050,7 @@ var JfaSdfBaker = class {
       src = dst;
     }
     this.lastSeed = src;
-    this.writeUni(0, lo);
+    this.writeUni(0, lo2);
     enc2 = dev.createCommandEncoder();
     const bf = dev.createBindGroup({ layout: this.finalPipe.getBindGroupLayout(0), entries: [
       { binding: 0, resource: this.seed[src].createView() },
@@ -4565,7 +5176,7 @@ var JfaSdfBaker = class {
     let passIdx = 0;
     for (const [srcT, dstT, axis] of passes) {
       const expand = region ? (2 - passIdx) * radius : 0;
-      const lo = region ? [Math.max(0, region.lo[0] - expand), Math.max(0, region.lo[1] - expand), Math.max(0, region.lo[2] - expand)] : [0, 0, 0];
+      const lo2 = region ? [Math.max(0, region.lo[0] - expand), Math.max(0, region.lo[1] - expand), Math.max(0, region.lo[2] - expand)] : [0, 0, 0];
       const hi2 = region ? [Math.min(dx, region.hi[0] + expand), Math.min(dy, region.hi[1] + expand), Math.min(dz, region.hi[2] + expand)] : [dx, dy, dz];
       const ab = new ArrayBuffer(112);
       const u322 = new Uint32Array(ab), f32 = new Float32Array(ab), i32 = new Int32Array(ab);
@@ -4575,9 +5186,9 @@ var JfaSdfBaker = class {
       u322[4] = axis;
       u322[5] = radius;
       f32.set(w, 8);
-      i32[24] = lo[0];
-      i32[25] = lo[1];
-      i32[26] = lo[2];
+      i32[24] = lo2[0];
+      i32[25] = lo2[1];
+      i32[26] = lo2[2];
       const ub = dev.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       dev.queue.writeBuffer(ub, 0, ab);
       const b = dev.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
@@ -4588,7 +5199,7 @@ var JfaSdfBaker = class {
       const bp = enc2.beginComputePass();
       bp.setPipeline(pipe);
       bp.setBindGroup(0, b);
-      bp.dispatchWorkgroups(Math.ceil((hi2[0] - lo[0]) / 4), Math.ceil((hi2[1] - lo[1]) / 4), Math.ceil((hi2[2] - lo[2]) / 4));
+      bp.dispatchWorkgroups(Math.ceil((hi2[0] - lo2[0]) / 4), Math.ceil((hi2[1] - lo2[1]) / 4), Math.ceil((hi2[2] - lo2[2]) / 4));
       bp.end();
       passIdx++;
     }
@@ -4757,21 +5368,21 @@ var SegmentationLogic = class {
   /** RAS bbox → padded-SDF-grid ijk bbox with an M-voxel margin (shell band + blur radii). */
   regionToIjk(regionRAS, M2 = 8) {
     const inv = invertAffine(this.sdf.sdfIjkToRAS());
-    const lo = [Infinity, Infinity, Infinity];
+    const lo2 = [Infinity, Infinity, Infinity];
     const hi2 = [-Infinity, -Infinity, -Infinity];
-    for (const x2 of [regionRAS.lo[0], regionRAS.hi[0]]) for (const y of [regionRAS.lo[1], regionRAS.hi[1]]) for (const z2 of [regionRAS.lo[2], regionRAS.hi[2]]) {
-      const i = inv[0] * x2 + inv[1] * y + inv[2] * z2 + inv[3];
-      const j2 = inv[4] * x2 + inv[5] * y + inv[6] * z2 + inv[7];
-      const k2 = inv[8] * x2 + inv[9] * y + inv[10] * z2 + inv[11];
-      lo[0] = Math.min(lo[0], i);
-      lo[1] = Math.min(lo[1], j2);
-      lo[2] = Math.min(lo[2], k2);
+    for (const x of [regionRAS.lo[0], regionRAS.hi[0]]) for (const y of [regionRAS.lo[1], regionRAS.hi[1]]) for (const z2 of [regionRAS.lo[2], regionRAS.hi[2]]) {
+      const i = inv[0] * x + inv[1] * y + inv[2] * z2 + inv[3];
+      const j2 = inv[4] * x + inv[5] * y + inv[6] * z2 + inv[7];
+      const k = inv[8] * x + inv[9] * y + inv[10] * z2 + inv[11];
+      lo2[0] = Math.min(lo2[0], i);
+      lo2[1] = Math.min(lo2[1], j2);
+      lo2[2] = Math.min(lo2[2], k);
       hi2[0] = Math.max(hi2[0], i);
       hi2[1] = Math.max(hi2[1], j2);
-      hi2[2] = Math.max(hi2[2], k2);
+      hi2[2] = Math.max(hi2[2], k);
     }
     return {
-      lo: [Math.floor(lo[0]) - M2, Math.floor(lo[1]) - M2, Math.floor(lo[2]) - M2],
+      lo: [Math.floor(lo2[0]) - M2, Math.floor(lo2[1]) - M2, Math.floor(lo2[2]) - M2],
       hi: [Math.ceil(hi2[0]) + M2, Math.ceil(hi2[1]) + M2, Math.ceil(hi2[2]) + M2]
     };
   }
@@ -4861,6 +5472,9 @@ var SegmentationLogic = class {
 
 // render/demos/segroulette-scene.ts
 var SDF_MAX_DIM = 256;
+var COLORIZE_UNIT_MM = 10;
+var COLORIZE_CT_MOD = 0.55;
+var COLORIZE_CONTEXT = 0.12;
 function modalityLUT(modality, maxAlpha = 0.42) {
   const lut = new Uint8Array(256 * 4);
   const m = (modality ?? "CT").toUpperCase();
@@ -4888,7 +5502,7 @@ function modalityLUT(modality, maxAlpha = 0.42) {
 function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
   const dev = gpu.device;
   const dims = ct2.dims;
-  const data = ct2.vol instanceof Float32Array ? ct2.vol : Float32Array.from(ct2.vol);
+  let ctScalars = ct2.vol instanceof Float32Array ? ct2.vol : Float32Array.from(ct2.vol);
   const clim = [ct2.lev - ct2.win / 2, ct2.lev + ct2.win / 2];
   const grayLut = modalityLUT(ct2.modality);
   const grayClim = [clim[0], clim[1]];
@@ -4902,7 +5516,7 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     for (let i = 0; i < 256; i++) l[i * 4 + 3] = Math.round(l[i * 4 + 3] * o);
     return l;
   };
-  let volumeField = opts.volumeField ?? new ImageField(dev, data, dims, [1, 1, 1], baseVolLut, {
+  let volumeField = opts.volumeField ?? new ImageField(dev, ctScalars, dims, [1, 1, 1], baseVolLut, {
     clim,
     ijkToRAS: ct2.ijkToRAS,
     shade: baseShade
@@ -4949,9 +5563,12 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
   let mode = "volume";
   let segLogic;
   let editable;
+  let segDisplayMode = "surface";
+  let colorizeField;
+  let liveIjkToRAS = ct2.ijkToRAS;
   const bakeSegSdf = (labmap) => {
     if (segments.length === 0) return;
-    const cap = resampleIsotropic(labmap.lab, volDims, ct2.ijkToRAS, opts.sdfMaxDim ?? SDF_MAX_DIM, opts.sdfMaxVoxels);
+    const cap = resampleIsotropic(labmap.lab, volDims, liveIjkToRAS, opts.sdfMaxDim ?? SDF_MAX_DIM, opts.sdfMaxVoxels);
     if (cap.coarsened) console.warn(`SEGRoulette: SDF grid coarsened to fit the device memory budget (${cap.dims.join("\xD7")}, ${cap.vox.toFixed(2)}mm) \u2014 a remote render server would allow full resolution.`);
     editable = new EditableSegmentation(dev, cap.dims, { ijkToRAS: cap.ijkToRAS });
     const boundaryMode = labelmapHasInternalBoundary(cap.lab, cap.dims) ? "all" : "outer";
@@ -4974,10 +5591,62 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
   let roiEnabled = false, roiVisible = false;
   const currentSegFields = () => segLogic ? [segLogic.field()] : [];
   let extraFields = [];
+  const destroyColorize = () => {
+    if (!colorizeField) return;
+    try {
+      colorizeField.destroy();
+    } catch {
+    }
+    colorizeField = void 0;
+  };
+  const syncColorizePalette = () => {
+    if (!colorizeField) return;
+    for (const s of segments) {
+      colorizeField.setSegmentColor(s.num, s.color);
+      colorizeField.setSegmentOpacity(s.num, effectiveOpacity(s.num) * segLayerOpacity);
+    }
+    colorizeField.flushPalette();
+  };
+  const applyColorizeVolumeTf = () => {
+    if (!colorizeField) return;
+    colorizeField.setCtLUT(baseVolLut);
+    colorizeField.setClim(baseClim[0] + volShift, baseClim[1] + volShift);
+    colorizeField.setShade(baseShade);
+    colorizeField.setContextOpacity(COLORIZE_CONTEXT * volumeOpacity);
+  };
+  const ensureColorizeField = () => {
+    if (!activeSeg || segments.length === 0) return;
+    destroyColorize();
+    colorizeField = new ColorizeField(dev, ctScalars, activeSeg.lab, volDims, baseVolLut, {
+      clim: [baseClim[0] + volShift, baseClim[1] + volShift],
+      ijkToRAS: liveIjkToRAS,
+      shade: baseShade,
+      contextOpacity: COLORIZE_CONTEXT * volumeOpacity,
+      ctModulation: COLORIZE_CT_MOD,
+      opacityUnitDistance: COLORIZE_UNIT_MM,
+      clippable: true
+    });
+    syncColorizePalette();
+  };
+  let out;
+  let slice;
+  const applySliceOverlay = () => {
+    if (segDisplayMode === "colorize" && colorizeField) {
+      slice.setTextures(volumeField.volumeTexture());
+      slice.setLabelOverlay(colorizeField.labelTexture(), colorizeField.paletteTexture());
+    } else {
+      slice.setLabelOverlay(null, null);
+      slice.setTextures(volumeField.volumeTexture(), colorTex);
+    }
+  };
   const rebuild = () => {
     const f = [];
-    if (showVolume) f.push(volumeField);
-    if (showSeg) f.push(...currentSegFields());
+    if (segDisplayMode === "colorize" && colorizeField && showSeg) {
+      f.push(colorizeField);
+    } else {
+      if (showVolume) f.push(volumeField);
+      if (showSeg) f.push(...currentSegFields());
+    }
     if (roiVisible) {
       f.push(roi.box, roi.handles);
     }
@@ -4987,9 +5656,8 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     if (roiEnabled) scene.setClipBox(roi.lo(), roi.hi());
     else scene.clearClip();
   };
-  rebuild();
   const rebakeColorized = () => {
-    if (!activeSeg) return;
+    if (!activeSeg || segDisplayMode === "colorize") return;
     const nt2 = bakeColorizeRGBA(dev, activeSeg.lab, volDims, visPalette(), 1.5);
     const old = colorTex;
     colorTex = nt2;
@@ -4997,6 +5665,8 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     old?.destroy();
   };
   const clearSegGpu = () => {
+    destroyColorize();
+    segDisplayMode = "surface";
     try {
       segLogic?.destroy();
     } catch {
@@ -5010,6 +5680,7 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     segments.length = 0;
     palette.fill(0);
     segOpacity.clear();
+    segVisible.clear();
     activeSeg = void 0;
     out.hasSeg = false;
     showSeg = false;
@@ -5017,6 +5688,10 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     const old = colorTex;
     colorTex = void 0;
     if (old) {
+      try {
+        slice.setLabelOverlay(null, null);
+      } catch {
+      }
       try {
         slice.setTextures(volumeField.volumeTexture(), void 0);
       } catch {
@@ -5029,12 +5704,15 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     slice.setOverlayOpacity(0);
   };
   const mountSegLabelmap = (labmap) => {
+    const keepColorize = segDisplayMode === "colorize";
     activeSeg = labmap;
     fillSegmentsFrom(labmap);
     if (segments.length === 0) {
       activeSeg = void 0;
       out.hasSeg = false;
       showSeg = false;
+      destroyColorize();
+      segDisplayMode = "surface";
       rebuild();
       return;
     }
@@ -5043,18 +5721,23 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     out.hasSeg = true;
     out.mode = mode;
     showSeg = segLayerOpacity > 1e-3;
-    rebakeColorized();
-    slice.setOverlayOpacity(0.5);
+    if (keepColorize) {
+      ensureColorizeField();
+      applySliceOverlay();
+      slice.setOverlayOpacity(0.5);
+    } else {
+      rebakeColorized();
+      slice.setOverlayOpacity(0.5);
+    }
     rebuild();
   };
-  const slice = new SliceRenderer(gpu, format);
+  slice = new SliceRenderer(gpu, format);
   slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
   slice.setTextures(volumeField.volumeTexture(), colorTex);
   slice.setWindowLevel(ct2.win, ct2.lev);
   slice.setOverlayOpacity(activeSeg ? 0.5 : 0);
   const center = [(rasLo[0] + rasHi[0]) / 2, (rasLo[1] + rasHi[1]) / 2, (rasLo[2] + rasHi[2]) / 2];
   const radius = Math.hypot(rasHi[0] - rasLo[0], rasHi[1] - rasLo[1], rasHi[2] - rasLo[2]) / 2;
-  let out;
   out = {
     scene,
     slice,
@@ -5070,12 +5753,32 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     mode,
     hasSeg,
     roi,
+    segDisplayMode: () => segDisplayMode,
+    setSegDisplayMode(next) {
+      if (next === segDisplayMode) return;
+      if (next === "colorize" && !out.hasSeg) return;
+      segDisplayMode = next;
+      if (next === "colorize") {
+        ensureColorizeField();
+        applySliceOverlay();
+      } else {
+        destroyColorize();
+        rebakeColorized();
+        applySliceOverlay();
+      }
+      rebuild();
+    },
     setLayers(sv, ss) {
       this.setVolumeOpacity(sv ? 1 : 0);
       this.setSegOpacity(ss ? 1 : 0);
     },
     setVolumeOpacity(o) {
       volumeOpacity = Math.max(0, Math.min(1, o));
+      if (segDisplayMode === "colorize" && colorizeField) {
+        applyColorizeVolumeTf();
+        scene.syncUniforms();
+        return;
+      }
       const was = showVolume;
       showVolume = volumeOpacity > 1e-3;
       volumeField.setLUT(scaledVolLut(volumeOpacity));
@@ -5092,13 +5795,23 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
         baseClim = [grayClim[0], grayClim[1]];
         baseShade = grayShade;
       }
+      if (segDisplayMode === "colorize" && colorizeField) {
+        applyColorizeVolumeTf();
+        scene.syncUniforms();
+        return;
+      }
       volumeField.setLUT(scaledVolLut(volumeOpacity));
       volumeField.setClim(baseClim[0] + volShift, baseClim[1] + volShift);
       volumeField.setShade(baseShade);
       scene.syncUniforms();
     },
-    setVolumeShift(hu) {
-      volShift = hu;
+    setVolumeShift(hu3) {
+      volShift = hu3;
+      if (segDisplayMode === "colorize" && colorizeField) {
+        applyColorizeVolumeTf();
+        scene.syncUniforms();
+        return;
+      }
       volumeField.setClim(baseClim[0] + volShift, baseClim[1] + volShift);
       scene.syncUniforms();
     },
@@ -5107,6 +5820,12 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
       segLayerOpacity = Math.max(0, Math.min(1, o));
       const was = showSeg;
       showSeg = out.hasSeg && segLayerOpacity > 1e-3;
+      if (segDisplayMode === "colorize" && colorizeField) {
+        syncColorizePalette();
+        if (was !== showSeg) rebuild();
+        else scene.syncUniforms();
+        return;
+      }
       segLogic?.setGlobalOpacity(segLayerOpacity);
       if (was !== showSeg) rebuild();
       else scene.syncUniforms();
@@ -5116,6 +5835,11 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
       const o = Math.max(0, Math.min(1, opacity));
       if (o >= 1) segOpacity.delete(num2);
       else segOpacity.set(num2, o);
+      if (segDisplayMode === "colorize" && colorizeField) {
+        syncColorizePalette();
+        scene.syncUniforms();
+        return;
+      }
       rebakeColorized();
       segLogic?.setLabelOpacity(num2, effectiveOpacity(num2));
       segLogic?.refineNow();
@@ -5125,7 +5849,12 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
         const o = Math.max(0, Math.min(1, opacity));
         if (o >= 1) segOpacity.delete(num2);
         else segOpacity.set(num2, o);
-        segLogic?.setLabelOpacity(num2, effectiveOpacity(num2));
+        if (segDisplayMode !== "colorize") segLogic?.setLabelOpacity(num2, effectiveOpacity(num2));
+      }
+      if (segDisplayMode === "colorize" && colorizeField) {
+        syncColorizePalette();
+        scene.syncUniforms();
+        return;
       }
       rebakeColorized();
       segLogic?.refineNow();
@@ -5134,6 +5863,11 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     setSegmentVisible(num2, visible) {
       if (visible) segVisible.delete(num2);
       else segVisible.set(num2, false);
+      if (segDisplayMode === "colorize" && colorizeField) {
+        syncColorizePalette();
+        scene.syncUniforms();
+        return;
+      }
       rebakeColorized();
       segLogic?.setLabelOpacity(num2, effectiveOpacity(num2));
       segLogic?.refineNow();
@@ -5156,44 +5890,55 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     volumeTexture: () => volumeField.volumeTexture(),
     patientToTexture: () => volumeField.patientToTexture(),
     normScale: () => volumeField.normScaleOf(),
-    patchVolumeScalars(data2, zStart, zCount) {
-      volumeField.updateScalars(data2, zStart, zCount);
+    patchVolumeScalars(data, zStart, zCount) {
+      ctScalars = data;
+      volumeField.updateScalars(data, zStart, zCount);
+      colorizeField?.updateScalars(data, zStart, zCount);
     },
     updateGeometry(m) {
+      liveIjkToRAS = m;
       volumeField.setIjkToRAS(m);
-      const [lo, hi2] = volumeField.aabb();
-      rasLo[0] = lo[0];
-      rasLo[1] = lo[1];
-      rasLo[2] = lo[2];
+      colorizeField?.setIjkToRAS(m);
+      const [lo2, hi2] = volumeField.aabb();
+      rasLo[0] = lo2[0];
+      rasLo[1] = lo2[1];
+      rasLo[2] = lo2[2];
       rasHi[0] = hi2[0];
       rasHi[1] = hi2[1];
       rasHi[2] = hi2[2];
       out.ijkToRAS = m;
-      out.center = [(lo[0] + hi2[0]) / 2, (lo[1] + hi2[1]) / 2, (lo[2] + hi2[2]) / 2];
-      out.radius = Math.hypot(hi2[0] - lo[0], hi2[1] - lo[1], hi2[2] - lo[2]) / 2;
+      out.center = [(lo2[0] + hi2[0]) / 2, (lo2[1] + hi2[1]) / 2, (lo2[2] + hi2[2]) / 2];
+      out.radius = Math.hypot(hi2[0] - lo2[0], hi2[1] - lo2[1], hi2[2] - lo2[2]) / 2;
       slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
       scene.syncUniforms();
     },
-    swapVolumeField(field, nextDims, ijkToRAS) {
+    swapVolumeField(field, nextDims, ijkToRAS, voxels) {
       const old = volumeField;
       volumeField = field;
       volDims = [nextDims[0], nextDims[1], nextDims[2]];
       out.dims = volDims;
       out.ijkToRAS = ijkToRAS;
+      liveIjkToRAS = ijkToRAS;
+      if (voxels) ctScalars = voxels;
       volumeField.setLUT(scaledVolLut(volumeOpacity));
       volumeField.setClim(baseClim[0] + volShift, baseClim[1] + volShift);
       volumeField.setShade(baseShade);
-      const [lo, hi2] = volumeField.aabb();
-      rasLo[0] = lo[0];
-      rasLo[1] = lo[1];
-      rasLo[2] = lo[2];
+      const [lo2, hi2] = volumeField.aabb();
+      rasLo[0] = lo2[0];
+      rasLo[1] = lo2[1];
+      rasLo[2] = lo2[2];
       rasHi[0] = hi2[0];
       rasHi[1] = hi2[1];
       rasHi[2] = hi2[2];
-      out.center = [(lo[0] + hi2[0]) / 2, (lo[1] + hi2[1]) / 2, (lo[2] + hi2[2]) / 2];
-      out.radius = Math.hypot(hi2[0] - lo[0], hi2[1] - lo[1], hi2[2] - lo[2]) / 2;
+      out.center = [(lo2[0] + hi2[0]) / 2, (lo2[1] + hi2[1]) / 2, (lo2[2] + hi2[2]) / 2];
+      out.radius = Math.hypot(hi2[0] - lo2[0], hi2[1] - lo2[1], hi2[2] - lo2[2]) / 2;
       slice.setVolume(volumeField.patientToTexture(), rasLo, rasHi);
-      slice.setTextures(volumeField.volumeTexture(), colorTex);
+      if (segDisplayMode === "colorize" && out.hasSeg && voxels) {
+        ensureColorizeField();
+        applySliceOverlay();
+      } else {
+        applySliceOverlay();
+      }
       rebuild();
       old.destroy();
     },
@@ -5202,7 +5947,9 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
       mountSegLabelmap(labmap);
     },
     replaceSegmentation(labmap) {
+      const keepColorize = segDisplayMode === "colorize";
       clearSegGpu();
+      if (keepColorize) segDisplayMode = "colorize";
       mountSegLabelmap(labmap);
     },
     labelmap: () => activeSeg,
@@ -5215,6 +5962,7 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
       clearSegGpu();
     }
   };
+  rebuild();
   return out;
 }
 
@@ -5242,7 +5990,7 @@ function createCrosshair(visible = true) {
   };
   return st2;
 }
-function drawCross(ctx, x2, y, opts = {}) {
+function drawCross(ctx, x, y, opts = {}) {
   const size = opts.size ?? 11, gap = opts.gap ?? 3;
   ctx.save();
   ctx.lineWidth = 1.5;
@@ -5250,14 +5998,14 @@ function drawCross(ctx, x2, y, opts = {}) {
   ctx.shadowColor = "rgba(0,0,0,0.8)";
   ctx.shadowBlur = 2;
   ctx.beginPath();
-  ctx.moveTo(x2 - size, y);
-  ctx.lineTo(x2 - gap, y);
-  ctx.moveTo(x2 + gap, y);
-  ctx.lineTo(x2 + size, y);
-  ctx.moveTo(x2, y - size);
-  ctx.lineTo(x2, y - gap);
-  ctx.moveTo(x2, y + gap);
-  ctx.lineTo(x2, y + size);
+  ctx.moveTo(x - size, y);
+  ctx.lineTo(x - gap, y);
+  ctx.moveTo(x + gap, y);
+  ctx.lineTo(x + size, y);
+  ctx.moveTo(x, y - size);
+  ctx.lineTo(x, y - gap);
+  ctx.moveTo(x, y + gap);
+  ctx.lineTo(x, y + size);
   ctx.stroke();
   ctx.restore();
 }
@@ -5277,7 +6025,7 @@ var uvOf = (canvas, e) => {
 var isShiftHover = (e) => e.shiftKey && e.buttons === 0;
 function mountCrosshair(cfg) {
   const state = createCrosshair(cfg.visible ?? true);
-  const slices = ["axial", "coronal", "sagittal", "oblique"].filter((k2) => k2 !== "oblique" || cfg.cells.oblique);
+  const slices = ["axial", "coronal", "sagittal", "oblique"].filter((k) => k !== "oblique" || cfg.cells.oblique);
   const all = [...slices, "threeD"];
   const cellOf = (cell) => cell === "threeD" ? cfg.cells.threeD : cfg.cells[cell];
   const ctx = {};
@@ -5313,9 +6061,9 @@ function mountCrosshair(cfg) {
   };
   state.onChange(redraw);
   let inFlight = false, queued = null;
-  const pick3d = async (u, v2) => {
+  const pick3d = async (u, v) => {
     inFlight = true;
-    const ras = await cfg.getScene().pick(u, v2);
+    const ras = await cfg.getScene().pick(u, v);
     inFlight = false;
     if (ras) {
       state.set(ras);
@@ -5329,16 +6077,16 @@ function mountCrosshair(cfg) {
   };
   cfg.cells.threeD.addEventListener("pointermove", (e) => {
     if (!isShiftHover(e)) return;
-    const { u, v: v2 } = uvOf(cfg.cells.threeD, e);
-    if (inFlight) queued = { u, v: v2 };
-    else pick3d(u, v2);
+    const { u, v } = uvOf(cfg.cells.threeD, e);
+    if (inFlight) queued = { u, v };
+    else pick3d(u, v);
   });
   for (const cell of slices) {
     const host = cellOf(cell);
     host.addEventListener("pointermove", (e) => {
       if (!isShiftHover(e)) return;
-      const { u, v: v2, aspect } = uvOf(host, e);
-      const ras = cfg.getSlice().viewToRas(cell, cfg.getOffset(cell), u, v2, aspect);
+      const { u, v, aspect } = uvOf(host, e);
+      const ras = cfg.getSlice().viewToRas(cell, cfg.getOffset(cell), u, v, aspect);
       state.set(ras);
       cfg.onJump(ras);
     });
@@ -5361,16 +6109,16 @@ var normalize = (a) => {
   const n = norm(a) || 1;
   return [a[0] / n, a[1] / n, a[2] / n];
 };
-function rotateAboutAxis(v2, axis, deg) {
-  const k2 = normalize(axis);
+function rotateAboutAxis(v, axis, deg) {
+  const k = normalize(axis);
   const t = deg * Math.PI / 180;
   const c = Math.cos(t), s = Math.sin(t);
-  const kv = cross(k2, v2);
-  const kd = dot(k2, v2);
+  const kv = cross(k, v);
+  const kd = dot(k, v);
   return [
-    v2[0] * c + kv[0] * s + k2[0] * kd * (1 - c),
-    v2[1] * c + kv[1] * s + k2[1] * kd * (1 - c),
-    v2[2] * c + kv[2] * s + k2[2] * kd * (1 - c)
+    v[0] * c + kv[0] * s + k[0] * kd * (1 - c),
+    v[1] * c + kv[1] * s + k[1] * kd * (1 - c),
+    v[2] * c + kv[2] * s + k[2] * kd * (1 - c)
   ];
 }
 var VtkCamera = class _VtkCamera {
@@ -5442,9 +6190,9 @@ var VtkCamera = class _VtkCamera {
     this.position = sub(this.focalPoint, scale(dop, d));
   }
   /** Translate both position and focal point (used by pan). */
-  translate(v2) {
-    this.position = add(this.position, v2);
-    this.focalPoint = add(this.focalPoint, v2);
+  translate(v) {
+    this.position = add(this.position, v);
+    this.focalPoint = add(this.focalPoint, v);
   }
   /** Half-height of the view plane at the focal point (perspective). */
   focalPlaneHalfHeight() {
@@ -5479,12 +6227,12 @@ var VtkCamera = class _VtkCamera {
   /** Inverse of worldToDisplay at a FIXED view-depth: the world point under display pixel (x,y)
    *  lying in the plane perpendicular to the view at `depth`. Dragging a 3D handle in this plane
    *  keeps its distance from the camera, so it tracks the cursor without depth ambiguity. */
-  displayToWorldAtDepth(x2, y, depth, w, h) {
+  displayToWorldAtDepth(x, y, depth, w, h) {
     const { right, up } = this.basis();
     const dop = this.directionOfProjection;
     const halfH = Math.max(1e-6, depth) * Math.tan(this.viewAngle * Math.PI / 360);
     const aspect = w / h;
-    const ndcx = x2 / w * 2 - 1;
+    const ndcx = x / w * 2 - 1;
     const ndcy = 1 - y / h * 2;
     const offset2 = add(scale(right, ndcx * halfH * aspect), scale(up, ndcy * halfH));
     return add(add(this.position, scale(dop, depth)), offset2);
@@ -5541,8 +6289,8 @@ var CameraInteractor = class _CameraInteractor {
   /** Mouse move while dragging. width/height are the view size in CSS pixels. */
   move(cssX, cssY, width, height) {
     if (this.action === "none" || !this.prev) return;
-    const [x2, y] = _CameraInteractor.toDisplay(cssX, cssY, height);
-    const dx = x2 - this.prev[0];
+    const [x, y] = _CameraInteractor.toDisplay(cssX, cssY, height);
+    const dx = x - this.prev[0];
     const dy = y - this.prev[1];
     if (dx === 0 && dy === 0) return;
     switch (this.action) {
@@ -5556,10 +6304,10 @@ var CameraInteractor = class _CameraInteractor {
         this.scale(dy, height);
         break;
       case "spin":
-        this.spin(x2, y, this.prev[0], this.prev[1], width, height);
+        this.spin(x, y, this.prev[0], this.prev[1], width, height);
         break;
     }
-    this.prev = [x2, y];
+    this.prev = [x, y];
     this.onChange?.();
   }
   /** vtkMRMLCameraWidget::ProcessRotate */
@@ -5579,9 +6327,9 @@ var CameraInteractor = class _CameraInteractor {
     this.camera.dolly(Math.pow(1.1, -dyf));
   }
   /** vtkMRMLCameraWidget::ProcessSpin — roll about the view plane normal. */
-  spin(x2, y, px, py, width, height) {
+  spin(x, y, px, py, width, height) {
     const cx = width / 2, cy = height / 2;
-    const newAngle = Math.atan2(y - cy, x2 - cx) * 180 / Math.PI;
+    const newAngle = Math.atan2(y - cy, x - cx) * 180 / Math.PI;
     const oldAngle = Math.atan2(py - cy, px - cx) * 180 / Math.PI;
     this.roll(newAngle - oldAngle);
   }
@@ -5590,14 +6338,14 @@ var CameraInteractor = class _CameraInteractor {
     const cam = this.camera;
     const axis = cam.directionOfProjection;
     const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
-    const v2 = cam.viewUp;
-    const k2 = axis;
-    const kv = [k2[1] * v2[2] - k2[2] * v2[1], k2[2] * v2[0] - k2[0] * v2[2], k2[0] * v2[1] - k2[1] * v2[0]];
-    const kd = k2[0] * v2[0] + k2[1] * v2[1] + k2[2] * v2[2];
+    const v = cam.viewUp;
+    const k = axis;
+    const kv = [k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]];
+    const kd = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
     cam.viewUp = [
-      v2[0] * c + kv[0] * s + k2[0] * kd * (1 - c),
-      v2[1] * c + kv[1] * s + k2[1] * kd * (1 - c),
-      v2[2] * c + kv[2] * s + k2[2] * kd * (1 - c)
+      v[0] * c + kv[0] * s + k[0] * kd * (1 - c),
+      v[1] * c + kv[1] * s + k[1] * kd * (1 - c),
+      v[2] * c + kv[2] * s + k[2] * kd * (1 - c)
     ];
     cam.orthogonalizeViewUp();
     this.onChange?.();
@@ -5641,12 +6389,12 @@ function attachCameraControls(canvas, camera, opts = {}) {
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   canvas.addEventListener("pointerdown", (e) => {
     if (!on2()) return;
-    const { x: x2, y } = local(e);
-    pointers.set(e.pointerId, { x: x2, y });
+    const { x, y } = local(e);
+    pointers.set(e.pointerId, { x, y });
     canvas.setPointerCapture(e.pointerId);
     if (pointers.size === 1) {
-      interactor.start(e.button, x2, y, canvas.clientHeight, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey });
-      opts.onLog?.("cameraStart", { action: interactor.action, x: x2, y, button: e.button, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey });
+      interactor.start(e.button, x, y, canvas.clientHeight, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey });
+      opts.onLog?.("cameraStart", { action: interactor.action, x, y, button: e.button, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey });
     } else if (pointers.size === 2) {
       interactor.end();
       pinch = pinchState();
@@ -5682,8 +6430,8 @@ function attachCameraControls(canvas, camera, opts = {}) {
   canvas.addEventListener("pointermove", (e) => {
     if (!on2()) return;
     if (!pointers.has(e.pointerId)) return;
-    const { x: x2, y } = local(e);
-    pointers.set(e.pointerId, { x: x2, y });
+    const { x, y } = local(e);
+    pointers.set(e.pointerId, { x, y });
     if (pointers.size >= 3) {
       const c = centroid();
       if (triple) opts.onVolumeDrag?.(c.mx - triple.mx, c.my - triple.my);
@@ -5698,7 +6446,7 @@ function attachCameraControls(canvas, camera, opts = {}) {
       }
       pinch = p;
     } else if (interactor.action !== "none") {
-      interactor.move(x2, y, canvas.clientWidth, canvas.clientHeight);
+      interactor.move(x, y, canvas.clientWidth, canvas.clientHeight);
     }
   });
   canvas.addEventListener("wheel", (e) => {
@@ -5735,8 +6483,8 @@ function attachSliceControls(canvas, cfg) {
   const onWheel = (e) => {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
-      const { u, v: v2, w, h: hh } = uv(e);
-      cfg.getSlice().zoomAbout(cfg.orient, Math.exp(-e.deltaY * 15e-4), u, v2, w, hh);
+      const { u, v, w, h: hh } = uv(e);
+      cfg.getSlice().zoomAbout(cfg.orient, Math.exp(-e.deltaY * 15e-4), u, v, w, hh);
       cfg.redraw();
       h.onZoom?.();
       return;
@@ -5766,24 +6514,24 @@ function attachSliceControls(canvas, cfg) {
     const wantZoom = e.button === 2;
     if (wantPan || wantZoom) {
       e.preventDefault();
-      const { u: u2, v: v3 } = uv(e);
-      view = { mode: wantZoom ? "zoom" : "pan", x: e.clientX, y: e.clientY, pu: u2, pv: v3 };
+      const { u: u2, v: v2 } = uv(e);
+      view = { mode: wantZoom ? "zoom" : "pan", x: e.clientX, y: e.clientY, pu: u2, pv: v2 };
       canvas.style.cursor = wantZoom ? "ns-resize" : "grabbing";
       canvas.setPointerCapture(e.pointerId);
       return;
     }
     if (e.button !== 0) return;
     e.preventDefault();
-    const { u, v: v2, w, h: hh } = uv(e);
+    const { u, v, w, h: hh } = uv(e);
     const mode = cfg.leftMode?.() ?? (cfg.wl?.enabled() ? "wl" : "scroll");
-    if (h.onLeftGrab?.(u, v2, w, hh)) {
+    if (h.onLeftGrab?.(u, v, w, hh)) {
       grabbed = { moved: 0 };
     } else if (mode === "wl" && cfg.wl) {
       const [win, lev] = cfg.wl.get();
       wlDrag = { x: e.clientX, y: e.clientY, win, lev };
       canvas.style.cursor = "crosshair";
     } else if (mode === "zoom" || mode === "pan") {
-      view = { mode, x: e.clientX, y: e.clientY, pu: u, pv: v2 };
+      view = { mode, x: e.clientX, y: e.clientY, pu: u, pv: v };
       canvas.style.cursor = mode === "zoom" ? "ns-resize" : "grabbing";
     } else scroll = { x: e.clientX, y: e.clientY, acc: 0 };
     canvas.setPointerCapture(e.pointerId);
@@ -5801,18 +6549,18 @@ function attachSliceControls(canvas, cfg) {
     }
     if (grabbed) {
       grabbed.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
-      const { u, v: v2, w, h: hh } = uv(e);
-      h.onLeftDrag?.(u, v2, w, hh);
+      const { u, v, w, h: hh } = uv(e);
+      h.onLeftDrag?.(u, v, w, hh);
       return;
     }
     if (wlDrag && cfg.wl) {
-      const [lo, hi2] = cfg.wl.range();
+      const [lo2, hi2] = cfg.wl.range();
       const r = canvas.getBoundingClientRect();
-      const gain = (hi2 - lo) / Math.max(1, Math.min(r.width, r.height));
+      const gain = (hi2 - lo2) / Math.max(1, Math.min(r.width, r.height));
       let win = wlDrag.win + gain * (e.clientX - wlDrag.x);
       if (win < 0) win = 0;
       let lev = wlDrag.lev + gain * (wlDrag.y - e.clientY);
-      if (lev < lo - win / 2) lev = lo - win / 2;
+      if (lev < lo2 - win / 2) lev = lo2 - win / 2;
       if (lev > hi2 + win / 2) lev = hi2 + win / 2;
       cfg.wl.set(win, lev);
       wlDrag = { x: e.clientX, y: e.clientY, win, lev };
@@ -5832,8 +6580,8 @@ function attachSliceControls(canvas, cfg) {
       return;
     }
     if (e.buttons === 0 && h.onHover) {
-      const { u, v: v2, w, h: hh } = uv(e);
-      h.onHover(u, v2, w, hh);
+      const { u, v, w, h: hh } = uv(e);
+      h.onHover(u, v, w, hh);
     }
   };
   const onUp = (e) => {
@@ -5885,12 +6633,21 @@ function attachSliceControls(canvas, cfg) {
 function attachViewGrid(grid, cells, onResize) {
   let maxed = null;
   const cellDiv = (cell) => grid.querySelector(`.cell[data-cell="${cell}"]`);
+  const apply = () => {
+    for (const n of cells) cellDiv(n).classList.toggle("max", n === maxed);
+    grid.classList.toggle("has-max", maxed !== null);
+    requestAnimationFrame(onResize);
+  };
   return {
+    setMax(cell) {
+      const next = cell && cells.includes(cell) ? cell : null;
+      if (maxed === next) return;
+      maxed = next;
+      apply();
+    },
     toggleMax(cell) {
       maxed = maxed === cell ? null : cell;
-      for (const n of cells) cellDiv(n).classList.toggle("max", n === maxed);
-      grid.classList.toggle("has-max", maxed !== null);
-      requestAnimationFrame(onResize);
+      apply();
     },
     isMax(cell) {
       return maxed === cell;
@@ -5944,15 +6701,15 @@ function attachWidgetControls(canvas, camera, opts) {
     const ndcx = px / rw * 2 - 1, ndcy = 1 - py / rh * 2;
     const near = applyMat4(invVp, [ndcx, ndcy, 0]);
     const far = applyMat4(invVp, [ndcx, ndcy, 1]);
-    const ro = near, rd = sub2(far, near);
+    const ro4 = near, rd = sub2(far, near);
     const n = sub2(camera.position, camera.focalPoint);
     const denom = dot2(rd, n);
     if (Math.abs(denom) < 1e-9) return [...planePt];
-    const t = dot2(sub2(planePt, ro), n) / denom;
-    return [ro[0] + rd[0] * t, ro[1] + rd[1] * t, ro[2] + rd[2] * t];
+    const t = dot2(sub2(planePt, ro4), n) / denom;
+    return [ro4[0] + rd[0] * t, ro4[1] + rd[1] * t, ro4[2] + rd[2] * t];
   };
   const pick = (e) => {
-    const { x: x2, y, rw, rh } = cursorCss(e);
+    const { x, y, rw, rh } = cursorCss(e);
     const { w, h } = opts.getSize();
     const { vp } = camMatrices(camera, w, h);
     const touch = e.pointerType === "touch";
@@ -5961,7 +6718,7 @@ function attachWidgetControls(canvas, camera, opts) {
       const s = project(vp, hnd.world, rw, rh);
       if (!s) continue;
       const r = (hnd.pickPx ?? 16) * (touch ? 2.75 : 1);
-      const d = Math.hypot(s.x - x2, s.y - y);
+      const d = Math.hypot(s.x - x, s.y - y);
       if (d < r && d < bestD) {
         bestD = d;
         best = hnd;
@@ -6008,10 +6765,10 @@ function attachWidgetControls(canvas, camera, opts) {
   const onMove = (e) => {
     if (!grabbed || e.pointerId !== grabbedId) return;
     e.stopPropagation();
-    const { x: x2, y, rw, rh } = cursorCss(e);
+    const { x, y, rw, rh } = cursorCss(e);
     const { w, h } = opts.getSize();
     const { invVp } = camMatrices(camera, w, h);
-    const world = unprojectToPlane(invVp, x2, y, rw, rh, grabbed.world);
+    const world = unprojectToPlane(invVp, x, y, rw, rh, grabbed.world);
     opts.onDrag(grabbed, world);
     opts.onChange?.();
   };
@@ -6080,8 +6837,8 @@ var DEFAULT_HELP = [
     ["Shift + move", "Jump the other views to the point under the cursor"]
   ] }
 ];
-function glass(el, extra = "") {
-  el.style.cssText += ";background:linear-gradient(135deg,rgba(58,64,88,.55),rgba(20,24,38,.66));backdrop-filter:blur(20px) saturate(1.6);-webkit-backdrop-filter:blur(20px) saturate(1.6);border:1px solid rgba(255,255,255,.2);box-shadow:0 18px 50px rgba(0,0,0,.55);" + extra;
+function glass(el3, extra = "") {
+  el3.style.cssText += ";background:linear-gradient(135deg,rgba(58,64,88,.55),rgba(20,24,38,.66));backdrop-filter:blur(20px) saturate(1.6);-webkit-backdrop-filter:blur(20px) saturate(1.6);border:1px solid rgba(255,255,255,.2);box-shadow:0 18px 50px rgba(0,0,0,.55);" + extra;
 }
 var helpEl = null;
 function escClose(e) {
@@ -6106,7 +6863,7 @@ function openChromeHelp(host = document.body, sheets = DEFAULT_HELP, actions = [
   glass(panel);
   panel.innerHTML = `<div style="font:800 20px -apple-system,system-ui,sans-serif;margin-bottom:4px">SlicerLive \u2014 controls</div>`;
   for (const sec of sheets) {
-    const rows2 = sec.rows.map(([k2, d]) => `<div style="font:600 12px ui-monospace,Menlo,monospace;color:#fff5d6;white-space:nowrap">${k2}</div><div style="color:rgba(232,238,255,.85)">${d}</div>`).join("");
+    const rows2 = sec.rows.map(([k, d]) => `<div style="font:600 12px ui-monospace,Menlo,monospace;color:#fff5d6;white-space:nowrap">${k}</div><div style="color:rgba(232,238,255,.85)">${d}</div>`).join("");
     panel.innerHTML += `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><div style="font:700 11px -apple-system,system-ui,sans-serif;letter-spacing:1.1px;text-transform:uppercase;color:#9fe9ff;margin-bottom:9px">${sec.title}</div><div style="display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;align-items:baseline">${rows2}</div></div>`;
   }
   if (actions.length) {
@@ -6202,7 +6959,7 @@ function installChrome(opts) {
     box.style.opacity = level < 0.02 ? "0.75" : "1";
     box.innerHTML = `<span style="position:absolute;left:0;top:0;bottom:0;width:${pct}%;background:${c};opacity:.9"></span><span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:700 10px -apple-system,system-ui,sans-serif;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.75)">${pct}%</span>`;
   };
-  const triNext = (v2) => v2 > 0.66 ? 0.5 : v2 > 0.04 ? 0 : 1;
+  const triNext = (v) => v > 0.66 ? 0.5 : v > 0.04 ? 0 : 1;
   const attachOpacity = (box, get, set, color, onChange) => {
     box.style.cursor = "ew-resize";
     box.title = "Click: 100% \u2192 50% \u2192 off \xB7 Drag sideways for a live opacity slider";
@@ -6319,7 +7076,7 @@ function installChrome(opts) {
         inp.step = String(c.slider.step ?? 1);
         inp.value = String(c.slider.get());
         inp.style.cssText = "width:100%;accent-color:#54c6f0;cursor:pointer;";
-        const fmt = c.slider.format ?? ((v2) => String(Math.round(v2)));
+        const fmt = c.slider.format ?? ((v) => String(Math.round(v)));
         const paint = () => {
           val.textContent = fmt(c.slider.get());
         };
@@ -6449,9 +7206,9 @@ function installChrome(opts) {
     pop.appendChild(about);
   }
   function refresh() {
-    for (const { c, el } of selEls) {
-      const v2 = c.get();
-      if (el.value !== v2) el.value = v2;
+    for (const { c, el: el3 } of selEls) {
+      const v = c.get();
+      if (el3.value !== v) el3.value = v;
     }
     for (const { c, row, sw, repaint } of rows2) {
       const dis = c.disabled?.() ?? false;
@@ -6512,6 +7269,237 @@ function installChrome(opts) {
   return { refresh, destroy, openHelp };
 }
 
+// render/demos/ira/colorize-groups.ts
+var COLORIZE_GROUP_DEFAULT_OPACITY = {
+  Organs: 0.9,
+  Heart: 0.9,
+  Vessels: 0.9,
+  Intestines: 0.55,
+  Vertebrae: 0.8,
+  Lungs: 0.05,
+  Ribs: 0.55,
+  "Other bone": 0.5,
+  Muscle: 0.05
+};
+var COLORIZE_GROUPS = [
+  {
+    name: "Organs",
+    classes: [
+      "spleen",
+      "kidney_right",
+      "kidney_left",
+      "gallbladder",
+      "liver",
+      "pancreas",
+      "adrenal_gland_right",
+      "adrenal_gland_left",
+      "thyroid_gland",
+      "urinary_bladder",
+      "prostate",
+      "kidney_cyst_left",
+      "kidney_cyst_right",
+      "brain"
+    ]
+  },
+  {
+    name: "Heart",
+    classes: [
+      "heart",
+      "heart_myocardium",
+      "heart_atrium_left",
+      "heart_ventricle_left",
+      "heart_atrium_right",
+      "heart_ventricle_right",
+      "atrial_appendage_left"
+    ]
+  },
+  {
+    name: "Vessels",
+    classes: [
+      "aorta",
+      "inferior_vena_cava",
+      "superior_vena_cava",
+      "portal_vein_and_splenic_vein",
+      "pulmonary_vein",
+      "pulmonary_artery",
+      "brachiocephalic_trunk",
+      "brachiocephalic_vein_left",
+      "brachiocephalic_vein_right",
+      "subclavian_artery_right",
+      "subclavian_artery_left",
+      "common_carotid_artery_right",
+      "common_carotid_artery_left",
+      "iliac_artery_left",
+      "iliac_artery_right",
+      "iliac_vena_left",
+      "iliac_vena_right"
+    ]
+  },
+  {
+    name: "Lungs",
+    classes: [
+      "lung_upper_lobe_left",
+      "lung_lower_lobe_left",
+      "lung_upper_lobe_right",
+      "lung_middle_lobe_right",
+      "lung_lower_lobe_right",
+      "lung_left",
+      "lung_right",
+      "trachea"
+    ]
+  },
+  {
+    name: "Intestines",
+    classes: ["stomach", "esophagus", "small_bowel", "duodenum", "colon"]
+  },
+  {
+    name: "Vertebrae",
+    classes: [
+      "sacrum",
+      "spinal_cord",
+      "vertebrae",
+      "vertebrae_S1",
+      "vertebrae_L5",
+      "vertebrae_L4",
+      "vertebrae_L3",
+      "vertebrae_L2",
+      "vertebrae_L1",
+      "vertebrae_T12",
+      "vertebrae_T11",
+      "vertebrae_T10",
+      "vertebrae_T9",
+      "vertebrae_T8",
+      "vertebrae_T7",
+      "vertebrae_T6",
+      "vertebrae_T5",
+      "vertebrae_T4",
+      "vertebrae_T3",
+      "vertebrae_T2",
+      "vertebrae_T1",
+      "vertebrae_C7",
+      "vertebrae_C6",
+      "vertebrae_C5",
+      "vertebrae_C4",
+      "vertebrae_C3",
+      "vertebrae_C2",
+      "vertebrae_C1"
+    ]
+  },
+  {
+    name: "Ribs",
+    classes: [
+      "rib_left_1",
+      "rib_left_2",
+      "rib_left_3",
+      "rib_left_4",
+      "rib_left_5",
+      "rib_left_6",
+      "rib_left_7",
+      "rib_left_8",
+      "rib_left_9",
+      "rib_left_10",
+      "rib_left_11",
+      "rib_left_12",
+      "rib_right_1",
+      "rib_right_2",
+      "rib_right_3",
+      "rib_right_4",
+      "rib_right_5",
+      "rib_right_6",
+      "rib_right_7",
+      "rib_right_8",
+      "rib_right_9",
+      "rib_right_10",
+      "rib_right_11",
+      "rib_right_12"
+    ]
+  },
+  {
+    name: "Other bone",
+    classes: [
+      "humerus_left",
+      "humerus_right",
+      "scapula_left",
+      "scapula_right",
+      "clavicula_left",
+      "clavicula_right",
+      "femur_left",
+      "femur_right",
+      "hip_left",
+      "hip_right",
+      "sternum",
+      "costal_cartilages",
+      "skull"
+    ]
+  },
+  {
+    name: "Muscle",
+    classes: [
+      "gluteus_maximus_left",
+      "gluteus_maximus_right",
+      "gluteus_medius_left",
+      "gluteus_medius_right",
+      "gluteus_minimus_left",
+      "gluteus_minimus_right",
+      "autochthon_left",
+      "autochthon_right",
+      "iliopsoas_left",
+      "iliopsoas_right"
+    ]
+  }
+];
+var CLASS_TO_GROUP = /* @__PURE__ */ new Map();
+for (const g of COLORIZE_GROUPS) {
+  for (const c of g.classes) CLASS_TO_GROUP.set(c, g.name);
+}
+function normalizeSegName(name) {
+  return name.trim().toLowerCase().replace(/[\s\-]+/g, "_").replace(/_+/g, "_");
+}
+function colorizeGroupForName(name) {
+  const n = normalizeSegName(name);
+  if (!n) return null;
+  const exact = CLASS_TO_GROUP.get(n);
+  if (exact) return exact;
+  if (n.startsWith("vertebrae_") || n === "sacrum" || n === "spinal_cord") return "Vertebrae";
+  if (n.startsWith("rib_")) return "Ribs";
+  if (n.startsWith("lung_")) return "Lungs";
+  if (n.startsWith("gluteus_") || n.startsWith("autochthon_") || n.startsWith("iliopsoas_")) return "Muscle";
+  if (n.startsWith("heart_")) return "Heart";
+  return null;
+}
+function resolveColorizeGroups(segments) {
+  const byGroup = /* @__PURE__ */ new Map();
+  for (const s of segments) {
+    const g = colorizeGroupForName(s.name);
+    if (!g) continue;
+    let list = byGroup.get(g);
+    if (!list) {
+      list = [];
+      byGroup.set(g, list);
+    }
+    list.push(s.num);
+  }
+  const out = [];
+  for (const g of COLORIZE_GROUPS) {
+    const nums = byGroup.get(g.name);
+    if (!nums?.length) continue;
+    out.push({
+      name: g.name,
+      segments: nums,
+      opacity: COLORIZE_GROUP_DEFAULT_OPACITY[g.name] ?? 1
+    });
+  }
+  return out;
+}
+function colorizeDefaultOpacityEntries(segments) {
+  const groups = resolveColorizeGroups(segments);
+  const entries = [];
+  for (const g of groups) {
+    for (const n of g.segments) entries.push([n, g.opacity]);
+  }
+  return entries;
+}
+
 // render/sdf-text.ts
 function layoutText(font, text, opts = {}) {
   const pxSize = opts.pxSize ?? font.sizePx;
@@ -6527,9 +7515,9 @@ function layoutText(font, text, opts = {}) {
     let penX = 0;
     const baseline = () => lineIdx * lineH + font.ascent * s;
     const wordWidth = (w) => {
-      let x2 = 0;
-      for (const ch of w) x2 += (font.glyphs.get(ch)?.advance ?? space / s) * s;
-      return x2;
+      let x = 0;
+      for (const ch of w) x += (font.glyphs.get(ch)?.advance ?? space / s) * s;
+      return x;
     };
     const emit = (w) => {
       for (const ch of w) {
@@ -6565,27 +7553,27 @@ function layoutText(font, text, opts = {}) {
   return { quads, width: maxLineW, height: lineIdx * lineH, lines: lineIdx };
 }
 var INF = 1e20;
-function edt1d(f, n, d, v2, z2) {
-  let k2 = 0;
-  v2[0] = 0;
+function edt1d(f, n, d, v, z2) {
+  let k = 0;
+  v[0] = 0;
   z2[0] = -INF;
   z2[1] = INF;
   for (let q2 = 1; q2 < n; q2++) {
-    let s = (f[q2] + q2 * q2 - (f[v2[k2]] + v2[k2] * v2[k2])) / (2 * q2 - 2 * v2[k2]);
-    while (s <= z2[k2]) {
-      k2--;
-      s = (f[q2] + q2 * q2 - (f[v2[k2]] + v2[k2] * v2[k2])) / (2 * q2 - 2 * v2[k2]);
+    let s = (f[q2] + q2 * q2 - (f[v[k]] + v[k] * v[k])) / (2 * q2 - 2 * v[k]);
+    while (s <= z2[k]) {
+      k--;
+      s = (f[q2] + q2 * q2 - (f[v[k]] + v[k] * v[k])) / (2 * q2 - 2 * v[k]);
     }
-    k2++;
-    v2[k2] = q2;
-    z2[k2] = s;
-    z2[k2 + 1] = INF;
+    k++;
+    v[k] = q2;
+    z2[k] = s;
+    z2[k + 1] = INF;
   }
-  k2 = 0;
+  k = 0;
   for (let q2 = 0; q2 < n; q2++) {
-    while (z2[k2 + 1] < q2) k2++;
-    const dv = q2 - v2[k2];
-    d[q2] = dv * dv + f[v2[k2]];
+    while (z2[k + 1] < q2) k++;
+    const dv = q2 - v[k];
+    d[q2] = dv * dv + f[v[k]];
   }
 }
 function edt2d(mask, w, h) {
@@ -6593,16 +7581,16 @@ function edt2d(mask, w, h) {
   for (let i = 0; i < w * h; i++) g[i] = mask[i] ? 0 : INF;
   const maxn = Math.max(w, h);
   const f = new Float64Array(maxn), d = new Float64Array(maxn), z2 = new Float64Array(maxn + 1);
-  const v2 = new Int32Array(maxn);
-  for (let x2 = 0; x2 < w; x2++) {
-    for (let y = 0; y < h; y++) f[y] = g[y * w + x2];
-    edt1d(f, h, d, v2, z2);
-    for (let y = 0; y < h; y++) g[y * w + x2] = d[y];
+  const v = new Int32Array(maxn);
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) f[y] = g[y * w + x];
+    edt1d(f, h, d, v, z2);
+    for (let y = 0; y < h; y++) g[y * w + x] = d[y];
   }
   for (let y = 0; y < h; y++) {
-    for (let x2 = 0; x2 < w; x2++) f[x2] = g[y * w + x2];
-    edt1d(f, w, d, v2, z2);
-    for (let x2 = 0; x2 < w; x2++) g[y * w + x2] = d[x2];
+    for (let x = 0; x < w; x++) f[x] = g[y * w + x];
+    edt1d(f, w, d, v, z2);
+    for (let x = 0; x < w; x++) g[y * w + x] = d[x];
   }
   return g;
 }
@@ -6677,9 +7665,9 @@ function buildFontAtlas(opts = {}) {
       continue;
     }
     const sub5 = new Uint8Array(cw * chh);
-    for (let y = 0; y < chh; y++) for (let x2 = 0; x2 < cw; x2++) sub5[y * cw + x2] = alpha[(p.cy + y) * atlasW + (p.cx + x2)];
+    for (let y = 0; y < chh; y++) for (let x = 0; x < cw; x++) sub5[y * cw + x] = alpha[(p.cy + y) * atlasW + (p.cx + x)];
     const sdf = sdfFromMask(sub5, cw, chh, spread);
-    for (let y = 0; y < chh; y++) for (let x2 = 0; x2 < cw; x2++) data[(p.cy + y) * atlasW + (p.cx + x2)] = sdf[y * cw + x2];
+    for (let y = 0; y < chh; y++) for (let x = 0; x < cw; x++) data[(p.cy + y) * atlasW + (p.cx + x)] = sdf[y * cw + x];
     const aw = Math.ceil(p.iw) + spread * 2, ah = Math.ceil(p.ih) + spread * 2;
     glyphs.set(p.ch, { advance: p.advance, ax: p.cx, ay: p.cy, aw: Math.min(aw, cw), ah: Math.min(ah, chh), offX: p.offX, offY: p.offY });
   }
@@ -6715,9 +7703,9 @@ function layoutStep(cards, anchorsPx, viewport, dtSec, opts = {}) {
   const GA = 2.399963229728653;
   let gx = 0, gy = 0;
   if (kos && kos.length) {
-    for (const k2 of kos) {
-      gx += k2.x;
-      gy += k2.y;
+    for (const k of kos) {
+      gx += k.x;
+      gy += k.y;
     }
     gx /= kos.length;
     gy /= kos.length;
@@ -6728,18 +7716,18 @@ function layoutStep(cards, anchorsPx, viewport, dtSec, opts = {}) {
     const bnd = o.boundary, bcx = (bnd.minX + bnd.maxX) / 2, bcy = (bnd.minY + bnd.maxY) / 2;
     slotRX = (bnd.maxX - bnd.minX) / 2 + o.ringGap;
     slotRY = (bnd.maxY - bnd.minY) / 2 + o.ringGap;
-    const P2 = 2 * (2 * slotRX + 2 * slotRY);
+    const P3 = 2 * (2 * slotRX + 2 * slotRY);
     const order = Array.from({ length: n }, (_2, i) => i).sort((i, j2) => Math.atan2(anchorsPx[i].y - bcy, anchorsPx[i].x - bcx) - Math.atan2(anchorsPx[j2].y - bcy, anchorsPx[j2].x - bcx));
     const foot = order.map((idx) => Math.max(cards[idx].w, cards[idx].h) + o.gap);
     let total = 0;
     for (const f of foot) total += f;
-    const extra = Math.max(0, P2 - total) / n;
+    const extra = Math.max(0, P3 - total) / n;
     slotArc = new Float64Array(n);
     let acc = 0;
-    for (let k2 = 0; k2 < n; k2++) {
-      acc += (foot[k2] + extra) / 2;
-      slotArc[order[k2]] = acc % P2;
-      acc += (foot[k2] + extra) / 2;
+    for (let k = 0; k < n; k++) {
+      acc += (foot[k] + extra) / 2;
+      slotArc[order[k]] = acc % P3;
+      acc += (foot[k] + extra) / 2;
     }
   }
   for (let i = 0; i < n; i++) {
@@ -6815,9 +7803,9 @@ function layoutStep(cards, anchorsPx, viewport, dtSec, opts = {}) {
     fx[i] += (tx - c.x) * o.anchorSpring;
     fy[i] += (ty - c.y) * o.anchorSpring;
     if (o.boundary) {
-      const k2 = o.boundary;
-      const bcx = (k2.minX + k2.maxX) / 2, bcy = (k2.minY + k2.maxY) / 2;
-      const bhx = (k2.maxX - k2.minX) / 2 + halfDiag, bhy = (k2.maxY - k2.minY) / 2 + halfDiag;
+      const k = o.boundary;
+      const bcx = (k.minX + k.maxX) / 2, bcy = (k.minY + k.maxY) / 2;
+      const bhx = (k.maxX - k.minX) / 2 + halfDiag, bhy = (k.maxY - k.minY) / 2 + halfDiag;
       const penx = bhx - Math.abs(c.x - bcx), peny = bhy - Math.abs(c.y - bcy);
       if (penx > 0 && peny > 0) {
         if (penx < peny) fx[i] += Math.sign(c.x - bcx || 1) * penx * o.keepOutForce;
@@ -6834,15 +7822,15 @@ function layoutStep(cards, anchorsPx, viewport, dtSec, opts = {}) {
         else fy[i] += Math.sign(c.y - rcy || 1) * py * F2;
       }
     }
-    if (kos) for (const k2 of kos) {
-      let dx = c.x - k2.x, dy = c.y - k2.y;
+    if (kos) for (const k of kos) {
+      let dx = c.x - k.x, dy = c.y - k.y;
       let d = Math.hypot(dx, dy);
       if (d < 1e-3) {
         dx = Math.cos(i * GA);
         dy = Math.sin(i * GA);
         d = 1;
       }
-      const need = k2.radius + halfDiag;
+      const need = k.radius + halfDiag;
       if (d < need) {
         const push = (need - d) * o.keepOutForce;
         fx[i] += dx / d * push;
@@ -7121,9 +8109,9 @@ var CardOverlay = class {
         y += l.height + gap * 0.6;
       }
       y += gap * 0.4;
-      for (let k2 = 0; k2 < BUTTONS.length; k2++) {
-        const lab = btnLabels[k2], lx = pad + (btnW - lab.width) / 2, ly = y + (btnH - lab.height) / 2;
-        extra.buttons.push({ x: pad, y, w: btnW, h: btnH, part: BUTTONS[k2].part, label: { quads: offset(lab.quads, lx, ly), color: BLACK } });
+      for (let k = 0; k < BUTTONS.length; k++) {
+        const lab = btnLabels[k], lx = pad + (btnW - lab.width) / 2, ly = y + (btnH - lab.height) / 2;
+        extra.buttons.push({ x: pad, y, w: btnW, h: btnH, part: BUTTONS[k].part, label: { quads: offset(lab.quads, lx, ly), color: BLACK } });
         y += btnH + btnGap;
       }
       const eh = Math.ceil(y - btnGap + pad);
@@ -7163,7 +8151,7 @@ var CardOverlay = class {
   buttonCenter(index, part) {
     const b = this.bodies[index], c = this.cards[index];
     if (!b || !c) return null;
-    const bt2 = c.extra.buttons.find((x2) => x2.part === part);
+    const bt2 = c.extra.buttons.find((x) => x.part === part);
     if (!bt2) return null;
     const sz = this.size(c);
     return { x: b.x - sz.w / 2 + bt2.x + bt2.w / 2, y: b.y - sz.h / 2 + bt2.y + bt2.h / 2 };
@@ -7240,8 +8228,8 @@ var CardOverlay = class {
     };
     const glyphs = (runs, ox, oy) => {
       for (const run of runs) for (const q2 of run.quads) {
-        const x0 = ox + q2.x, x1 = ox + q2.x + q2.w, y0 = oy + q2.y, y1 = oy + q2.y + q2.h, co = run.color;
-        for (const [px, py, uu, vv] of [[x0, y0, q2.u0, q2.v0], [x1, y0, q2.u1, q2.v0], [x1, y1, q2.u1, q2.v1], [x0, y0, q2.u0, q2.v0], [x1, y1, q2.u1, q2.v1], [x0, y1, q2.u0, q2.v1]]) text.push(px, py, uu, vv, ...co);
+        const x0 = ox + q2.x, x1 = ox + q2.x + q2.w, y0 = oy + q2.y, y1 = oy + q2.y + q2.h, co2 = run.color;
+        for (const [px, py, uu, vv] of [[x0, y0, q2.u0, q2.v0], [x1, y0, q2.u1, q2.v0], [x1, y1, q2.u1, q2.v1], [x0, y0, q2.u0, q2.v0], [x1, y1, q2.u1, q2.v1], [x0, y1, q2.u0, q2.v1]]) text.push(px, py, uu, vv, ...co2);
       }
     };
     for (let i = 0; i < this.cards.length; i++) {
@@ -7326,8 +8314,8 @@ var CardOverlay = class {
     };
     const glyphs = (runs, ox, oy) => {
       for (const run of runs) for (const q2 of run.quads) {
-        const x0 = ox + q2.x * ss, x1 = ox + (q2.x + q2.w) * ss, y0 = oy + q2.y * ss, y1 = oy + (q2.y + q2.h) * ss, co = run.color;
-        for (const [px, py, uu, vv] of [[x0, y0, q2.u0, q2.v0], [x1, y0, q2.u1, q2.v0], [x1, y1, q2.u1, q2.v1], [x0, y0, q2.u0, q2.v0], [x1, y1, q2.u1, q2.v1], [x0, y1, q2.u0, q2.v1]]) text.push(px, py, uu, vv, ...co);
+        const x0 = ox + q2.x * ss, x1 = ox + (q2.x + q2.w) * ss, y0 = oy + q2.y * ss, y1 = oy + (q2.y + q2.h) * ss, co2 = run.color;
+        for (const [px, py, uu, vv] of [[x0, y0, q2.u0, q2.v0], [x1, y0, q2.u1, q2.v0], [x1, y1, q2.u1, q2.v1], [x0, y0, q2.u0, q2.v0], [x1, y1, q2.u1, q2.v1], [x0, y1, q2.u0, q2.v1]]) text.push(px, py, uu, vv, ...co2);
       }
     };
     const transparent = [0, 0, 0, 0];
@@ -7401,42 +8389,42 @@ function build(ct2, seg, segments, maxCards) {
   const isCT = (ct2.modality ?? "CT") === "CT";
   const wanted = new Set([...segments].sort((a, b) => b.voxels - a.voxels).slice(0, maxCards).map((s) => s.num));
   const acc = /* @__PURE__ */ new Map();
-  for (let k2 = 0; k2 < nz; k2++) for (let j2 = 0; j2 < ny; j2++) for (let i = 0; i < nx; i++) {
-    const idx = (k2 * ny + j2) * nx + i, v2 = seg.lab[idx];
-    if (!v2 || !wanted.has(v2)) continue;
-    let e = acc.get(v2);
+  for (let k = 0; k < nz; k++) for (let j2 = 0; j2 < ny; j2++) for (let i = 0; i < nx; i++) {
+    const idx = (k * ny + j2) * nx + i, v = seg.lab[idx];
+    if (!v || !wanted.has(v)) continue;
+    let e = acc.get(v);
     if (!e) {
-      e = { n: 0, x: 0, y: 0, z: 0, s: 0, s2: 0, lo: [i, j2, k2], hi: [i, j2, k2] };
-      acc.set(v2, e);
+      e = { n: 0, x: 0, y: 0, z: 0, s: 0, s2: 0, lo: [i, j2, k], hi: [i, j2, k] };
+      acc.set(v, e);
     }
     e.n++;
     e.x += i;
     e.y += j2;
-    e.z += k2;
+    e.z += k;
     if (i < e.lo[0]) e.lo[0] = i;
     if (j2 < e.lo[1]) e.lo[1] = j2;
-    if (k2 < e.lo[2]) e.lo[2] = k2;
+    if (k < e.lo[2]) e.lo[2] = k;
     if (i > e.hi[0]) e.hi[0] = i;
     if (j2 > e.hi[1]) e.hi[1] = j2;
-    if (k2 > e.hi[2]) e.hi[2] = k2;
+    if (k > e.hi[2]) e.hi[2] = k;
     if (isCT) {
-      const hu = ct2.vol[idx];
-      e.s += hu;
-      e.s2 += hu * hu;
+      const hu3 = ct2.vol[idx];
+      e.s += hu3;
+      e.s2 += hu3 * hu3;
     }
   }
   const voxMm3 = Math.abs(M2[0] * (M2[5] * M2[10] - M2[6] * M2[9]) - M2[1] * (M2[4] * M2[10] - M2[6] * M2[8]) + M2[2] * (M2[4] * M2[9] - M2[5] * M2[8]));
-  const ras = (i, j2, k2) => [M2[0] * i + M2[1] * j2 + M2[2] * k2 + M2[3], M2[4] * i + M2[5] * j2 + M2[6] * k2 + M2[7], M2[8] * i + M2[9] * j2 + M2[10] * k2 + M2[11]];
+  const ras = (i, j2, k) => [M2[0] * i + M2[1] * j2 + M2[2] * k + M2[3], M2[4] * i + M2[5] * j2 + M2[6] * k + M2[7], M2[8] * i + M2[9] * j2 + M2[10] * k + M2[11]];
   const term = seg.terminology ?? {};
   const specs = [], geom = [];
   for (const s of segments) {
     const e = acc.get(s.num);
     if (!e) continue;
     const c = ras(e.x / e.n, e.y / e.n, e.z / e.n);
-    const hu = isCT ? { mean: e.s / e.n, std: Math.sqrt(Math.max(0, e.s2 / e.n - (e.s / e.n) ** 2)) } : void 0;
-    specs.push({ anchorRAS: c, id: s.num, title: s.name, subtitle: bodyText(term[s.num], s.name), swatch: s.color, stat: { voxels: e.n, volumeCc: e.n * voxMm3 / 1e3, hu } });
+    const hu3 = isCT ? { mean: e.s / e.n, std: Math.sqrt(Math.max(0, e.s2 / e.n - (e.s / e.n) ** 2)) } : void 0;
+    specs.push({ anchorRAS: c, id: s.num, title: s.name, subtitle: bodyText(term[s.num], s.name), swatch: s.color, stat: { voxels: e.n, volumeCc: e.n * voxMm3 / 1e3, hu: hu3 } });
     const [lx, ly, lz] = e.lo, [hx, hy, hz] = e.hi;
-    geom.push({ corners: [[lx, ly, lz], [hx, ly, lz], [lx, hy, lz], [hx, hy, lz], [lx, ly, hz], [hx, ly, hz], [lx, hy, hz], [hx, hy, hz]].map(([i, j2, k2]) => ras(i, j2, k2)) });
+    geom.push({ corners: [[lx, ly, lz], [hx, ly, lz], [lx, hy, lz], [hx, hy, lz], [lx, ly, hz], [hx, ly, hz], [lx, hy, hz], [hx, hy, hz]].map(([i, j2, k]) => ras(i, j2, k)) });
   }
   return { specs, geom };
 }
@@ -7488,8 +8476,8 @@ function mountSegmentCards(gpu, format, font, canvas, camera, hooks) {
       geom = r.geom;
       overlay.setCards(r.specs, dpr, compact);
       const [nx, ny, nz] = ct2.dims, M2 = ct2.ijkToRAS;
-      const ras = (i, j2, k2) => [M2[0] * i + M2[1] * j2 + M2[2] * k2 + M2[3], M2[4] * i + M2[5] * j2 + M2[6] * k2 + M2[7], M2[8] * i + M2[9] * j2 + M2[10] * k2 + M2[11]];
-      sceneBox = [[0, 0, 0], [nx, 0, 0], [0, ny, 0], [nx, ny, 0], [0, 0, nz], [nx, 0, nz], [0, ny, nz], [nx, ny, nz]].map(([i, j2, k2]) => ras(i, j2, k2));
+      const ras = (i, j2, k) => [M2[0] * i + M2[1] * j2 + M2[2] * k + M2[3], M2[4] * i + M2[5] * j2 + M2[6] * k + M2[7], M2[8] * i + M2[9] * j2 + M2[10] * k + M2[11]];
+      sceneBox = [[0, 0, 0], [nx, 0, 0], [0, ny, 0], [nx, ny, 0], [0, 0, nz], [nx, 0, nz], [0, ny, nz], [nx, ny, nz]].map(([i, j2, k]) => ras(i, j2, k));
     },
     draw(view, w, h, _dpr, dt2) {
       if (!geom.length) return false;
@@ -7533,7 +8521,7 @@ async function fetchRetry(url, opts, tries = 6) {
   let err;
   for (let i = 0; i < tries; i++) {
     const ac = new AbortController();
-    const to = setTimeout(() => ac.abort(), 2e4);
+    const to2 = setTimeout(() => ac.abort(), 2e4);
     try {
       const r = await fetch(url, { ...opts || {}, signal: ac.signal });
       if (!r.ok && r.status !== 206)
@@ -7544,7 +8532,7 @@ async function fetchRetry(url, opts, tries = 6) {
       if (i < tries - 1)
         await new Promise((res) => setTimeout(res, Math.min(4e3, 250 * 2 ** i) * (0.6 + 0.8 * Math.random())));
     } finally {
-      clearTimeout(to);
+      clearTimeout(to2);
     }
   }
   throw err;
@@ -7561,9 +8549,9 @@ async function s3ListKeys(prefix, bucket) {
       url += `&continuation-token=${encodeURIComponent(token)}`;
     const xml = new DOMParser().parseFromString(await fetchRetry(url).then((r) => r.text()), "application/xml");
     for (const e of Array.from(xml.getElementsByTagName("Key"))) {
-      const k2 = e.textContent;
-      if (k2 && /\.dcm$/i.test(k2))
-        keys.push(k2);
+      const k = e.textContent;
+      if (k && /\.dcm$/i.test(k))
+        keys.push(k);
     }
     more = xml.getElementsByTagName("IsTruncated")[0]?.textContent === "true";
     token = more ? xml.getElementsByTagName("NextContinuationToken")[0]?.textContent ?? null : null;
@@ -7782,11 +8770,11 @@ function normalizeColor(color) {
 }
 function asVec3(p) {
   if (!Array.isArray(p) || p.length < 3) return null;
-  const x2 = Number(p[0]);
+  const x = Number(p[0]);
   const y = Number(p[1]);
   const z2 = Number(p[2]);
-  if (![x2, y, z2].every(Number.isFinite)) return null;
-  return [x2, y, z2];
+  if (![x, y, z2].every(Number.isFinite)) return null;
+  return [x, y, z2];
 }
 function newStrokeId() {
   try {
@@ -7829,8 +8817,8 @@ var VanishingStrokeStore = class {
     const args = op.args;
     const points = [];
     for (const p of args.points || []) {
-      const v2 = asVec3(p);
-      if (v2) points.push(v2);
+      const v = asVec3(p);
+      if (v) points.push(v);
     }
     if (!args.strokeId || points.length < 1) return false;
     const prev = this.strokes.get(args.strokeId);
@@ -8135,7 +9123,8 @@ function mountIra(cfg) {
   };
   const strokeNearPlane = (s, p) => {
     if (s.plane && s.plane === p && typeof s.mm === "number") {
-      return Math.abs(s.mm - cfg.offsetMm(p)) <= cfg.spacing(p) / 2 + 1e-3;
+      const tol2 = Math.max(cfg.spacing(p), 1) * 1.5;
+      return Math.abs(s.mm - cfg.offsetMm(p)) <= tol2;
     }
     const nAxis = {
       sagittal: 0,
@@ -8146,7 +9135,7 @@ function mountIra(cfg) {
     if (ax === void 0) return true;
     const mm = cfg.offsetMm(p);
     const tol = Math.max(cfg.spacing(p), 1) * 1.5;
-    return s.points.some((pt2) => Math.abs(pt2[ax] - mm) <= tol);
+    return s.points.some((pt4) => Math.abs(pt4[ax] - mm) <= tol);
   };
   const drawStrokePoly = (ctx, p, points, w, h, color, widthPx, alpha) => {
     if (points.length < 2 || alpha <= 0) return;
@@ -8167,7 +9156,7 @@ function mountIra(cfg) {
   for (const p of cfg.planes) {
     const cell = cfg.cellOf(p);
     if (!cell) continue;
-    cell.querySelectorAll("canvas.ira-overlay").forEach((el) => el.remove());
+    cell.querySelectorAll("canvas.ira-overlay").forEach((el3) => el3.remove());
     const c = document.createElement("canvas");
     c.className = "ira-overlay";
     c.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;";
@@ -8178,7 +9167,7 @@ function mountIra(cfg) {
   {
     const cell3 = cfg.cellOf("threeD");
     if (cell3) {
-      cell3.querySelectorAll("canvas.ira-overlay").forEach((el) => el.remove());
+      cell3.querySelectorAll("canvas.ira-overlay").forEach((el3) => el3.remove());
       overlay3d = document.createElement("canvas");
       overlay3d.className = "ira-overlay";
       overlay3d.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3;";
@@ -8196,7 +9185,7 @@ function mountIra(cfg) {
       overlay3d.height = Math.max(1, Math.floor(overlay3d.clientHeight * dpr));
     }
   };
-  const rasOfClick = (p, u, v2, w, h) => cfg.slice().viewToRas(p, cfg.off01(p), u, v2, w / h);
+  const rasOfClick = (p, u, v, w, h) => cfg.slice().viewToRas(p, cfg.off01(p), u, v, w / h);
   const toPx = (p, ras, w, h) => {
     const r = cfg.slice().rasToView(p, cfg.off01(p), ras, w / h);
     return { x: r.u * w, y: r.v * h };
@@ -8236,21 +9225,21 @@ function mountIra(cfg) {
       }
     }
     if (crossRas) {
-      const pt2 = toPx(p, crossRas, w, h);
-      if (pt2.x >= 0 && pt2.x <= w && pt2.y >= 0 && pt2.y <= h) {
-        drawCross(ctx, pt2.x, pt2.y, { color: "#6cc4ff", size: 14, gap: 5 });
+      const pt4 = toPx(p, crossRas, w, h);
+      if (pt4.x >= 0 && pt4.x <= w && pt4.y >= 0 && pt4.y <= h) {
+        drawCross(ctx, pt4.x, pt4.y, { color: "#6cc4ff", size: 14, gap: 5 });
       }
     }
     const near = (m) => m.plane === p && Math.abs(m.mm - cfg.offsetMm(p)) <= cfg.spacing(p) / 2;
     ctx.font = "700 15px -apple-system,system-ui,sans-serif";
     ctx.lineJoin = "round";
     ctx.textBaseline = "alphabetic";
-    const label = (text, x2, y) => {
+    const label = (text, x, y) => {
       ctx.lineWidth = 4;
       ctx.strokeStyle = "rgba(6,10,16,.92)";
-      ctx.strokeText(text, x2, y);
+      ctx.strokeText(text, x, y);
       ctx.fillStyle = "#8dffc4";
-      ctx.fillText(text, x2, y);
+      ctx.fillText(text, x, y);
     };
     for (const m of [...measurements.filter(near), ...pending && pending.plane === p ? [pending] : []]) {
       const px = m.pts.map((r) => toPx(p, r, w, h));
@@ -8431,13 +9420,13 @@ function mountIra(cfg) {
   layoutSel.id = "ira-layout";
   layoutSel.title = "Layout Multiple Viewports \u2014 hanging protocol";
   layoutSel.style.cssText = "font:600 11px -apple-system,system-ui,sans-serif;color:#d6e2f2;background:#11141d;border:1px solid #33507e;border-radius:4px;padding:2px 4px;cursor:pointer;";
-  for (const [v2, label] of [
+  for (const [v, label] of [
     ["fourUp", "Four-Up (MPR + 3D)"],
     ["dental", "Dental (MPR + 3D + Oblique)"],
     ["twoUp", "2 side-by-side"],
     ["single", "Single viewport"],
     ["browser", "Browser (patient/study/series)"]
-  ]) layoutSel.add(new Option(label, v2));
+  ]) layoutSel.add(new Option(label, v));
   layoutSel.addEventListener("change", () => {
     if (layoutSel.value === "browser") cfg.close();
     else setLayout(layoutSel.value);
@@ -8535,8 +9524,8 @@ function mountIra(cfg) {
       item.textContent = opt.textContent;
       item.style.cssText = "padding:6px 10px;border-radius:5px;cursor:pointer;white-space:nowrap;";
       item.addEventListener("pointerenter", () => {
-        for (const el of presetPop.querySelectorAll(".ira-preset-item")) {
-          el.style.background = "transparent";
+        for (const el3 of presetPop.querySelectorAll(".ira-preset-item")) {
+          el3.style.background = "transparent";
         }
         item.style.background = "#2b6cb0";
         cfg.presetsEl.value = opt.value;
@@ -8739,21 +9728,21 @@ function mountIra(cfg) {
     strip = document.createElement("div");
     strip.id = "ira-strip";
     strip.innerHTML = `<div class="head">Series</div>`;
-    for (const it2 of cfg.strip) {
+    for (const it4 of cfg.strip) {
       const item = document.createElement("div");
-      item.className = "item" + (it2.current ? " current" : "");
-      item.title = it2.lines.join(" \xB7 ") + " \u2014 double-click to load";
+      item.className = "item" + (it4.current ? " current" : "");
+      item.title = it4.lines.join(" \xB7 ") + " \u2014 double-click to load";
       const img = document.createElement("img");
       img.alt = "";
-      it2.thumb().then((b) => {
+      it4.thumb().then((b) => {
         if (b) img.src = URL.createObjectURL(b);
       }).catch(() => {
       });
       const cap = document.createElement("div");
       cap.className = "cap";
-      cap.textContent = it2.lines.join(" \xB7 ");
+      cap.textContent = it4.lines.join(" \xB7 ");
       item.append(img, cap);
-      item.addEventListener("dblclick", () => it2.open());
+      item.addEventListener("dblclick", () => it4.open());
       strip.appendChild(item);
     }
     const row = document.createElement("div");
@@ -8906,7 +9895,7 @@ function mountIra(cfg) {
       ["F10", "Advanced Mode \u2014 Four-Up MPR + 3D vs single-stack"],
       ["H / F1", "This help"]
     ].map(
-      ([k2, d]) => `<tr><td style="padding:3px 14px 3px 0;color:#9fd0b3;white-space:nowrap;font-weight:600;">${k2}</td><td style="padding:3px 0;color:#9fb3d0;">${d}</td></tr>`
+      ([k, d]) => `<tr><td style="padding:3px 14px 3px 0;color:#9fd0b3;white-space:nowrap;font-weight:600;">${k}</td><td style="padding:3px 0;color:#9fb3d0;">${d}</td></tr>`
     ).join("")}
         </table>
         <p style="color:#9fb3d0;margin:14px 0 4px;">This reader implements the IHE Radiology <b>Basic Image Review (IRA)</b> profile \u2014
@@ -8929,7 +9918,7 @@ function mountIra(cfg) {
     if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
     const t = e.target;
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(t?.tagName ?? "")) return;
-    const k2 = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     const map = {
       s: () => setTool("scroll"),
       w: () => setTool("wl"),
@@ -8955,7 +9944,7 @@ function mountIra(cfg) {
       PageUp: () => cfg.nav?.prevSeries?.(),
       PageDown: () => cfg.nav?.nextSeries?.()
     };
-    const fn2 = map[k2];
+    const fn2 = map[k];
     if (fn2) {
       e.preventDefault();
       fn2();
@@ -8963,16 +9952,16 @@ function mountIra(cfg) {
   };
   document.addEventListener("keydown", onKey);
   const hooks = (p) => ({
-    onLeftGrab: (u, v2, w, h) => {
+    onLeftGrab: (u, v, w, h) => {
       if (tool === "select") return true;
       if (tool === "crosshair") {
-        crossRas = rasOfClick(p, u, v2, w, h);
+        crossRas = rasOfClick(p, u, v, w, h);
         cfg.jumpAll(crossRas);
         redrawOverlays();
         return true;
       }
       if (tool === "marker") {
-        const ras = rasOfClick(p, u, v2, w, h);
+        const ras = rasOfClick(p, u, v, w, h);
         markerDraft = {
           strokeId: newStrokeId(),
           plane: p,
@@ -8987,7 +9976,7 @@ function mountIra(cfg) {
         return true;
       }
       if (tool === "distance" || tool === "angle") {
-        const ras = rasOfClick(p, u, v2, w, h);
+        const ras = rasOfClick(p, u, v, w, h);
         if (!pending || pending.plane !== p) {
           pending = { kind: tool, plane: p, mm: cfg.offsetMm(p), pts: [ras] };
         } else {
@@ -9003,9 +9992,9 @@ function mountIra(cfg) {
       }
       return false;
     },
-    onLeftDrag: (u, v2, w, h) => {
+    onLeftDrag: (u, v, w, h) => {
       if (tool !== "marker" || !markerDraft || markerDraft.plane !== p) return;
-      const ras = rasOfClick(p, u, v2, w, h);
+      const ras = rasOfClick(p, u, v, w, h);
       const last = markerDraft.pts[markerDraft.pts.length - 1];
       if (last && Math.hypot(ras[0] - last[0], ras[1] - last[1], ras[2] - last[2]) < 0.35) {
         return;
@@ -9019,12 +10008,9 @@ function mountIra(cfg) {
     },
     onLeftDrop: () => {
       if (tool !== "marker" || !markerDraft || markerDraft.plane !== p) return;
-      if (markerDraft.pts.length >= 2) {
-        publishMarker("end", markerDraft);
-      } else {
-        publishMarker("end", markerDraft);
-      }
+      const draft = markerDraft;
       markerDraft = null;
+      publishMarker("end", draft);
       redrawOverlays();
     }
   });
@@ -9032,8 +10018,9 @@ function mountIra(cfg) {
     marker3dActive = false;
     marker3dPointerId = null;
     if (markerDraft && markerDraft.plane === "threeD") {
-      publishMarker("end", markerDraft);
+      const draft = markerDraft;
       markerDraft = null;
+      publishMarker("end", draft);
       redrawOverlays();
     }
   };
@@ -9050,7 +10037,7 @@ function mountIra(cfg) {
     canvas.setPointerCapture?.(e.pointerId);
     const r = canvas.getBoundingClientRect();
     const u = (e.clientX - r.left) / Math.max(1, r.width);
-    const v2 = (e.clientY - r.top) / Math.max(1, r.height);
+    const v = (e.clientY - r.top) / Math.max(1, r.height);
     const strokeId = newStrokeId();
     markerDraft = {
       strokeId,
@@ -9061,7 +10048,7 @@ function mountIra(cfg) {
       widthPx: DEFAULT_VANISHING_WIDTH_PX,
       lastPublishAt: 0
     };
-    void cfg.vanishing3d.pick(u, v2).then((ras) => {
+    void cfg.vanishing3d.pick(u, v).then((ras) => {
       if (!marker3dActive || !markerDraft || markerDraft.strokeId !== strokeId) return;
       if (!ras) {
         markerDraft = null;
@@ -9086,12 +10073,12 @@ function mountIra(cfg) {
     e.stopPropagation();
     const canvas = cfg.vanishing3d.canvas();
     const r = canvas.getBoundingClientRect();
-    const x2 = e.clientX - r.left;
+    const x = e.clientX - r.left;
     const y = e.clientY - r.top;
     const cw = Math.max(1, r.width);
     const ch = Math.max(1, r.height);
     const ras = cfg.vanishing3d.displayToWorldAtDepth(
-      x2,
+      x,
       y,
       markerDraft.depth,
       cw,
@@ -9188,8 +10175,8 @@ var SlicePlaneField = class {
     this.o = { ...this.o, ...opts };
     if (opts.halfThick !== void 0) this.halfThick = opts.halfThick;
   }
-  setClim(lo, hi2) {
-    this.o.clim = [lo, hi2];
+  setClim(lo2, hi2) {
+    this.o.clim = [lo2, hi2];
   }
   uniformFloats() {
     return 36;
@@ -9199,17 +10186,17 @@ var SlicePlaneField = class {
     return Math.max(0.25, this.halfThick);
   }
   aabb() {
-    const { origin: c, uAxis: u, vAxis: v2, normal: n, halfExtU: hu, halfExtV: hv } = this.o;
+    const { origin: c, uAxis: u, vAxis: v, normal: n, halfExtU: hu3, halfExtV: hv } = this.o;
     const t = this.halfThick;
-    const lo = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
+    const lo2 = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
     for (const su of [-1, 1]) for (const sv of [-1, 1]) for (const sn2 of [-1, 1]) {
       for (let a = 0; a < 3; a++) {
-        const p = c[a] + su * hu * u[a] + sv * hv * v2[a] + sn2 * t * n[a];
-        if (p < lo[a]) lo[a] = p;
+        const p = c[a] + su * hu3 * u[a] + sv * hv * v[a] + sn2 * t * n[a];
+        if (p < lo2[a]) lo2[a] = p;
         if (p > hi2[a]) hi2[a] = p;
       }
     }
-    return [lo, hi2];
+    return [lo2, hi2];
   }
   structMembers(s) {
     return [
@@ -9260,7 +10247,7 @@ fn sample_field_slice${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
     );
   }
   fillUniforms(out, off) {
-    const { p2t, origin: c, normal: n, uAxis: u, vAxis: v2, halfExtU: hu, halfExtV: hv, clim } = this.o;
+    const { p2t, origin: c, normal: n, uAxis: u, vAxis: v, halfExtU: hu3, halfExtV: hv, clim } = this.o;
     out.set(p2t, off);
     out[off + 16] = c[0];
     out[off + 17] = c[1];
@@ -9272,10 +10259,10 @@ fn sample_field_slice${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
     out[off + 24] = u[0];
     out[off + 25] = u[1];
     out[off + 26] = u[2];
-    out[off + 27] = hu;
-    out[off + 28] = v2[0];
-    out[off + 29] = v2[1];
-    out[off + 30] = v2[2];
+    out[off + 27] = hu3;
+    out[off + 28] = v[0];
+    out[off + 29] = v[1];
+    out[off + 30] = v[2];
     out[off + 31] = hv;
     out[off + 32] = clim[0] / this.normScale;
     out[off + 33] = clim[1] / this.normScale;
@@ -9540,17 +10527,17 @@ function segmentToStl(lab, dims, ijkToRAS, segmentNum) {
     throw new Error(`labelmap size ${lab.length} != dims ${nx}\xD7${ny}\xD7${nz}`);
   }
   let i0 = nx, j0 = ny, k0 = nz, i1 = -1, j1 = -1, k1 = -1;
-  for (let k2 = 0; k2 < nz; k2++) {
+  for (let k = 0; k < nz; k++) {
     for (let j2 = 0; j2 < ny; j2++) {
-      const base = (k2 * ny + j2) * nx;
+      const base = (k * ny + j2) * nx;
       for (let i = 0; i < nx; i++) {
         if (lab[base + i] !== segmentNum) continue;
         if (i < i0) i0 = i;
         if (j2 < j0) j0 = j2;
-        if (k2 < k0) k0 = k2;
+        if (k < k0) k0 = k;
         if (i > i1) i1 = i;
         if (j2 > j1) j1 = j2;
-        if (k2 > k1) k1 = k2;
+        if (k > k1) k1 = k;
       }
     }
   }
@@ -9559,14 +10546,14 @@ function segmentToStl(lab, dims, ijkToRAS, segmentNum) {
   const x1 = i1 + 1, y1 = j1 + 1, z1 = k1 + 1;
   const sx = x1 - x0 + 1, sy = y1 - y0 + 1, sz = z1 - z0 + 1;
   const mask = new Uint8Array(sx * sy * sz);
-  for (let k2 = 0; k2 < sz; k2++) {
-    const gk = k2 + z0;
+  for (let k = 0; k < sz; k++) {
+    const gk = k + z0;
     for (let j2 = 0; j2 < sy; j2++) {
       const gj = j2 + y0;
       for (let i = 0; i < sx; i++) {
         const gi2 = i + x0;
         if (gi2 < 0 || gj < 0 || gk < 0 || gi2 >= nx || gj >= ny || gk >= nz) continue;
-        if (lab[(gk * ny + gj) * nx + gi2] === segmentNum) mask[(k2 * sy + j2) * sx + i] = 1;
+        if (lab[(gk * ny + gj) * nx + gi2] === segmentNum) mask[(k * sy + j2) * sx + i] = 1;
       }
     }
   }
@@ -9575,14 +10562,14 @@ function segmentToStl(lab, dims, ijkToRAS, segmentNum) {
   const M2 = ijkToRAS;
   const lps = new Array(tris.length);
   for (let t = 0; t < tris.length; t += 9) {
-    for (let v2 = 0; v2 < 3; v2++) {
-      const i = tris[t + v2 * 3], j2 = tris[t + v2 * 3 + 1], k2 = tris[t + v2 * 3 + 2];
-      const rx = M2[0] * i + M2[1] * j2 + M2[2] * k2 + M2[3];
-      const ry = M2[4] * i + M2[5] * j2 + M2[6] * k2 + M2[7];
-      const rz = M2[8] * i + M2[9] * j2 + M2[10] * k2 + M2[11];
-      lps[t + v2 * 3] = -rx;
-      lps[t + v2 * 3 + 1] = -ry;
-      lps[t + v2 * 3 + 2] = rz;
+    for (let v = 0; v < 3; v++) {
+      const i = tris[t + v * 3], j2 = tris[t + v * 3 + 1], k = tris[t + v * 3 + 2];
+      const rx = M2[0] * i + M2[1] * j2 + M2[2] * k + M2[3];
+      const ry = M2[4] * i + M2[5] * j2 + M2[6] * k + M2[7];
+      const rz = M2[8] * i + M2[9] * j2 + M2[10] * k + M2[11];
+      lps[t + v * 3] = -rx;
+      lps[t + v * 3 + 1] = -ry;
+      lps[t + v * 3 + 2] = rz;
     }
   }
   return writeBinaryStl(lps, "SlicerLive IRA. SPACE=LPS");
@@ -10170,15 +11157,15 @@ var EDGES = [
 ];
 function marchingCubes(mask, sx, sy, sz, ox, oy, oz) {
   const out = [];
-  const vert = (i, j2, k2) => mask[(k2 * sy + j2) * sx + i] ? 1 : 0;
+  const vert = (i, j2, k) => mask[(k * sy + j2) * sx + i] ? 1 : 0;
   const edgePos = new Float32Array(12 * 3);
-  for (let k2 = 0; k2 < sz - 1; k2++) {
+  for (let k = 0; k < sz - 1; k++) {
     for (let j2 = 0; j2 < sy - 1; j2++) {
       for (let i = 0; i < sx - 1; i++) {
         let cube = 0;
         for (let c = 0; c < 8; c++) {
           const [di2, dj, dk] = CORNER[c];
-          if (vert(i + di2, j2 + dj, k2 + dk)) cube |= 1 << c;
+          if (vert(i + di2, j2 + dj, k + dk)) cube |= 1 << c;
         }
         const edges = EDGE_TABLE[cube];
         if (!edges) continue;
@@ -10189,12 +11176,12 @@ function marchingCubes(mask, sx, sy, sz, ox, oy, oz) {
           const [bi2, bj, bk] = CORNER[b];
           edgePos[e * 3] = i + (ai2 + bi2) * 0.5;
           edgePos[e * 3 + 1] = j2 + (aj + bj) * 0.5;
-          edgePos[e * 3 + 2] = k2 + (ak + bk) * 0.5;
+          edgePos[e * 3 + 2] = k + (ak + bk) * 0.5;
         }
         const tri = TRI_TABLE[cube];
         for (let t = 0; t + 2 < tri.length; t += 3) {
-          for (let v2 = 0; v2 < 3; v2++) {
-            const e = tri[t + v2];
+          for (let v = 0; v < 3; v++) {
+            const e = tri[t + v];
             out.push(edgePos[e * 3] + ox, edgePos[e * 3 + 1] + oy, edgePos[e * 3 + 2] + oz);
           }
         }
@@ -10304,9 +11291,9 @@ var CT_VR_PRESETS = [
   }
 ];
 function presetLUT(p) {
-  const lo = p.colorTF[0][0];
+  const lo2 = p.colorTF[0][0];
   const hi2 = p.colorTF[p.colorTF.length - 1][0];
-  const clim = [lo, hi2];
+  const clim = [lo2, hi2];
   const lut = lutFromTransferFunctions(p.colorTF, p.opacityTF, clim);
   const shade = p.shade ? [p.light[0], p.light[1], p.light[2], p.light[3]] : [1, 0, 0, 1];
   return { lut, clim, shade };
@@ -10325,18 +11312,18 @@ function openVrPresetMenu(opts) {
   grid.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;";
   card.appendChild(grid);
   const close = () => overlay.remove();
-  for (const it2 of opts.items) {
+  for (const it4 of opts.items) {
     const cell = document.createElement("button");
-    const sel = it2.name === opts.current;
+    const sel = it4.name === opts.current;
     cell.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 6px 7px;cursor:pointer;background:" + (sel ? "rgba(84,198,240,.18)" : "rgba(255,255,255,.04)") + ";border:1px solid " + (sel ? "#54c6f0" : "rgba(255,255,255,.12)") + ";border-radius:10px;color:#eaf0ff;";
-    it2.canvas.style.cssText = "width:110px;height:110px;border-radius:7px;background:#05060a;display:block;";
+    it4.canvas.style.cssText = "width:110px;height:110px;border-radius:7px;background:#05060a;display:block;";
     const lab = document.createElement("div");
-    lab.textContent = it2.label;
+    lab.textContent = it4.label;
     lab.style.cssText = "font:600 11.5px -apple-system,system-ui,sans-serif;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px;" + (sel ? "color:#9fe9ff;" : "");
-    cell.appendChild(it2.canvas);
+    cell.appendChild(it4.canvas);
     cell.appendChild(lab);
     cell.onclick = () => {
-      opts.onPick(it2.name);
+      opts.onPick(it4.name);
       close();
     };
     grid.appendChild(cell);
@@ -10356,48 +11343,48 @@ function openVrPresetMenu(opts) {
 }
 
 // ../../cast-interface/cast-js-client/dist/cast-client.js
-function gn(e, t) {
+function Xn(e, t) {
   t.classHierarchy || (t.classHierarchy = []), e.getClassName = () => t.classHierarchy[t.classHierarchy.length - 1] || "CastClient", e.isA = (n) => t.classHierarchy.includes(n), typeof e.delete != "function" && (e.delete = () => {
   });
 }
-function Sn(e, t, n) {
-  n.forEach((r) => {
-    const i = `get${r.charAt(0).toUpperCase()}${r.slice(1)}`;
-    e[i] = () => t[r];
+function Qn(e, t, n) {
+  n.forEach((i) => {
+    const r = `get${i.charAt(0).toUpperCase()}${i.slice(1)}`;
+    e[r] = () => t[i];
   });
 }
-function Cn(e, t) {
+function er(e, t) {
   return () => {
     e(), typeof t == "function" && t();
   };
 }
-function wn(e, t) {
-  return function(r = {}) {
-    const i = {};
-    return e(i, { classHierarchy: [t] }, r), i;
+function tr(e, t) {
+  return function(i = {}) {
+    const r = {};
+    return e(r, { classHierarchy: [t] }, i), r;
   };
 }
-var ze = "CAST";
-var ft = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-function Nt(e, t = ze) {
+var at = "CAST";
+var Ut = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function Gt(e, t = at) {
   return String(e || t).trim().replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "") || t;
 }
-function En(e) {
-  return `${Nt(e)}-`;
+function nr(e) {
+  return `${Gt(e)}-`;
 }
-function ce(e) {
+function Ee(e) {
   return typeof crypto < "u" && crypto.randomUUID ? e + crypto.randomUUID().replace(/-/g, "").slice(0, 16) : e + Math.random().toString(36).substring(2, 18);
 }
-function He(e = ze) {
-  const t = Nt(e);
+function ct(e = at) {
+  const t = Gt(e);
   let n = "";
-  for (let r = 0; r < 6; r++) {
-    const i = Math.floor(Math.random() * ft.length);
-    n += ft[i];
+  for (let i = 0; i < 6; i++) {
+    const r = Math.floor(Math.random() * Ut.length);
+    n += Ut[r];
   }
   return `${t}-${n}`;
 }
-var dt = [
+var Mt = [
   "dicom",
   "nifti",
   "jpg",
@@ -10407,26 +11394,26 @@ var dt = [
   "scene"
   // scene-update (LiveSync HubBlobs multipart)
 ];
-function Ge(e) {
+function ut(e) {
   if (typeof e != "string") return false;
   const t = e.trim().toLowerCase();
   if (!t) return false;
-  for (let n = 0; n < dt.length; n++) {
-    const r = dt[n];
-    if (t === r || t.startsWith(`${r}-`) || t.startsWith(`${r}_`))
+  for (let n = 0; n < Mt.length; n++) {
+    const i = Mt[n];
+    if (t === i || t.startsWith(`${i}-`) || t.startsWith(`${i}_`))
       return true;
   }
   return false;
 }
-function Tn(e) {
+function rr(e) {
   return typeof ArrayBuffer < "u" && ArrayBuffer.isView(e);
 }
-async function de(e) {
+async function Ae(e) {
   if (e instanceof ArrayBuffer)
     return e;
-  if (Tn(e)) {
-    const { buffer: t, byteOffset: n, byteLength: r } = e;
-    return t.slice(n, n + r);
+  if (rr(e)) {
+    const { buffer: t, byteOffset: n, byteLength: i } = e;
+    return t.slice(n, n + i);
   }
   if (typeof Blob < "u" && e instanceof Blob && typeof e.arrayBuffer == "function")
     return e.arrayBuffer();
@@ -10434,84 +11421,84 @@ async function de(e) {
     "CastClient: binary resource.data must be ArrayBuffer, TypedArray, DataView, Blob, or File"
   );
 }
-function ee(e) {
+function de(e) {
   const t = e && e.context;
   if (!t || typeof t != "object" || Array.isArray(t))
     return [];
   const n = t.files;
-  return Array.isArray(n) ? n.filter((r) => r && typeof r == "object") : [];
+  return Array.isArray(n) ? n.filter((i) => i && typeof i == "object") : [];
 }
-function We(e) {
+function lt(e) {
   if (!e || typeof e != "object" || e.data != null)
     return { payloadIds: [], chunkByteLengths: [] };
   const t = e.payloadIds;
   if (Array.isArray(t) && t.length) {
-    const r = t.map((s) => typeof s == "string" ? s.trim() : "").filter(Boolean), i = Array.isArray(e.chunkByteLengths) ? e.chunkByteLengths.filter((s) => typeof s == "number" && s >= 0) : [];
-    if (i.length === r.length)
-      return { payloadIds: r, chunkByteLengths: i };
-    if (r.length === 1) {
+    const i = t.map((s) => typeof s == "string" ? s.trim() : "").filter(Boolean), r = Array.isArray(e.chunkByteLengths) ? e.chunkByteLengths.filter((s) => typeof s == "number" && s >= 0) : [];
+    if (r.length === i.length)
+      return { payloadIds: i, chunkByteLengths: r };
+    if (i.length === 1) {
       const s = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
       return {
-        payloadIds: r,
+        payloadIds: i,
         chunkByteLengths: s != null ? [s] : []
       };
     }
   }
   const n = typeof e.payloadId == "string" ? e.payloadId.trim() : "";
   if (n) {
-    const r = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
+    const i = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
     return {
       payloadIds: [n],
-      chunkByteLengths: r != null ? [r] : []
+      chunkByteLengths: i != null ? [i] : []
     };
   }
   return { payloadIds: [], chunkByteLengths: [] };
 }
-function Nn(e) {
-  const t = ee(e);
+function ir(e) {
+  const t = de(e);
   for (let n = 0; n < t.length; n++) {
-    const r = t[n];
-    if (r.data == null) {
-      const i = We(r);
-      if (i.payloadIds.length)
+    const i = t[n];
+    if (i.data == null) {
+      const r = lt(i);
+      if (r.payloadIds.length)
         return {
           kind: "files",
           index: n,
           chunkIndex: 0,
-          payloadId: i.payloadIds[0],
-          expectedChunkBytes: i.chunkByteLengths[0] ?? null
+          payloadId: r.payloadIds[0],
+          expectedChunkBytes: r.chunkByteLengths[0] ?? null
         };
     }
   }
   return null;
 }
-function At(e) {
-  return Nn(e);
+function Vt(e) {
+  return ir(e);
 }
-function Re(e) {
-  return !!At(e);
+function Ye(e) {
+  return !!Vt(e);
 }
-function xe(e, t) {
+function Ke(e, t) {
   return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? t === 0 ? "nifti-send.nii.gz" : `nifti-send-${t + 1}.nii.gz` : t === 0 ? "dicom-send.dcm" : `dicom-send-${t + 1}.dcm`;
 }
-function Pe(e) {
+function Xe(e) {
   return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? "application/octet-stream" : "application/dicom";
 }
-function Ue(e) {
+function Ze(e) {
   const t = e && e.event;
-  if (!t || !Ge(t["hub.event"]) || ee(t).length)
+  if (!t || !ut(t["hub.event"]) || de(t).length)
     return e;
-  const n = t["hub.event"], r = t.context;
-  let i = [];
-  Array.isArray(r) ? i = r : r != null && (i = [r]);
+  const n = t["hub.event"], i = t.context;
+  let r = [];
+  Array.isArray(i) ? r = i : i != null && (r = [i]);
   const s = [];
-  for (let o = 0; o < i.length; o++) {
-    const c = i[o];
+  for (let o = 0; o < r.length; o++) {
+    const c = r[o];
     if (c && typeof c == "object") {
-      const d = c.resource;
-      if (d && typeof d == "object" && d.data != null) {
-        const f = { ...d };
-        (typeof f.fileName != "string" || !f.fileName.trim()) && (f.fileName = xe(n, o)), (typeof f.mimeType != "string" || !f.mimeType.trim()) && (f.mimeType = Pe(n)), s.push(f);
+      const l = c.resource;
+      if (l && typeof l == "object" && l.data != null) {
+        const h = { ...l };
+        (typeof h.fileName != "string" || !h.fileName.trim()) && (h.fileName = Ke(n, o)), (typeof h.mimeType != "string" || !h.mimeType.trim()) && (h.mimeType = Xe(n)), s.push(h);
       }
     }
   }
@@ -10525,24 +11512,24 @@ function Ue(e) {
     }
   } : e;
 }
-function An(e, t) {
-  const n = e && e.event, r = n && n.context;
-  let i = [];
-  Array.isArray(r) ? i = r : r != null && (i = [r]);
-  for (let s = 0; s < i.length; s++) {
-    const o = i[s];
+function or(e, t) {
+  const n = e && e.event, i = n && n.context;
+  let r = [];
+  Array.isArray(i) ? r = i : i != null && (r = [i]);
+  for (let s = 0; s < r.length; s++) {
+    const o = r[s];
     if (o && typeof o == "object") {
       const c = o.resource;
       if (c && typeof c == "object") {
-        const d = typeof c.fileName == "string" ? c.fileName.trim() : "";
-        if (d)
-          return d;
+        const l = typeof c.fileName == "string" ? c.fileName.trim() : "";
+        if (l)
+          return l;
       }
     }
   }
   return t;
 }
-function be(e) {
+function Ne(e) {
   if (!e || typeof e != "object")
     return false;
   const t = typeof e.url == "string" ? e.url.trim() : "";
@@ -10551,65 +11538,65 @@ function be(e) {
   const n = t.toLowerCase();
   return n.startsWith("http://") || n.startsWith("https://");
 }
-function vn(e) {
+function sr(e) {
   const t = [];
   for (let n = 0; n < e.length; n += 1)
-    be(e[n]) || t.push(n);
+    Ne(e[n]) || t.push(n);
   return t;
 }
-function Ln(e) {
+function ar(e) {
   const t = e && e.event;
-  if (!t || !Ge(t["hub.event"]))
+  if (!t || !ut(t["hub.event"]))
     return false;
-  const n = ee(t);
+  const n = de(t);
   return n.length ? n.some(
-    (r) => r.data != null && !be(r)
+    (i) => i.data != null && !Ne(i)
   ) : false;
 }
-async function In(e, t = "", n = 0) {
+async function cr(e, t = "", n = 0) {
   if (!e || typeof e != "object")
     throw new Error(
       "CastClient: binary batch publish files[] entries must be objects"
     );
-  const r = be(e);
-  let i = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
+  const i = Ne(e);
+  let r = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
   if ("data" in e && e.data != null) {
     if (typeof e.data == "string")
       throw new Error(
         "CastClient: binary batch publish string payloads are not supported; pass binary input instead"
       );
-    i = (await de(e.data)).byteLength;
+    r = (await Ae(e.data)).byteLength;
   }
-  if (i == null && r) {
+  if (r == null && i) {
     const o = { ...e };
-    return delete o.data, delete o.binaryTransfer, delete o.payloadId, delete o.payloadIds, delete o.chunkByteLengths, delete o.expiresAt, (typeof o.fileName != "string" || !o.fileName.trim()) && (o.fileName = xe(t, n)), (typeof o.mimeType != "string" || !o.mimeType.trim()) && (o.mimeType = Pe(t)), o;
+    return delete o.data, delete o.binaryTransfer, delete o.payloadId, delete o.payloadIds, delete o.chunkByteLengths, delete o.expiresAt, (typeof o.fileName != "string" || !o.fileName.trim()) && (o.fileName = Ke(t, n)), (typeof o.mimeType != "string" || !o.mimeType.trim()) && (o.mimeType = Xe(t)), o;
   }
-  if (i == null)
+  if (r == null)
     throw new Error(
       "CastClient: binary batch publish requires files[].data or files[].byteLength"
     );
   const s = { ...e };
-  return delete s.data, delete s.binaryTransfer, r || delete s.url, delete s.payloadId, delete s.payloadIds, delete s.chunkByteLengths, delete s.expiresAt, s.byteLength = i, (typeof s.fileName != "string" || !s.fileName.trim()) && (s.fileName = xe(t, n)), (typeof s.mimeType != "string" || !s.mimeType.trim()) && (s.mimeType = Pe(t)), s;
+  return delete s.data, delete s.binaryTransfer, i || delete s.url, delete s.payloadId, delete s.payloadIds, delete s.chunkByteLengths, delete s.expiresAt, s.byteLength = r, (typeof s.fileName != "string" || !s.fileName.trim()) && (s.fileName = Ke(t, n)), (typeof s.mimeType != "string" || !s.mimeType.trim()) && (s.mimeType = Xe(t)), s;
 }
-async function _n(e) {
+async function ur(e) {
   if (!e.event || typeof e.event != "object")
     throw new Error("CastClient: binary batch publish requires event object");
   const t = e.event;
-  if (!Ge(t["hub.event"]))
+  if (!ut(t["hub.event"]))
     return e;
   const n = t.context;
   if (!n || typeof n != "object" || Array.isArray(n))
     throw new Error(
       "CastClient: binary batch publish requires event.context object"
     );
-  const r = n.files;
-  if (!Array.isArray(r) || !r.length)
+  const i = n.files;
+  if (!Array.isArray(i) || !i.length)
     throw new Error(
       "CastClient: binary batch publish requires non-empty event.context.files[]"
     );
-  const i = t["hub.event"], s = await Promise.all(
-    r.map(
-      (o, c) => In(o, i, c)
+  const r = t["hub.event"], s = await Promise.all(
+    i.map(
+      (o, c) => cr(o, r, c)
     )
   );
   return {
@@ -10623,19 +11610,19 @@ async function _n(e) {
     }
   };
 }
-async function bt(e) {
+async function Pt(e) {
   const t = e && e.event;
   if (!t)
     return [];
-  const r = ee(t).filter(
-    (i) => i && typeof i == "object" && i.data != null && !be(i)
+  const i = de(t).filter(
+    (r) => r && typeof r == "object" && r.data != null && !Ne(r)
   );
-  return Promise.all(r.map((i) => de(i.data)));
+  return Promise.all(i.map((r) => Ae(r.data)));
 }
-function kn(e, t, n) {
-  const r = new TextEncoder(), i = r.encode(`\r
+function lr(e, t, n) {
+  const i = new TextEncoder(), r = i.encode(`\r
 `), s = [], o = (c) => {
-    s.push(r.encode(c));
+    s.push(i.encode(c));
   };
   o(
     `--${e}\r
@@ -10645,54 +11632,54 @@ ${t}\r
 `
   );
   for (let c = 0; c < n.length; c++) {
-    const d = n[c], f = d && d.mimeType && String(d.mimeType).trim() || "application/octet-stream";
+    const l = n[c], h = l && l.mimeType && String(l.mimeType).trim() || "application/octet-stream";
     o(`--${e}\r
-Content-Type: ${f}\r
+Content-Type: ${h}\r
 \r
-`), s.push(new Uint8Array(d.buffer)), s.push(i);
+`), s.push(new Uint8Array(l.buffer)), s.push(r);
   }
   return o(`--${e}--\r
 `), new Blob(s);
 }
-async function $n({
+async function fr({
   msg: e,
   fileBytesList: t,
   hub: n,
-  messageIdPrefix: r
+  messageIdPrefix: i
 }) {
-  const i = await _n(e), s = await Promise.all(
-    (t || []).map((b) => de(b))
-  ), o = ee(i.event), c = vn(o);
+  const r = await ur(e), s = await Promise.all(
+    (t || []).map((u) => Ae(u))
+  ), o = de(r.event), c = sr(o);
   if (s.length !== c.length)
     throw new Error(
       `CastClient: binary batch publish expected ${c.length} file part(s), got ${s.length}`
     );
-  const d = s.map((b, l) => {
-    const u = c[l];
+  const l = s.map((u, f) => {
+    const d = c[f];
     return {
-      buffer: b,
-      mimeType: o[u] && o[u].mimeType || "application/octet-stream"
+      buffer: u,
+      mimeType: o[d] && o[d].mimeType || "application/octet-stream"
     };
-  }), f = `cast-batch-${ce(r())}`, a = kn(
-    f,
-    JSON.stringify(i),
-    d
+  }), h = `cast-batch-${Ee(i())}`, a = lr(
+    h,
+    JSON.stringify(r),
+    l
   );
   try {
     return await fetch(n.hub_endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${n.token}`,
-        "Content-Type": `multipart/related; boundary="${f}"; type="application/dicom"`
+        "Content-Type": `multipart/related; boundary="${h}"; type="application/dicom"`
       },
       body: a
     });
-  } catch (b) {
-    const l = b instanceof Error ? b.message : String(b);
-    return console.debug("CastClient:", l), null;
+  } catch (u) {
+    const f = u instanceof Error ? u.message : String(u);
+    return console.debug("CastClient:", f), null;
   }
 }
-function he(e) {
+function xe(e) {
   const t = {
     responses: [],
     expected: [],
@@ -10708,10 +11695,10 @@ function he(e) {
   const n = (
     /** @type {Record<string, unknown>} */
     e
-  ), r = Array.isArray(n.responses) ? n.responses.filter((o) => o && typeof o == "object") : [], i = Array.isArray(n.expected) ? n.expected.map((o) => String(o)) : [], s = Array.isArray(n.missing) ? n.missing.map((o) => String(o)) : [];
+  ), i = Array.isArray(n.responses) ? n.responses.filter((o) => o && typeof o == "object") : [], r = Array.isArray(n.expected) ? n.expected.map((o) => String(o)) : [], s = Array.isArray(n.missing) ? n.missing.map((o) => String(o)) : [];
   return {
-    responses: r,
-    expected: i,
+    responses: i,
+    expected: r,
     missing: s,
     timedOut: !!n.timedOut,
     ok: !!n.ok,
@@ -10720,84 +11707,83 @@ function he(e) {
     productName: n.productName != null ? String(n.productName) : null
   };
 }
-function Un(e) {
-  return he(e).responses;
+function dr(e) {
+  return xe(e).responses;
 }
-function vt(e, t) {
+function Jt(e, t) {
   if (t === "file:")
     return true;
   const n = String(e || "").toLowerCase();
   return !!(n === "localhost" || n === "127.0.0.1" || n === "[::1]" || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(n) || /^192\.168\.\d{1,3}\.\d{1,3}$/.test(n) || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(n));
 }
-function Lt(e = typeof window < "u" ? window.location : null) {
-  return e ? !vt(e.hostname, e.protocol) : false;
+function Zt(e = typeof window < "u" ? window.location : null) {
+  return e ? !Jt(e.hostname, e.protocol) : false;
 }
-function It(e) {
+function Yt(e) {
   try {
     const t = new URL(e);
-    return !vt(t.hostname, t.protocol);
+    return !Jt(t.hostname, t.protocol);
   } catch {
     return false;
   }
 }
-function Rn(e, t, n = Lt()) {
-  const r = t.find((s) => {
+function hr(e, t, n = Zt()) {
+  const i = t.find((s) => {
     var c;
     const o = (c = e[s]) == null ? void 0 : c.hubEndpoint;
-    return o && It(o) === n;
+    return o && Yt(o) === n;
   });
-  if (r)
-    return r;
-  const i = n ? "cloud" : "local";
-  return e[i] ? i : t[0];
+  if (i)
+    return i;
+  const r = n ? "cloud" : "local";
+  return e[r] ? r : t[0];
 }
-var V = "-request";
-var J = "-response";
-function Ve(e) {
+var oe = "-request";
+var se = "-response";
+function ft(e) {
   return typeof e != "string" ? "" : e.trim().toLowerCase();
 }
-function me(e) {
-  const t = Ve(e);
-  return t ? `${t}${V}` : "";
+function ke(e) {
+  const t = ft(e);
+  return t ? `${t}${oe}` : "";
 }
-function _t(e) {
-  const t = Ve(e);
-  return t ? `${t}${J}` : "";
+function Kt(e) {
+  const t = ft(e);
+  return t ? `${t}${se}` : "";
 }
-function xn(e) {
-  return typeof e != "string" ? false : e.endsWith(V);
+function br(e) {
+  return typeof e != "string" ? false : e.endsWith(oe);
 }
-function Pn(e) {
-  return typeof e != "string" ? false : e.endsWith(J);
+function mr(e) {
+  return typeof e != "string" ? false : e.endsWith(se);
 }
-function On(e) {
-  return typeof e != "string" ? "" : e.endsWith(V) ? e.slice(0, -V.length) : e.endsWith(J) ? e.slice(0, -J.length) : "";
+function pr(e) {
+  return typeof e != "string" ? "" : e.endsWith(oe) ? e.slice(0, -oe.length) : e.endsWith(se) ? e.slice(0, -se.length) : "";
 }
-function Dn(e) {
+function gr(e) {
   if (!(e != null && e.length))
     return ["*"];
-  if (e.some((i) => String(i).trim() === "*"))
+  if (e.some((r) => String(r).trim() === "*"))
     return ["*"];
-  const t = me("STATUS"), n = new Set(
-    e.map((i) => String(i).trim().toLowerCase()).filter(Boolean)
-  ), r = [];
-  return t && !n.has(t.toLowerCase()) && (r.push(t), n.add(t.toLowerCase())), n.has("status-update") || r.push("status-update"), r.length ? [...e, ...r] : [...e];
+  const t = ke("STATUS"), n = new Set(
+    e.map((r) => String(r).trim().toLowerCase()).filter(Boolean)
+  ), i = [];
+  return t && !n.has(t.toLowerCase()) && (i.push(t), n.add(t.toLowerCase())), n.has("status-update") || i.push("status-update"), i.length ? [...e, ...i] : [...e];
 }
-var kt = "cast-radio-icon";
-var $t = `<svg class="${kt}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>`;
-var Ut = "cast-radio-status-icon";
-var Rt = "cast-radio-slash";
-function Mn(e = {}) {
+var Xt = "cast-radio-icon";
+var Qt = `<svg class="${Xt}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>`;
+var en = "cast-radio-status-icon";
+var tn = "cast-radio-slash";
+function yr(e = {}) {
   const t = e.slashId || "castRadioSlash";
-  return `<span class="${Ut}">${$t}<span id="${t}" class="${Rt}" aria-hidden="true" hidden></span></span>`;
+  return `<span class="${en}">${Qt}<span id="${t}" class="${tn}" aria-hidden="true" hidden></span></span>`;
 }
-function Bn(e, t = {}) {
-  const n = !!t.conferenceActive;
-  return e === "connected" ? {
+function Cr(e, t = {}) {
+  return t == null || t.conferenceActive, e === "connected" ? {
     tone: "connected",
     showSlash: false,
     pulse: false,
-    conferencePulse: n
+    conferencePulse: false
   } : e === "connecting" || e === "token-ready" ? {
     tone: "connecting",
     showSlash: false,
@@ -10815,7 +11801,7 @@ function Bn(e, t = {}) {
     conferencePulse: false
   };
 }
-function Fn() {
+function Sr() {
   return {
     name: "",
     friendlyName: "",
@@ -10827,7 +11813,7 @@ function Fn() {
     client_secret: ""
   };
 }
-function jn() {
+function wr() {
   return {
     subscriberName: "",
     productName: "",
@@ -10840,21 +11826,21 @@ function jn() {
     defaultTargetActor: ""
   };
 }
-function ue(e) {
+function Te(e) {
   if (e == null)
     return;
   const t = String(e).trim();
   if (!(!t || t === "*"))
     return t;
 }
-function xt(e) {
+function nn(e) {
   if (e == null)
     return;
   const t = String(e).trim();
   if (!(!t || t === "*"))
     return t;
 }
-function qn() {
+function Er() {
   return {
     token: "",
     lastIdToken: "",
@@ -10864,7 +11850,7 @@ function qn() {
     websocket: null
   };
 }
-function zn() {
+function Tr() {
   if (typeof navigator > "u")
     return null;
   const e = {};
@@ -10876,22 +11862,22 @@ function zn() {
   }
   return Object.keys(e).length ? e : null;
 }
-function ht(e) {
+function Rt(e) {
   return e || (typeof window < "u" ? `${window.location.origin}/castCallback` : "");
 }
-function mt(e, t, n, r = "") {
-  const i = new URLSearchParams();
-  i.append("hub.mode", e), i.append("hub.channel.type", "websocket"), i.append("hub.callback", n), i.append("hub.events", (t.events || []).toString()), i.append("hub.topic", t.topic || ""), i.append("hub.lease", String(t.lease || 999)), i.append("subscriber.name", t.subscriberName || ""), i.append("subscriber.product.name", t.productName || ""), i.append(
+function Ft(e, t, n, i = "") {
+  const r = new URLSearchParams();
+  r.append("hub.mode", e), r.append("hub.channel.type", "websocket"), r.append("hub.callback", n), r.append("hub.events", (t.events || []).toString()), r.append("hub.topic", t.topic || ""), r.append("hub.lease", String(t.lease || 999)), r.append("subscriber.name", t.subscriberName || ""), r.append("subscriber.product.name", t.productName || ""), r.append(
     "subscriber.product.version",
-    t.productVersion || r || ""
+    t.productVersion || i || ""
   );
   const s = (t.actors || []).map((c) => c.trim()).filter(Boolean);
-  s.length && i.append("subscriber.actors", JSON.stringify(s));
-  const o = zn();
-  return o && i.append("subscriber.client_info", JSON.stringify(o)), i;
+  s.length && r.append("subscriber.actors", JSON.stringify(s));
+  const o = Tr();
+  return o && r.append("subscriber.client_info", JSON.stringify(o)), r;
 }
-var F = 25;
-function Hn(e) {
+var Z = 25;
+function vr(e) {
   try {
     const t = new URL(e);
     return t.hostname.toLowerCase() === "localhost" && (t.hostname = "127.0.0.1"), t.toString();
@@ -10899,49 +11885,49 @@ function Hn(e) {
     return e;
   }
 }
-function Gn(e) {
+function Lr(e) {
   if (!(e instanceof Error))
     return false;
   const t = e.name || "";
   return t === "TypeError" || t === "NetworkError";
 }
-function Wn(e, t) {
+function Ar(e, t) {
   if (!e)
     return "";
   try {
     const n = `/api/hub/payloads/${encodeURIComponent(e)}`;
-    return Hn(new URL(n, t).toString());
+    return vr(new URL(n, t).toString());
   } catch (n) {
     return console.warn("CastClient: invalid payloadId url", e, n), "";
   }
 }
-function Vn(e) {
+function Nr(e) {
   delete e.binaryTransfer, delete e.url, delete e.payloadId, delete e.payloadIds, delete e.chunkByteLengths, delete e.expiresAt;
 }
-function Pt(e, t) {
+function rn(e, t) {
   const n = e.reduce((s, o) => s + o.byteLength, 0);
   if (typeof t == "number" && t >= 0 && n !== t)
     throw new Error(
       `CastClient: payload size mismatch expected=${t} received=${n}`
     );
-  const r = new Uint8Array(n);
-  let i = 0;
+  const i = new Uint8Array(n);
+  let r = 0;
   for (let s = 0; s < e.length; s++)
-    r.set(new Uint8Array(e[s]), i), i += e[s].byteLength;
-  return r.buffer;
+    i.set(new Uint8Array(e[s]), r), r += e[s].byteLength;
+  return i.buffer;
 }
-function pt(e, t, n) {
-  const r = e && e.event, i = r && r.context, s = i && i.files, o = s && s[t];
-  return !o || typeof o != "object" ? false : (Vn(o), o.data = n, o.byteLength = n.byteLength, true);
+function Ot(e, t, n) {
+  const i = e && e.event, r = i && i.context, s = r && r.files, o = s && s[t];
+  return !o || typeof o != "object" ? false : (Nr(o), o.data = n, o.byteLength = n.byteLength, true);
 }
-async function Ot(e, t, { hubEndpoint: n, accessToken: r }) {
-  const i = Wn(e, n);
-  if (!i)
+async function on(e, t, { hubEndpoint: n, accessToken: i }) {
+  const r = Ar(e, n);
+  if (!r)
     throw new Error("CastClient.fetchPayload: missing or invalid payloadId");
   const s = {};
-  r && (s.Authorization = `Bearer ${r}`);
+  i && (s.Authorization = `Bearer ${i}`);
   async function o() {
-    const c = await fetch(i, {
+    const c = await fetch(r, {
       method: "GET",
       credentials: "omit",
       headers: s
@@ -10950,136 +11936,136 @@ async function Ot(e, t, { hubEndpoint: n, accessToken: r }) {
       throw new Error(
         `CastClient.fetchPayload: GET ${c.status} ${c.statusText}`
       );
-    const d = await c.arrayBuffer();
-    if (typeof t == "number" && t >= 0 && d.byteLength !== t)
+    const l = await c.arrayBuffer();
+    if (typeof t == "number" && t >= 0 && l.byteLength !== t)
       throw new Error(
         `CastClient.fetchPayload: chunk size mismatch payloadId=${e.slice(
           0,
           8
-        )} expected=${t} received=${d.byteLength}`
+        )} expected=${t} received=${l.byteLength}`
       );
-    return d;
+    return l;
   }
   try {
     return await o();
   } catch (c) {
-    if (Gn(c))
+    if (Lr(c))
       return o();
     throw c;
   }
 }
-async function Jn(e, t) {
-  const n = We(e);
+async function xr(e, t) {
+  const n = lt(e);
   if (!n.payloadIds.length)
     throw new Error("CastClient.fetchPayload: no payloadIds on file entry");
-  const r = [];
-  for (let i = 0; i < n.payloadIds.length; i += F) {
+  const i = [];
+  for (let r = 0; r < n.payloadIds.length; r += Z) {
     const s = n.payloadIds.slice(
-      i,
-      i + F
+      r,
+      r + Z
     ), o = n.chunkByteLengths.slice(
-      i,
-      i + F
+      r,
+      r + Z
     ), c = await Promise.all(
       s.map(
-        (d, f) => Ot(d, o[f] ?? null, t)
+        (l, h) => on(l, o[h] ?? null, t)
       )
     );
-    r.push(...c);
+    i.push(...c);
   }
-  return Pt(
-    r,
+  return rn(
+    i,
     typeof e.byteLength == "number" ? e.byteLength : null
   );
 }
-async function Yn(e, t, n = F) {
+async function kr(e, t, n = Z) {
   if (!e.length)
     return [];
-  const r = Math.max(1, n | 0), i = new Array(e.length);
+  const i = Math.max(1, n | 0), r = new Array(e.length);
   let s = 0;
   async function o() {
     for (; s < e.length; ) {
-      const d = s++, f = e[d];
-      i[d] = await Ot(
-        f.payloadId,
-        f.expectedLength ?? null,
+      const l = s++, h = e[l];
+      r[l] = await on(
+        h.payloadId,
+        h.expectedLength ?? null,
         t
       );
     }
   }
   const c = Array.from(
-    { length: Math.min(r, e.length) },
+    { length: Math.min(i, e.length) },
     () => o()
   );
-  return await Promise.all(c), i;
+  return await Promise.all(c), r;
 }
-function yt(e) {
+function Dt(e) {
   return JSON.parse(JSON.stringify(e));
 }
-function Kn(e) {
+function Ir(e) {
   const t = () => e();
   return {
     hasPendingPayload(n) {
-      const r = n && n.event;
-      return !!(r && Re(r));
+      const i = n && n.event;
+      return !!(i && Ye(i));
     },
     async fetchPayload(n) {
-      const r = n && n.event;
-      if (!r || !Re(r))
+      const i = n && n.event;
+      if (!i || !Ye(i))
         return n;
-      const i = At(r);
-      if (!i)
+      const r = Vt(i);
+      if (!r)
         return n;
-      const s = typeof performance < "u" && performance.now ? performance.now() : Date.now(), o = r.context.files[i.index], c = await Jn(o, t()), d = yt(n);
-      if (!pt(d, i.index, c))
+      const s = typeof performance < "u" && performance.now ? performance.now() : Date.now(), o = i.context.files[r.index], c = await xr(o, t()), l = Dt(n);
+      if (!Ot(l, r.index, c))
         throw new Error("CastClient.fetchPayload: no payload slot on message");
       const a = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - s;
       return console.debug(
-        `CastClient: payload fetched fileIndex=${i.index} bytes=${c.byteLength} elapsed=${(a / 1e3).toFixed(2)}s`
-      ), d;
+        `CastClient: payload fetched fileIndex=${r.index} bytes=${c.byteLength} elapsed=${(a / 1e3).toFixed(2)}s`
+      ), l;
     },
     async fetchAllPayloads(n) {
-      const r = n && n.event, i = r && r.context, s = i && typeof i == "object" && !Array.isArray(i) && Array.isArray(i.files) ? i.files : [], o = [];
-      for (let u = 0; u < s.length; u++) {
-        const h = s[u];
-        if (!h || typeof h != "object" || h.data != null)
+      const i = n && n.event, r = i && i.context, s = r && typeof r == "object" && !Array.isArray(r) && Array.isArray(r.files) ? r.files : [], o = [];
+      for (let d = 0; d < s.length; d++) {
+        const b = s[d];
+        if (!b || typeof b != "object" || b.data != null)
           continue;
-        const m = We(h);
+        const m = lt(b);
         if (m.payloadIds.length)
-          for (let y = 0; y < m.payloadIds.length; y++)
+          for (let g = 0; g < m.payloadIds.length; g++)
             o.push({
-              fileIndex: u,
-              chunkIndex: y,
-              payloadId: m.payloadIds[y],
-              expectedLength: typeof m.chunkByteLengths[y] == "number" ? m.chunkByteLengths[y] : null
+              fileIndex: d,
+              chunkIndex: g,
+              payloadId: m.payloadIds[g],
+              expectedLength: typeof m.chunkByteLengths[g] == "number" ? m.chunkByteLengths[g] : null
             });
       }
       if (!o.length)
         return n;
-      const c = typeof performance < "u" && performance.now ? performance.now() : Date.now(), d = t(), f = await Yn(
+      const c = typeof performance < "u" && performance.now ? performance.now() : Date.now(), l = t(), h = await kr(
         o,
-        d,
-        F
+        l,
+        Z
       ), a = /* @__PURE__ */ new Map();
-      for (let u = 0; u < o.length; u++) {
-        const { fileIndex: h, chunkIndex: m } = o[u];
-        let y = a.get(h);
-        y || (y = [], a.set(h, y)), y[m] = f[u];
+      for (let d = 0; d < o.length; d++) {
+        const { fileIndex: b, chunkIndex: m } = o[d];
+        let g = a.get(b);
+        g || (g = [], a.set(b, g)), g[m] = h[d];
       }
-      const b = yt(n);
-      for (const [u, h] of a) {
-        const m = b.event.context.files[u], y = typeof m.byteLength == "number" ? m.byteLength : null, S = Pt(h, y);
-        if (!pt(b, u, S))
+      const u = Dt(n);
+      for (const [d, b] of a) {
+        const m = u.event.context.files[d], g = typeof m.byteLength == "number" ? m.byteLength : null, y = rn(b, g);
+        if (!Ot(u, d, y))
           throw new Error("CastClient.fetchAllPayloads: attach failed");
       }
-      const l = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - c;
+      const f = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - c;
       return console.debug(
-        `CastClient: fetchAllPayloads files=${a.size} chunks=${o.length} concurrent=${F} elapsed=${(l / 1e3).toFixed(2)}s`
-      ), b;
+        `CastClient: fetchAllPayloads files=${a.size} chunks=${o.length} concurrent=${Z} elapsed=${(f / 1e3).toFixed(2)}s`
+      ), u;
     }
   };
 }
-function te(e) {
+function he(e) {
   const t = String(e ?? "").trim();
   if (!t)
     return null;
@@ -11090,34 +12076,40 @@ function te(e) {
     return null;
   }
 }
-function Xn(e) {
-  const t = te(e);
+function $r(e) {
+  const t = he(e);
   if (!t)
     return "";
   const n = t.href.endsWith("/") ? t.href : `${t.href}/`;
   return new URL("admin", n).href;
 }
-function Zn(e, t = {}) {
-  var d, f, a, b;
-  const n = te(e);
+function _r(e, t = {}) {
+  var l, h, a, u;
+  const n = he(e);
   if (!n)
     return "";
-  const r = new URL("/api/hub/conference-client", n.origin), i = (d = t.subscriberName) == null ? void 0 : d.trim(), s = (f = t.topic) == null ? void 0 : f.trim(), o = ((a = t.theme) == null ? void 0 : a.trim()) || "volview", c = ((b = t.mode) == null ? void 0 : b.trim().toLowerCase()) === "light" ? "light" : "dark";
-  return i && r.searchParams.set("subscriberName", i), s && r.searchParams.set("topic", s), r.searchParams.set("theme", o), r.searchParams.set("mode", c), r.href;
+  const i = new URL("/api/hub/conference-client", n.origin), r = (l = t.subscriberName) == null ? void 0 : l.trim(), s = (h = t.topic) == null ? void 0 : h.trim(), o = ((a = t.theme) == null ? void 0 : a.trim()) || "volview", c = ((u = t.mode) == null ? void 0 : u.trim().toLowerCase()) === "light" ? "light" : "dark";
+  return r && i.searchParams.set("subscriberName", r), s && i.searchParams.set("topic", s), i.searchParams.set("theme", o), i.searchParams.set("mode", c), i.href;
 }
-var Qn = { width: 336, height: 288 };
-var er = "castViewer-reporting";
-function tr(e = null) {
-  const t = typeof globalThis < "u" ? globalThis.screen : null, n = typeof globalThis < "u" && globalThis.window ? globalThis.window : null, r = Number(t == null ? void 0 : t.availLeft) || 0, i = Number(t == null ? void 0 : t.availTop) || 0, s = (t == null ? void 0 : t.availWidth) || (t == null ? void 0 : t.width) || 1200, o = (t == null ? void 0 : t.availHeight) || (t == null ? void 0 : t.height) || 800, c = (e == null ? void 0 : e.left) ?? (n == null ? void 0 : n.screenX) ?? (n == null ? void 0 : n.screenLeft) ?? 0, d = (e == null ? void 0 : e.top) ?? (n == null ? void 0 : n.screenY) ?? (n == null ? void 0 : n.screenTop) ?? 0, f = Math.min(756, Math.max(600, Math.floor(s * 0.444))), a = Math.min(784, Math.max(624, Math.floor(o * 0.688))), b = 96, l = 48;
-  let u = c + b, h = d + l;
-  return u + f > r + s && (u = Math.max(r, r + s - f)), h + a > i + o && (h = Math.max(i, i + o - a)), u = Math.max(r, Math.min(u, r + s - f)), h = Math.max(i, Math.min(h, i + o - a)), {
-    width: f,
-    height: a,
-    left: Math.floor(u),
-    top: Math.floor(h)
+var Ur = { width: 336, height: 288 };
+var Mr = "castViewer-reporting";
+var Pr = "castViewer-worklist";
+function Rr(e = null) {
+  const t = typeof globalThis < "u" ? globalThis.screen : null, n = typeof globalThis < "u" && globalThis.window ? globalThis.window : null, i = Number(t == null ? void 0 : t.availLeft) || 0, r = Number(t == null ? void 0 : t.availTop) || 0, s = (t == null ? void 0 : t.availWidth) || (t == null ? void 0 : t.width) || 1200, o = (t == null ? void 0 : t.availHeight) || (t == null ? void 0 : t.height) || 800, c = (e == null ? void 0 : e.left) ?? (n == null ? void 0 : n.screenX) ?? (n == null ? void 0 : n.screenLeft) ?? 0, l = (e == null ? void 0 : e.top) ?? (n == null ? void 0 : n.screenY) ?? (n == null ? void 0 : n.screenTop) ?? 0, h = Math.max(
+    1,
+    Number(
+      (e == null ? void 0 : e.width) ?? (n == null ? void 0 : n.outerWidth) ?? Math.floor(s * 0.5)
+    ) || Math.floor(s * 0.5)
+  ), a = Math.min(756, Math.max(600, Math.floor(s * 0.444))), u = Math.min(784, Math.max(624, Math.floor(o * 0.688))), f = Math.max(0, Math.floor(h * 0.1));
+  let d = c + h - f, b = l;
+  return d + a > i + s && (d = Math.max(i, i + s - a)), b + u > r + o && (b = Math.max(r, r + o - u)), d = Math.max(i, Math.min(d, i + s - a)), b = Math.max(r, Math.min(b, r + o - u)), {
+    width: a,
+    height: u,
+    left: Math.floor(d),
+    top: Math.floor(b)
   };
 }
-function nr(e) {
+function Fr(e) {
   return [
     "popup",
     `width=${e.width}`,
@@ -11126,20 +12118,20 @@ function nr(e) {
     `top=${e.top}`
   ].join(",");
 }
-function rr(e, t) {
+function Or(e, t) {
   if (!(!e || !t))
     try {
       e.resizeTo(t.width, t.height), e.moveTo(t.left, t.top), e.focus();
     } catch {
     }
 }
-function ir(e, t, n = { width: 800, height: 600 }) {
+function Dr(e, t, n = { width: 800, height: 600 }) {
   if (!e || typeof window > "u")
     return;
-  const r = n.width, i = n.height, s = Math.max(0, Math.floor((window.screen.width - r) / 2)), o = Math.max(0, Math.floor((window.screen.height - i) / 2)), c = [
+  const i = n.width, r = n.height, s = Math.max(0, Math.floor((window.screen.width - i) / 2)), o = Math.max(0, Math.floor((window.screen.height - r) / 2)), c = [
     "popup",
-    `width=${r}`,
-    `height=${i}`,
+    `width=${i}`,
+    `height=${r}`,
     `left=${s}`,
     `top=${o}`,
     "noopener",
@@ -11147,222 +12139,582 @@ function ir(e, t, n = { width: 800, height: 600 }) {
   ].join(",");
   window.open(e, t, c);
 }
-var sr = 3e4;
-var Dt = 1200;
-var Mt = [
-  "Test conference",
+var Br = 3e4;
+var sn = 1200;
+var an = [
+  "ST-444 \xB7 Anatomie humaine",
   "US annotations",
   "Tumor Board",
   "Case discussion",
   "Pedicle screw"
 ];
-function Je(e, t) {
-  const n = te(e);
+function be(e, t) {
+  const n = he(e);
   return n ? new URL(t, n.origin).href : null;
 }
-function Ye(e) {
+function dt(e) {
   if (!Array.isArray(e))
     return [];
   const t = /* @__PURE__ */ new Set();
   return e.map((n) => String(n ?? "").trim()).filter((n) => !n || t.has(n) ? false : (t.add(n), true));
 }
-function ne(e) {
+function D(e) {
   return String((e == null ? void 0 : e.hostTopic) ?? (e == null ? void 0 : e.user) ?? "").trim();
 }
-function Ke(e, t) {
-  const n = ne(t), r = String(e ?? "").trim();
-  return !r || !n ? false : r === n || r.toLowerCase() === n.toLowerCase();
+function ht(e) {
+  const t = D(e);
+  return String((e == null ? void 0 : e.sceneLeaderTopic) ?? "").trim() || t;
 }
-function Xe(e, t, n) {
-  const r = String(e ?? "").trim(), i = String(t ?? "").trim(), s = ne(n), o = Array.isArray(n == null ? void 0 : n.topics) ? n.topics.map((c) => String(c).trim()).filter(Boolean) : [];
-  return !!(r && (r === s || o.includes(r)) || i && i === s);
+function bt(e, t) {
+  const n = D(t), i = String(e ?? "").trim();
+  return !i || !n ? false : i === n || i.toLowerCase() === n.toLowerCase();
 }
-function Y(e, t, n) {
+function cn(e, t) {
+  const n = ht(t), i = String(e ?? "").trim();
+  return !i || !n ? false : i === n || i.toLowerCase() === n.toLowerCase();
+}
+function mt(e, t, n) {
+  const i = String(e ?? "").trim(), r = String(t ?? "").trim(), s = D(n), o = Array.isArray(n == null ? void 0 : n.topics) ? n.topics.map((c) => String(c).trim()).filter(Boolean) : [];
+  return !!(i && (i === s || o.includes(i)) || r && r === s);
+}
+function ae(e, t, n) {
   return n.find(
-    (r) => Xe(e, t, r)
+    (i) => mt(e, t, i)
   ) || null;
 }
-async function Bt(e) {
-  const t = Je(e, "/api/hub/conference-topics");
+async function un(e) {
+  const t = be(e, "/api/hub/conference-topics");
   if (!t)
     return [];
   try {
     const n = await fetch(t);
     if (!n.ok)
       return [];
-    const r = await n.json();
-    return Array.isArray(r) ? r.map((i) => String(i).trim()).filter((i) => i && i !== "*") : [];
+    const i = await n.json();
+    return Array.isArray(i) ? i.map((r) => String(r).trim()).filter((r) => r && r !== "*") : [];
   } catch {
     return [];
   }
 }
-async function K(e) {
-  const t = te(e);
+async function ce(e) {
+  const t = he(e);
   if (!t)
     return [];
   const n = new URL("/api/hub/conference", t.origin).href;
   try {
-    const r = await fetch(n);
-    if (!r.ok)
+    const i = await fetch(n);
+    if (!i.ok)
       return [];
-    const i = await r.json();
-    return Array.isArray(i) ? i : [];
+    const r = await i.json();
+    return Array.isArray(r) ? r : [];
   } catch {
     return [];
   }
 }
-async function Ft(e, t, n, r, i) {
-  const s = Je(e, "/api/hub/conference");
+async function ln(e, t, n, i, r) {
+  const s = be(e, "/api/hub/conference");
   if (!s)
     throw new Error("Invalid hub endpoint");
   const o = {
     hostTopic: String(t).trim(),
     title: String(n).trim(),
-    topics: r
-  }, c = String(i ?? "").trim();
+    topics: i
+  }, c = String(r ?? "").trim();
   c && (o.hostUserName = c);
-  const d = await fetch(s, {
+  const l = await fetch(s, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(o)
   });
-  if (!d.ok) {
-    const f = await d.text();
-    throw new Error(f || `HTTP ${d.status}`);
+  if (!l.ok) {
+    const h = await l.text();
+    throw new Error(h || `HTTP ${l.status}`);
   }
 }
-async function Ze(e, t, n) {
-  const r = Je(e, "/api/hub/conference");
+async function fn(e, t, n, i) {
+  const r = be(e, "/api/hub/conference/join");
   if (!r)
     throw new Error("Invalid hub endpoint");
-  const i = { hostTopic: String(t).trim() }, s = n == null ? void 0 : n.trim();
-  s && (i.leaveTopic = s);
-  const o = await fetch(r, {
+  const s = {
+    hostTopic: String(t).trim(),
+    joinTopic: String(n).trim()
+  }, o = String(i ?? "").trim();
+  o && (s.joinUserName = o);
+  const c = await fetch(r, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(s)
+  });
+  if (!c.ok) {
+    const l = await c.text();
+    throw new Error(l || `HTTP ${c.status}`);
+  }
+}
+async function pt(e, t, n) {
+  const i = be(e, "/api/hub/conference");
+  if (!i)
+    throw new Error("Invalid hub endpoint");
+  const r = { hostTopic: String(t).trim() }, s = n == null ? void 0 : n.trim();
+  s && (r.leaveTopic = s);
+  const o = await fetch(i, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(i)
+    body: JSON.stringify(r)
   });
   if (!o.ok) {
     const c = await o.text();
     throw new Error(c || `HTTP ${o.status}`);
   }
 }
-async function or(e, t, n) {
-  const r = await K(e), i = Y(t, n, r);
+async function jr(e, t, n, i) {
+  const r = be(e, "/api/hub/conference/lead");
+  if (!r)
+    throw new Error("Invalid hub endpoint");
+  const s = {
+    hostTopic: String(t).trim(),
+    sceneLeaderTopic: String(n).trim()
+  }, o = String(i ?? "").trim();
+  o && (s.leaderUserName = o);
+  const c = await fetch(r, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(s)
+  });
+  if (!c.ok) {
+    const l = await c.text();
+    throw new Error(l || `HTTP ${c.status}`);
+  }
+  try {
+    return await c.json();
+  } catch {
+    return { status: "updated" };
+  }
+}
+async function Hr(e, t, n) {
+  const i = await ce(e), r = ae(t, n, i);
   return {
-    active: !!i,
-    title: String((i == null ? void 0 : i.title) ?? "").trim(),
-    participants: Ye(i == null ? void 0 : i.participants)
+    active: !!r,
+    title: String((r == null ? void 0 : r.title) ?? "").trim(),
+    participants: dt(r == null ? void 0 : r.participants)
   };
 }
-function Qe(e, t) {
+function gt(e, t) {
   if (!t)
     return null;
-  const n = String((e == null ? void 0 : e.topic) ?? "").trim(), r = String((e == null ? void 0 : e.subscriberName) ?? "").trim(), i = String((e == null ? void 0 : e.userName) ?? "").trim(), s = ne(t);
-  if (!s || !Xe(n, r, t))
+  const n = String((e == null ? void 0 : e.topic) ?? "").trim(), i = String((e == null ? void 0 : e.subscriberName) ?? "").trim(), r = String((e == null ? void 0 : e.userName) ?? "").trim(), s = D(t);
+  if (!s || !mt(n, i, t))
     return null;
-  const o = Array.isArray(t.topics) ? t.topics.map((u) => String(u).trim()).filter(Boolean) : [], c = Ye(t.participants), d = [], f = /* @__PURE__ */ new Set();
-  for (const u of [n, s, ...o])
-    !u || f.has(u) || (f.add(u), d.push(u));
-  const a = Ke(n, t) ? "leading" : "following", b = s, l = d.map((u) => {
-    const h = !!n && (u === n || u.toLowerCase() === n.toLowerCase()), m = u === b || u.toLowerCase() === b.toLowerCase(), y = m && a === "following";
-    let S = "";
-    return h ? S = a === "leading" ? "You \xB7 leading" : "You" : y ? S = "Following" : a === "leading" && (S = "Following you"), {
-      placeId: u,
-      label: h && i ? i : u,
-      isSelf: h,
-      isLeading: m,
+  const o = Array.isArray(t.topics) ? t.topics.map((b) => String(b).trim()).filter(Boolean) : [], c = dt(t.participants), l = [], h = /* @__PURE__ */ new Set();
+  for (const b of [n, s, ...o])
+    !b || h.has(b) || (h.add(b), l.push(b));
+  const a = ht(t), u = bt(n, t), f = cn(n, t) ? "leading" : "following", d = l.map((b) => {
+    const m = !!n && (b === n || b.toLowerCase() === n.toLowerCase()), g = b === a || b.toLowerCase() === a.toLowerCase(), y = g && f === "following";
+    let N = "";
+    return m ? N = f === "leading" ? "You \xB7 leading" : "You" : y ? N = "Following" : f === "leading" && (N = "Following you"), {
+      placeId: b,
+      label: m && r ? r : b,
+      isSelf: m,
+      isLeading: g,
       isFollowing: y,
-      statusLabel: S
+      statusLabel: N
     };
   });
   return {
     title: String(t.title ?? "").trim(),
-    places: l,
+    places: d,
     selfPlaceId: n,
-    leadingPlaceId: b,
-    selfRole: a,
+    leadingPlaceId: a,
+    selfRole: f,
+    isConferenceOwner: u,
     hostTopic: s,
+    sceneLeaderTopic: a,
     attendeeTopics: o,
     participants: c
   };
 }
-async function jt(e, t, n, r) {
-  const i = await K(e), s = Y(t, n, i);
-  return Qe({ topic: t, subscriberName: n, userName: r }, s);
+async function dn(e, t, n, i) {
+  const r = await ce(e), s = ae(t, n, r);
+  return gt({ topic: t, subscriberName: n, userName: i }, s);
+}
+var Qe = Object.freeze({
+  // Dialog shell
+  dialogTitle: "Conferencing",
+  close: "Close",
+  closeAria: "Close",
+  // Create
+  createSection: "Create a conference",
+  conferenceTitle: "Conference title",
+  selectConferenceTitle: "Select a conference title",
+  otherTitle: "Other\u2026",
+  customTitle: "Custom title",
+  customTitlePlaceholder: "Enter conference title",
+  users: "Users",
+  loadingUsers: "Loading users\u2026",
+  noUsers: "No users available",
+  createConference: "Create conference",
+  creating: "Creating\u2026",
+  // Join
+  joinSection: "Join a conference",
+  activeConferences: "Active conferences",
+  noConferences: "No conferences available",
+  selectConference: "Select a conference",
+  untitled: "Untitled",
+  joinConference: "Join conference",
+  joining: "Joining\u2026",
+  // Manage
+  manageSection: "Manage conference",
+  titleLabel: "Title:",
+  na: "N/A",
+  participants: "Participants",
+  noPlaces: "No places",
+  leaveConference: "Leave conference",
+  endConference: "End conference",
+  ending: "Ending\u2026",
+  leaving: "Leaving\u2026",
+  conferenceEnded: "Conference ended.",
+  leftConference: "Left conference.",
+  // Errors / status
+  connectHubFirst: "Connect to the Cast hub first.",
+  topicRequiredHost: "Cast topic is required to host a conference.",
+  topicRequiredJoin: "Cast topic is required to join a conference.",
+  titleRequired: "Conference title is required.",
+  selectAttendee: "Select at least one attendee topic.",
+  selectConferenceToJoin: "Select a conference to join.",
+  failedCreate: "Failed to create conference.",
+  failedJoin: "Failed to join conference.",
+  failedUpdate: "Failed to update conference.",
+  // Invite
+  inviteTitle: "Conference invitation",
+  joinAndFollow: "Join and follow",
+  joinNoFollow: "Join but do not follow",
+  doNotJoin: "Do not join",
+  hostFallback: "host",
+  /** {{title}} — join and follow {{host}}? */
+  inviteLeadWithTitle: "{{title}} \u2014 join and follow {{host}}?",
+  /** Join conference and follow {{host}}? */
+  inviteLeadNoTitle: "Join conference and follow {{host}}?",
+  /** Join and follow {{host}} */
+  joinAndFollowHost: "Join and follow {{host}}",
+  // Takeover
+  takeoverTitle: "Take over?",
+  takeoverBody: "The host and all participants will be notified that you are taking over. You will lead scene updates for this conference.",
+  cancel: "Cancel",
+  takeOver: "Take over",
+  // Header
+  conferencing: "Conferencing",
+  subscribeHubFirst: "Subscribe to the hub first",
+  stopFollowing: "Stop following",
+  resumeFollowing: "Resume following"
+});
+function ie(e, t = {}) {
+  return String(e || "").replace(
+    /\{\{(\w+)\}\}/g,
+    (n, i) => t[i] != null ? String(t[i]) : ""
+  );
+}
+function W(e) {
+  return !e || typeof e != "object" ? { ...Qe } : { ...Qe, ...e };
+}
+function M(e, t) {
+  return `${e}-${t}`;
+}
+function yt(e) {
+  var i;
+  if (!((i = e == null ? void 0 : e.places) != null && i.length)) return null;
+  const t = e.places.find((r) => r && r.isLeading);
+  if (t) return t;
+  const n = String(e.leadingPlaceId || "").trim();
+  return n && e.places.find(
+    (r) => r && (r.placeId === n || r.placeId.toLowerCase() === n.toLowerCase())
+  ) || null;
+}
+function hn(e, t = true) {
+  return e != null && e.isFollowing ? t ? "Following" : "Skipping" : String((e == null ? void 0 : e.statusLabel) || "").trim();
+}
+function Ct(e, t, n = "short", i = true, r = "") {
+  if ((t === "leading" || t === "following" ? t : e != null && e.isLeading ? "leading" : "following") === "leading")
+    return n === "full" ? "You \xB7 leading" : "Leading";
+  const o = String(r || "").trim();
+  if (!i)
+    return o ? `Skipping ${o}` : n === "full" ? "You \xB7 skipping" : "Skipping";
+  if (o) return `Following ${o}`;
+  if (n === "full") {
+    const c = String((e == null ? void 0 : e.statusLabel) || "").trim();
+    return c || "You";
+  }
+  return "Following";
+}
+function bn(e, t, n = true) {
+  if (!e) return "";
+  if (e.isSelf) {
+    const i = yt(t);
+    return Ct(
+      e,
+      t == null ? void 0 : t.selfRole,
+      "short",
+      n,
+      i && !i.isSelf ? i.label : ""
+    );
+  }
+  return hn(e, n);
+}
+function qr(e, t) {
+  e.classList.remove(t, `${t}-leading`);
+  const n = e.querySelector("[data-cast-conference-role]");
+  n instanceof HTMLElement && (n.hidden = true, n.textContent = "");
+}
+function mn(e, t, n, i, r) {
+  const s = (t.places || []).filter((o) => o && (r || !o.isSelf));
+  for (const o of s) {
+    const c = document.createElement("div");
+    c.className = M(n, "chip"), c.setAttribute("role", "listitem"), o.isSelf && c.classList.add(M(n, "chip-self")), o.isLeading && c.classList.add(M(n, "chip-leading")), o.isFollowing && (c.classList.add(M(n, "chip-following")), i || c.classList.add(M(n, "chip-skipping")));
+    const l = bn(
+      o,
+      t,
+      i
+    ), h = document.createElement("span");
+    h.className = M(n, "chip-name"), h.textContent = o.label;
+    const a = [o.label, l, o.placeId].map((u) => String(u || "").trim()).filter(Boolean).join(" \u2014 ");
+    if (h.title = a, c.title = a, c.append(h), l) {
+      const u = document.createElement("span");
+      u.className = M(n, "chip-status"), u.textContent = l, c.append(u);
+    }
+    e.append(c);
+  }
+}
+function zr(e) {
+  var g;
+  const t = (e == null ? void 0 : e.view) ?? null, n = e == null ? void 0 : e.statusControl, i = (e == null ? void 0 : e.chipsHost) instanceof HTMLElement ? e.chipsHost : null, r = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim() || "cast-conference", s = String((e == null ? void 0 : e.statusClassPrefix) || M(r, "user")).trim() || M(r, "user"), o = (e == null ? void 0 : e.selfStatusMode) === "full" ? "full" : "short", c = (e == null ? void 0 : e.followHost) !== false, l = M(r, "chip-status");
+  if (!(n instanceof HTMLElement))
+    return;
+  if (!!!((g = t == null ? void 0 : t.places) != null && g.length)) {
+    qr(n, s), i && (i.replaceChildren(), i.hidden = true), O();
+    return;
+  }
+  const a = t.places.find((y) => y && y.isSelf) || null, u = yt(t), f = t.selfRole === "leading" || !!(a != null && a.isLeading), d = u && !u.isSelf ? String(u.label || "").trim() : "";
+  n.classList.add(s), n.classList.toggle(`${s}-leading`, f);
+  let b = n.querySelector("[data-cast-conference-role]");
+  if (b instanceof HTMLElement || (b = document.createElement("span"), b.dataset.castConferenceRole = "1", n.append(b)), b.className = l, b.hidden = false, b.textContent = Ct(
+    a,
+    t.selfRole,
+    o,
+    c,
+    d
+  ), !i)
+    return;
+  if (i.replaceChildren(), !t.places.filter((y) => y && !y.isSelf).length) {
+    i.hidden = true;
+    return;
+  }
+  i.hidden = false, mn(i, t, r, c, false);
+}
+var H = null;
+function O() {
+  H && (H.cleanup(), H = null);
+}
+function Wr() {
+  return !!H;
+}
+function Gr(e) {
+  var m;
+  const t = e == null ? void 0 : e.anchor, n = (e == null ? void 0 : e.view) ?? null, i = (e == null ? void 0 : e.followHost) !== false, r = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim() || "cast-conference", s = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
+  if (!(t instanceof HTMLElement) || !s || !((m = n == null ? void 0 : n.places) != null && m.length))
+    return O(), { close: O, open: false };
+  if (H) {
+    const g = H.panel.__castAnchor === t;
+    if (O(), g)
+      return { close: O, open: false };
+  }
+  const o = document.createElement("div");
+  o.className = M(r, "participants-popup"), o.setAttribute("role", "dialog"), o.setAttribute("aria-label", "Conference participants"), o.dataset.castParticipantsPopup = "1", o.__castAnchor = t;
+  const c = document.createElement("div");
+  c.className = M(r, "participants-popup-title"), c.textContent = "Participants", o.append(c);
+  const l = document.createElement("div");
+  l.className = M(r, "participants-popup-list"), l.setAttribute("role", "list"), mn(l, n, r, i, true), o.append(l), s.appendChild(o);
+  const h = () => {
+    const g = t.getBoundingClientRect(), y = 6, N = Math.max(220, Math.min(320, o.offsetWidth || 260));
+    let T = g.left, L = g.bottom + y;
+    const A = window.innerWidth - N - 8;
+    T > A && (T = Math.max(8, A)), L + o.offsetHeight > window.innerHeight - 8 && (L = Math.max(8, g.top - o.offsetHeight - y)), o.style.position = "fixed", o.style.left = `${Math.round(T)}px`, o.style.top = `${Math.round(L)}px`, o.style.zIndex = "10030", o.style.minWidth = "220px", o.style.maxWidth = "320px";
+  };
+  h();
+  const a = (g) => {
+    const y = g.target;
+    y instanceof Node && (o.contains(y) || t.contains(y) || O());
+  }, u = (g) => {
+    g.key === "Escape" && O();
+  }, f = () => h(), d = window.setTimeout(() => {
+    document.addEventListener("pointerdown", a, true);
+  }, 0);
+  return document.addEventListener("keydown", u, true), window.addEventListener("resize", f), H = { panel: o, cleanup: () => {
+    window.clearTimeout(d), document.removeEventListener("pointerdown", a, true), document.removeEventListener("keydown", u, true), window.removeEventListener("resize", f), o.remove();
+  } }, requestAnimationFrame(h), { close: O, open: true };
+}
+function pn(e = {}) {
+  var f;
+  const t = W(e.strings), n = e.view ?? null, i = !!e.followHost, r = !!e.connected, s = !!((f = n == null ? void 0 : n.places) != null && f.length), o = (n == null ? void 0 : n.selfRole) === "leading", l = !!(n != null && n.isConferenceOwner) ? t.endConference : t.leaveConference, h = s && !o && i, a = s && !o && !i, u = r ? t.conferencing : t.subscribeHubFirst;
+  return {
+    active: s,
+    start: {
+      hidden: s,
+      disabled: !r || s,
+      label: t.conferencing,
+      title: u,
+      ariaLabel: t.conferencing
+    },
+    leave: {
+      hidden: !s,
+      disabled: !r || !s,
+      label: l,
+      title: l,
+      ariaLabel: l
+    },
+    stopFollowing: {
+      hidden: !h,
+      label: t.stopFollowing,
+      title: t.stopFollowing,
+      ariaLabel: t.stopFollowing
+    },
+    resumeFollowing: {
+      hidden: !a,
+      label: t.resumeFollowing,
+      title: t.resumeFollowing,
+      ariaLabel: t.resumeFollowing
+    },
+    takeOver: {
+      hidden: !a,
+      disabled: !r || !a,
+      label: t.takeOver,
+      title: t.takeOver,
+      ariaLabel: t.takeOver
+    }
+  };
+}
+function re(e, t) {
+  e instanceof HTMLElement && (typeof t.hidden == "boolean" && (e.hidden = t.hidden), typeof t.disabled == "boolean" && "disabled" in e && (e.disabled = t.disabled, t.disabled || e.removeAttribute("disabled")), typeof t.label == "string" && (e.textContent = t.label), typeof t.title == "string" && (e.title = t.title), typeof t.ariaLabel == "string" && e.setAttribute("aria-label", t.ariaLabel));
+}
+function Vr(e = {}) {
+  const t = pn({
+    view: e.view,
+    followHost: e.followHost,
+    connected: e.connected,
+    strings: e.strings
+  });
+  return re(e.startBtn, t.start), re(e.endBtn, t.leave), re(e.stopFollowBtn, t.stopFollowing), re(e.resumeFollowBtn, t.resumeFollowing), re(e.takeOverBtn, t.takeOver), t;
 }
 function C(e, t) {
   return `${e}-${t}`;
 }
-function D(e) {
+function j(e) {
   return String(e ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function ar(e) {
-  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, r = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim(), i = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
-  if (!i)
+function Jr(e, t) {
+  const n = String(e || "").trim();
+  if (!n) return false;
+  const i = D(t);
+  return i && (i === n || i.toLowerCase() === n.toLowerCase()) ? true : (Array.isArray(t == null ? void 0 : t.topics) ? t.topics : []).some((s) => {
+    const o = String(s || "").trim();
+    return o === n || o.toLowerCase() === n.toLowerCase();
+  });
+}
+function Zr(e) {
+  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, i = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, r = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim(), s = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
+  if (!s)
     throw new Error("createCastConferenceDialog requires a DOM root");
-  let s = null, o = false;
-  const c = document.createElement("div");
-  c.className = C(r, "overlay"), c.hidden = true, c.innerHTML = `
+  let o = W(e == null ? void 0 : e.strings), c = null, l = false, h = null;
+  const a = document.createElement("div");
+  a.className = C(r, "overlay"), a.hidden = true, a.innerHTML = `
     <div class="${C(r, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${C(r, "title")}" tabindex="-1">
       <div class="${C(r, "header")}">
-        <h2 id="${C(r, "title")}" class="${C(r, "title")}">Conferencing</h2>
-        <button type="button" class="${C(r, "close")}" data-cast-conference-close aria-label="Close">\xD7</button>
+        <h2 id="${C(r, "title")}" class="${C(r, "title")}" data-cast-conference-dialog-title></h2>
+        <button type="button" class="${C(r, "close")}" data-cast-conference-close aria-label="">\xD7</button>
       </div>
       <div class="${C(r, "body")}">
         <p class="${C(r, "status")}" data-cast-conference-status role="alert" hidden></p>
         <div data-cast-conference-create>
-          <div class="${C(r, "field")}">
-            <label class="${C(r, "label")}" for="${C(r, "title-select")}">Conference title</label>
-            <select id="${C(r, "title-select")}" class="${C(r, "select")}" data-cast-conference-title-select>
-              <option value="">Select a conference title</option>
-              ${Mt.map(
-    (p) => `<option value="${D(p)}"${p === "Test conference" ? " selected" : ""}>${D(p)}</option>`
-  ).join("")}
-              <option value="other">Other\u2026</option>
-            </select>
-          </div>
-          <div class="${C(r, "field")}" data-cast-conference-custom-group hidden>
-            <label class="${C(r, "label")}" for="${C(r, "custom-title")}">Custom title</label>
-            <input id="${C(r, "custom-title")}" class="${C(r, "input")}" type="text" placeholder="Enter conference title" data-cast-conference-custom-title />
-          </div>
-          <div class="${C(r, "field")}">
-            <span class="${C(r, "label")}">Users</span>
-            <div class="${C(r, "topics")}" data-cast-conference-topics>
-              <p class="${C(r, "muted")}">Loading users\u2026</p>
+          <div class="${C(r, "section")}">
+            <div class="${C(r, "section-title")}" data-cast-conference-create-section></div>
+            <div class="${C(r, "field")}">
+              <label class="${C(r, "label")}" for="${C(r, "title-select")}" data-cast-conference-title-label></label>
+              <select id="${C(r, "title-select")}" class="${C(r, "select")}" data-cast-conference-title-select>
+              </select>
             </div>
+            <div class="${C(r, "field")}" data-cast-conference-custom-group hidden>
+              <label class="${C(r, "label")}" for="${C(r, "custom-title")}" data-cast-conference-custom-label></label>
+              <input id="${C(r, "custom-title")}" class="${C(r, "input")}" type="text" data-cast-conference-custom-title />
+            </div>
+            <div class="${C(r, "field")}">
+              <span class="${C(r, "label")}" data-cast-conference-users-label></span>
+              <div class="${C(r, "topics")}" data-cast-conference-topics>
+                <p class="${C(r, "muted")}" data-cast-conference-loading-users></p>
+              </div>
+            </div>
+            <button type="button" class="${C(r, "primary")}" data-cast-conference-create-btn></button>
           </div>
-          <button type="button" class="${C(r, "primary")}" data-cast-conference-create-btn>Create conference</button>
+          <div class="${C(r, "section")}" data-cast-conference-join-section>
+            <div class="${C(r, "section-title")}" data-cast-conference-join-section-title></div>
+            <div class="${C(r, "field")}">
+              <label class="${C(r, "label")}" for="${C(r, "join-select")}" data-cast-conference-active-label></label>
+              <select id="${C(r, "join-select")}" class="${C(r, "select")}" data-cast-conference-join-select>
+              </select>
+            </div>
+            <button type="button" class="${C(r, "primary")}" data-cast-conference-join-btn disabled></button>
+          </div>
         </div>
         <div data-cast-conference-manage hidden>
-          <div class="${C(r, "label")}">Manage conference</div>
+          <div class="${C(r, "label")}" data-cast-conference-manage-label></div>
           <div class="${C(r, "info")}" data-cast-conference-info></div>
-          <button type="button" class="${C(r, "primary")}" data-cast-conference-exit-btn>Leave conference</button>
+          <button type="button" class="${C(r, "primary")}" data-cast-conference-exit-btn></button>
         </div>
       </div>
       <div class="${C(r, "actions")}">
-        <button type="button" class="${C(r, "secondary")}" data-cast-conference-close>Close</button>
+        <button type="button" class="${C(r, "secondary")}" data-cast-conference-close data-cast-conference-close-label></button>
       </div>
     </div>
-  `, i.appendChild(c);
-  const d = c.querySelector(`.${C(r, "dialog")}`), f = c.querySelector("[data-cast-conference-status]"), a = c.querySelector("[data-cast-conference-create]"), b = c.querySelector("[data-cast-conference-manage]"), l = c.querySelector("[data-cast-conference-title-select]"), u = c.querySelector("[data-cast-conference-custom-group]"), h = c.querySelector("[data-cast-conference-custom-title]"), m = c.querySelector("[data-cast-conference-topics]"), y = c.querySelector("[data-cast-conference-info]"), S = c.querySelector("[data-cast-conference-create-btn]"), g = c.querySelector("[data-cast-conference-exit-btn]");
-  function E(p, I2) {
+  `, s.appendChild(a);
+  const u = a.querySelector(`.${C(r, "dialog")}`), f = a.querySelector("[data-cast-conference-status]"), d = a.querySelector("[data-cast-conference-create]"), b = a.querySelector("[data-cast-conference-manage]");
+  a.querySelector("[data-cast-conference-join-section]");
+  const m = a.querySelector("[data-cast-conference-title-select]"), g = a.querySelector("[data-cast-conference-custom-group]"), y = a.querySelector("[data-cast-conference-custom-title]"), N = a.querySelector("[data-cast-conference-topics]"), T = a.querySelector("[data-cast-conference-join-select]"), L = a.querySelector("[data-cast-conference-info]"), A = a.querySelector("[data-cast-conference-create-btn]"), S = a.querySelector("[data-cast-conference-join-btn]"), x = a.querySelector("[data-cast-conference-exit-btn]");
+  function U() {
+    if (!(m instanceof HTMLSelectElement)) return;
+    const p = String(m.value || "");
+    m.replaceChildren();
+    const E = document.createElement("option");
+    E.value = "", E.textContent = o.selectConferenceTitle, m.appendChild(E);
+    for (const v of an) {
+      const k = document.createElement("option");
+      k.value = v, k.textContent = v, v === "ST-444 \xB7 Anatomie humaine" && (k.selected = true), m.appendChild(k);
+    }
+    const w = document.createElement("option");
+    w.value = "other", w.textContent = o.otherTitle, m.appendChild(w), p && [...m.options].some((v) => v.value === p) && (m.value = p);
+  }
+  function kt() {
+    const p = (E, w) => {
+      const v = a.querySelector(E);
+      v && (v.textContent = w);
+    };
+    p("[data-cast-conference-dialog-title]", o.dialogTitle), p("[data-cast-conference-create-section]", o.createSection), p("[data-cast-conference-title-label]", o.conferenceTitle), p("[data-cast-conference-custom-label]", o.customTitle), p("[data-cast-conference-users-label]", o.users), p("[data-cast-conference-loading-users]", o.loadingUsers), p("[data-cast-conference-join-section-title]", o.joinSection), p("[data-cast-conference-active-label]", o.activeConferences), p("[data-cast-conference-manage-label]", o.manageSection), A && (A.textContent = o.createConference), S && (S.textContent = o.joinConference), x && (x.textContent = c != null && c.isConferenceOwner ? o.endConference : o.leaveConference), a.querySelectorAll("[data-cast-conference-close]").forEach((E) => {
+      E instanceof HTMLElement && (E.setAttribute("aria-label", o.closeAria), E.hasAttribute("data-cast-conference-close-label") && (E.textContent = o.close));
+    }), y instanceof HTMLInputElement && (y.placeholder = o.customTitlePlaceholder), U();
+  }
+  kt();
+  function $2(p, E) {
     if (!f)
       return;
-    const T = String(I2 || "").trim();
+    const w = String(E || "").trim();
     if (f.classList.remove(
       C(r, "status-success"),
       C(r, "status-error")
-    ), !T) {
+    ), !w) {
       f.hidden = true, f.textContent = "";
       return;
     }
-    f.hidden = false, f.textContent = T, p === "success" ? f.classList.add(C(r, "status-success")) : p === "error" && f.classList.add(C(r, "status-error"));
+    f.hidden = false, f.textContent = w, p === "success" ? f.classList.add(C(r, "status-success")) : p === "error" && f.classList.add(C(r, "status-error"));
   }
-  function w(p) {
-    s = p, n && n(p);
+  function We(p) {
+    c = p, n && n(p);
   }
-  function L() {
+  function Se() {
     const p = t() || {};
     return {
       hubEndpoint: String(p.hubEndpoint ?? "").trim(),
@@ -11372,184 +12724,277 @@ function ar(e) {
       connected: !!p.connected
     };
   }
-  function $2() {
-    const p = String((l == null ? void 0 : l.value) || "").trim();
-    return p === "other" ? String((h == null ? void 0 : h.value) || "").trim() : p;
+  function zn() {
+    const p = String((m == null ? void 0 : m.value) || "").trim();
+    return p === "other" ? String((y == null ? void 0 : y.value) || "").trim() : p;
   }
-  function ut() {
-    return m ? Array.from(
-      m.querySelectorAll(
+  function Wn() {
+    return N ? Array.from(
+      N.querySelectorAll(
         'input[type="checkbox"][data-cast-conference-topic]:checked'
       )
     ).map((p) => String(p.value || "").trim()).filter(Boolean) : [];
   }
-  function P2(p, I2) {
-    if (m) {
-      if (m.replaceChildren(), !p.length) {
-        const T = document.createElement("p");
-        T.className = C(r, "muted"), T.textContent = "No users available", m.appendChild(T);
+  function It(p) {
+    if (N) {
+      if (N.replaceChildren(), !p.length) {
+        const E = document.createElement("p");
+        E.className = C(r, "muted"), E.textContent = o.noUsers, N.appendChild(E);
         return;
       }
-      for (const T of p) {
-        const N = document.createElement("label");
-        N.className = C(r, "topic-row");
-        const A = document.createElement("input");
-        A.type = "checkbox", A.dataset.castConferenceTopic = "1", A.value = T, A.checked = true;
-        const U = document.createElement("span");
-        U.textContent = T, N.appendChild(A), N.appendChild(U), m.appendChild(N);
+      for (const E of p) {
+        const w = document.createElement("label");
+        w.className = C(r, "topic-row");
+        const v = document.createElement("input");
+        v.type = "checkbox", v.dataset.castConferenceTopic = "1", v.value = E, v.checked = true;
+        const k = document.createElement("span");
+        k.textContent = E, w.appendChild(v), w.appendChild(k), N.appendChild(w);
       }
     }
   }
-  function lt(p) {
-    if (a && (a.hidden = !!p), b && (b.hidden = !p), p && y) {
-      const I2 = p.places.length ? `<div class="${C(r, "places")}">${p.places.map((T) => {
-        const N = [C(r, "place")];
-        T.isSelf && N.push(C(r, "place-self")), T.isLeading && N.push(C(r, "place-leading")), T.isFollowing && N.push(C(r, "place-following"));
-        const A = T.statusLabel ? `<span class="${C(r, "place-status")}">${D(
-          T.statusLabel
+  function $t(p, E) {
+    if (!T || !S) return;
+    const w = (Array.isArray(p) ? p : []).filter(
+      (I2) => I2 && typeof I2 == "object" && !Jr(
+        E,
+        /** @type {Record<string, unknown>} */
+        I2
+      )
+    ), v = String(T.value || "");
+    if (T.replaceChildren(), !w.length) {
+      const I2 = document.createElement("option");
+      I2.value = "", I2.textContent = o.noConferences, T.appendChild(I2), T.disabled = true, S.disabled = true;
+      return;
+    }
+    const k = document.createElement("option");
+    k.value = "", k.textContent = o.selectConference, T.appendChild(k);
+    for (const I2 of w) {
+      const G = (
+        /** @type {Record<string, unknown>} */
+        I2
+      ), ne = D(G), we = String(G.title || "").trim() || o.untitled, Je = document.createElement("option");
+      Je.value = ne, Je.textContent = `${we} \u2014 ${ne}`, T.appendChild(Je);
+    }
+    T.disabled = false, v && w.some((I2) => D(
+      /** @type {Record<string, unknown>} */
+      I2
+    ) === v) && (T.value = v), S.disabled = !String(T.value || "").trim();
+  }
+  function Ge(p) {
+    if (d && (d.hidden = !!p), b && (b.hidden = !p), p && L) {
+      const E = p.places.length ? `<div class="${C(r, "places")}">${p.places.map((w) => {
+        const v = [C(r, "place")];
+        w.isSelf && v.push(C(r, "place-self")), w.isLeading && v.push(C(r, "place-leading")), w.isFollowing && v.push(C(r, "place-following"));
+        const k = w.statusLabel ? `<span class="${C(r, "place-status")}">${j(
+          w.statusLabel
         )}</span>` : "";
-        return `<span class="${N.join(
+        return `<span class="${v.join(
           " "
-        )}" title="${D(T.placeId)}"><span class="${C(
+        )}" title="${j(w.placeId)}"><span class="${C(
           r,
           "place-name"
-        )}">${D(T.label)}</span>${A}</span>`;
-      }).join("")}</div>` : `<div class="${C(r, "muted")}">No places</div>`;
-      y.innerHTML = `<div><strong>Title:</strong> ${D(
-        p.title || "N/A"
-      )}</div><div class="${C(r, "places-label")}">Participants</div>${I2}`;
+        )}">${j(w.label)}</span>${k}</span>`;
+      }).join("")}</div>` : `<div class="${C(r, "muted")}">${j(o.noPlaces)}</div>`;
+      L.innerHTML = `<div><strong>${j(o.titleLabel)}</strong> ${j(
+        p.title || o.na
+      )}</div><div class="${C(r, "places-label")}">${j(
+        o.participants
+      )}</div>${E}`;
     }
-    g && (g.textContent = (p == null ? void 0 : p.selfRole) === "leading" ? "End conference" : "Leave conference");
+    x && (x.textContent = p != null && p.isConferenceOwner ? o.endConference : o.leaveConference);
   }
-  async function oe() {
-    const p = L();
+  async function te() {
+    const p = Se();
     if (!p.hubEndpoint || !p.connected)
-      return P2([], p.topic), lt(null), w(null), null;
-    const [I2, T] = await Promise.all([
-      Bt(p.hubEndpoint),
-      K(p.hubEndpoint)
-    ]), N = Y(
+      return It([]), $t([], p.topic), Ge(null), We(null), null;
+    const [E, w] = await Promise.all([
+      un(p.hubEndpoint),
+      ce(p.hubEndpoint)
+    ]), v = ae(
       p.topic,
       p.subscriberName,
-      T
-    ), A = Qe(p, N);
-    return N || P2(I2, p.topic), lt(A), w(A), A;
+      w
+    ), k = gt(p, v);
+    return v || (It(E), $t(w, p.topic)), Ge(k), We(k), k;
   }
-  async function hn() {
-    if (o)
+  async function Gn() {
+    if (l)
       return;
-    const p = L(), I2 = $2(), T = ut();
+    const p = Se(), E = zn(), w = Wn();
     if (!p.connected) {
-      E("error", "Connect to the Cast hub first.");
+      $2("error", o.connectHubFirst);
       return;
     }
     if (!p.topic) {
-      E("error", "Cast topic is required to host a conference.");
+      $2("error", o.topicRequiredHost);
       return;
     }
-    if (!I2) {
-      E("error", "Conference title is required.");
+    if (!E) {
+      $2("error", o.titleRequired);
       return;
     }
-    if (!T.length) {
-      E("error", "Select at least one attendee topic.");
+    if (!w.length) {
+      $2("error", o.selectAttendee);
       return;
     }
-    o = true, S && (S.disabled = true, S.textContent = "Creating\u2026"), E("", "");
+    l = true, A && (A.disabled = true, A.textContent = o.creating), $2("", "");
     try {
-      await Ft(
+      await ln(
         p.hubEndpoint,
         p.topic,
-        I2,
-        T,
+        E,
+        w,
         p.userName
-      ), await oe(), O();
-    } catch (N) {
-      E(
+      ), await te(), B();
+    } catch (v) {
+      $2(
         "error",
-        N instanceof Error ? N.message : "Failed to create conference."
+        v instanceof Error ? v.message : o.failedCreate
       );
     } finally {
-      o = false, S && (S.disabled = false, S.textContent = "Create conference");
+      l = false, A && (A.disabled = false, A.textContent = o.createConference);
     }
   }
-  async function mn() {
-    if (o)
+  async function Vn() {
+    if (l) return;
+    const p = Se(), E = String((T == null ? void 0 : T.value) || "").trim();
+    if (!p.connected) {
+      $2("error", o.connectHubFirst);
       return;
-    const p = L(), I2 = await K(p.hubEndpoint), T = Y(
+    }
+    if (!p.topic) {
+      $2("error", o.topicRequiredJoin);
+      return;
+    }
+    if (!E) {
+      $2("error", o.selectConferenceToJoin);
+      return;
+    }
+    l = true, S && (S.disabled = true, S.textContent = o.joining), $2("", "");
+    try {
+      await fn(
+        p.hubEndpoint,
+        E,
+        p.topic,
+        p.userName
+      ), i == null || i(true), await te(), B();
+    } catch (w) {
+      $2(
+        "error",
+        w instanceof Error ? w.message : o.failedJoin
+      );
+    } finally {
+      l = false, S && (S.textContent = o.joinConference, S.disabled = !String((T == null ? void 0 : T.value) || "").trim());
+    }
+  }
+  async function Jn() {
+    if (l)
+      return;
+    const p = Se(), E = await ce(p.hubEndpoint), w = ae(
       p.topic,
       p.subscriberName,
-      I2
+      E
     );
-    if (!T) {
-      await oe();
+    if (!w) {
+      await te();
       return;
     }
-    const N = ne(T), A = Ke(p.topic, T);
-    o = true, g && (g.disabled = true, g.textContent = A ? "Ending\u2026" : "Leaving\u2026"), E("", "");
+    const v = D(w), k = bt(p.topic, w);
+    l = true, x && (x.disabled = true, x.textContent = k ? o.ending : o.leaving), $2("", "");
     try {
-      await Ze(
+      await pt(
         p.hubEndpoint,
-        N,
-        A ? void 0 : p.topic
-      ), w(null), E(
+        v,
+        k ? void 0 : p.topic
+      ), We(null), $2(
         "success",
-        A ? "Conference ended." : "Left conference."
-      ), await new Promise((U) => {
-        setTimeout(U, Dt);
-      }), O();
-    } catch (U) {
-      E(
+        k ? o.conferenceEnded : o.leftConference
+      ), await new Promise((I2) => {
+        setTimeout(I2, sn);
+      }), B();
+    } catch (I2) {
+      $2(
         "error",
-        U instanceof Error ? U.message : "Failed to update conference."
+        I2 instanceof Error ? I2.message : o.failedUpdate
       );
     } finally {
-      o = false, g && (g.disabled = false, g.textContent = A ? "End conference" : "Leave conference");
+      l = false, x && (x.disabled = false, x.textContent = k ? o.endConference : o.leaveConference);
     }
   }
-  function pn() {
-    E("", ""), l && (l.value = "Test conference"), h && (h.value = ""), u && (u.hidden = true), c.hidden = false, d instanceof HTMLElement && d.focus({ preventScroll: true }), oe().catch(() => {
+  function _t() {
+    a.classList.remove(C(r, "overlay-anchored")), u instanceof HTMLElement && (u.style.top = "", u.style.left = "", u.style.right = "", u.style.bottom = "", u.style.maxWidth = "");
+  }
+  function Ve(p) {
+    if (!(u instanceof HTMLElement) || !(p instanceof HTMLElement)) {
+      _t();
+      return;
+    }
+    const E = p.getBoundingClientRect(), w = 8, v = 6;
+    a.classList.add(C(r, "overlay-anchored"));
+    const k = Math.max(
+      280,
+      Math.min(u.offsetWidth || 336, window.innerWidth - w * 2)
+    );
+    let I2 = E.left, G = E.bottom + v;
+    const ne = window.innerWidth - k - w;
+    I2 > ne && (I2 = Math.max(w, ne)), I2 < w && (I2 = w);
+    const we = u.offsetHeight || 360;
+    G + we > window.innerHeight - w && (G = Math.max(w, E.top - we - v)), u.style.left = `${Math.round(I2)}px`, u.style.top = `${Math.round(G)}px`, u.style.maxWidth = `${Math.round(k)}px`;
+  }
+  function Zn(p) {
+    $2("", ""), m && (m.value = "ST-444 \xB7 Anatomie humaine"), y && (y.value = ""), g && (g.hidden = true), h = p instanceof HTMLElement ? p : null, a.hidden = false, Ve(h), u instanceof HTMLElement && u.focus({ preventScroll: true }), te().then(() => Ve(h)).catch(() => {
     });
   }
-  function O() {
-    c.hidden = true, E("", "");
+  function B() {
+    a.hidden = true, $2("", ""), _t(), h = null;
   }
-  function yn() {
-    O(), c.remove();
+  function Yn() {
+    B(), a.remove();
   }
-  return l == null || l.addEventListener("change", () => {
-    u && (u.hidden = String(l.value || "") !== "other");
+  function Kn(p) {
+    o = W(p), kt(), c && Ge(c);
+  }
+  return m == null || m.addEventListener("change", () => {
+    g && (g.hidden = String(m.value || "") !== "other");
+  }), T == null || T.addEventListener("change", () => {
+    S && (S.disabled = !String(T.value || "").trim() || l);
+  }), A == null || A.addEventListener("click", () => {
+    Gn().catch(() => {
+    });
   }), S == null || S.addEventListener("click", () => {
-    hn().catch(() => {
+    Vn().catch(() => {
     });
-  }), g == null || g.addEventListener("click", () => {
-    mn().catch(() => {
+  }), x == null || x.addEventListener("click", () => {
+    Jn().catch(() => {
     });
-  }), c.querySelectorAll("[data-cast-conference-close]").forEach((p) => {
-    p.addEventListener("click", () => O());
-  }), c.addEventListener("click", (p) => {
-    p.target === c && O();
+  }), a.querySelectorAll("[data-cast-conference-close]").forEach((p) => {
+    p.addEventListener("click", () => B());
+  }), a.addEventListener("click", (p) => {
+    p.target === a && B();
+  }), window.addEventListener("resize", () => {
+    a.hidden || Ve(h);
   }), {
-    open: pn,
-    close: O,
-    destroy: yn,
-    refresh: oe,
-    getView: () => s,
+    open: Zn,
+    close: B,
+    destroy: Yn,
+    refresh: te,
+    setStrings: Kn,
+    getView: () => c,
     get element() {
-      return c;
+      return a;
     }
   };
 }
-var Oe = "ID";
-function cr(e = {}) {
+var et = "ID";
+function Yr(e = {}) {
   const t = Array.isArray(e.selfActors) ? e.selfActors.map((s) => String(s || "").trim()).filter(Boolean) : [], n = Array.isArray(e.connectedActors) ? e.connectedActors.map((s) => String(s || "").trim()).filter(Boolean) : [];
   return t.some(
-    (s) => s === Oe || s.toUpperCase() === "ID"
+    (s) => s === et || s.toUpperCase() === "ID"
   ) ? true : !n.some(
-    (s) => s === Oe || s.toUpperCase() === "ID"
+    (s) => s === et || s.toUpperCase() === "ID"
   );
 }
-function qt(e) {
+function gn(e) {
   const t = e && typeof e == "object" ? (
     /** @type {{ event?: Record<string, unknown> }} */
     e.event
@@ -11557,218 +13002,343 @@ function qt(e) {
   if (!t || typeof t != "object")
     return null;
   const n = String(t["hub.event"] || "").trim().toLowerCase();
-  if (n !== "conference-start" && n !== "conference-end")
+  if (n !== "conference-start" && n !== "conference-end" && n !== "conference-lead")
     return null;
-  const r = t.context && typeof t.context == "object" ? (
+  const i = t.context && typeof t.context == "object" ? (
     /** @type {Record<string, unknown>} */
     t.context
-  ) : {}, i = String(
-    r.hostTopic || t["hub.topic"] || ""
-  ).trim(), s = String(r.title || "").trim(), o = String(r.hostUserName || "").trim();
+  ) : {}, r = String(
+    i.hostTopic || t["hub.topic"] || ""
+  ).trim(), s = String(i.title || "").trim(), o = String(i.hostUserName || "").trim(), c = String(i.sceneLeaderTopic || "").trim(), l = String(
+    i.leaderUserName || i.leaderLabel || ""
+  ).trim(), h = l || c || o || r || "host", a = String(i.joinedTopic || "").trim();
   return {
     hubEvent: n,
     title: s,
-    hostTopic: i,
+    hostTopic: r,
     hostUserName: o,
-    hostLabel: o || i || "host"
+    hostLabel: o || r || "host",
+    sceneLeaderTopic: c,
+    leaderUserName: l,
+    leaderLabel: h,
+    joinedTopic: a
   };
 }
-function v(e, t) {
+function _(e, t) {
   return `${e}-${t}`;
 }
-function zt(e = {}) {
+function yn(e = {}) {
   const t = typeof e.onDecision == "function" ? e.onDecision : null, n = String(
     e.classPrefix || "cast-conference-invite"
-  ).trim(), r = e.root || (typeof document < "u" ? document.body : null);
-  if (!r)
+  ).trim(), i = e.root || (typeof document < "u" ? document.body : null);
+  if (!i)
     throw new Error("createCastConferenceInviteDialog requires a DOM root");
-  let i = null, s = false;
-  const o = document.createElement("div");
-  o.className = v(n, "overlay"), o.hidden = true, o.innerHTML = `
-    <div class="${v(n, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${v(n, "title")}" tabindex="-1">
-      <div class="${v(n, "header")}">
-        <h2 id="${v(n, "title")}" class="${v(n, "title")}">Conference invitation</h2>
-        <button type="button" class="${v(n, "close")}" data-cast-invite-close aria-label="Close">\xD7</button>
+  let r = W(e.strings), s = null, o = false;
+  const c = document.createElement("div");
+  c.className = _(n, "overlay"), c.hidden = true, c.innerHTML = `
+    <div class="${_(n, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${_(n, "title")}" tabindex="-1">
+      <div class="${_(n, "header")}">
+        <h2 id="${_(n, "title")}" class="${_(n, "title")}" data-cast-invite-title></h2>
+        <button type="button" class="${_(n, "close")}" data-cast-invite-close aria-label="">\xD7</button>
       </div>
-      <div class="${v(n, "body")}">
-        <p class="${v(n, "lead")}" data-cast-invite-lead></p>
-        <p class="${v(n, "status")}" data-cast-invite-status role="alert" hidden></p>
-        <div class="${v(n, "actions")}">
-          <button type="button" class="${v(n, "primary")}" data-cast-invite-follow>Join and follow</button>
-          <button type="button" class="${v(n, "secondary")}" data-cast-invite-join>Join but do not follow</button>
-          <button type="button" class="${v(n, "secondary")}" data-cast-invite-decline>Do not join</button>
+      <div class="${_(n, "body")}">
+        <p class="${_(n, "lead")}" data-cast-invite-lead></p>
+        <p class="${_(n, "status")}" data-cast-invite-status role="alert" hidden></p>
+        <div class="${_(n, "actions")}">
+          <button type="button" class="${_(n, "primary")}" data-cast-invite-follow></button>
+          <button type="button" class="${_(n, "secondary")}" data-cast-invite-join></button>
+          <button type="button" class="${_(n, "secondary")}" data-cast-invite-decline></button>
         </div>
       </div>
     </div>
-  `, r.appendChild(o);
-  const c = o.querySelector(`.${v(n, "dialog")}`), d = o.querySelector("[data-cast-invite-lead]"), f = o.querySelector("[data-cast-invite-status]"), a = o.querySelector("[data-cast-invite-follow]"), b = o.querySelector("[data-cast-invite-join]"), l = o.querySelector("[data-cast-invite-decline]");
-  function u(g, E) {
-    if (!(f instanceof HTMLElement)) return;
-    const w = String(E || "").trim();
-    f.hidden = !w, f.textContent = w, f.classList.toggle(v(n, "status-error"), g === "error");
+  `, i.appendChild(c);
+  const l = c.querySelector(`.${_(n, "dialog")}`), h = c.querySelector("[data-cast-invite-title]"), a = c.querySelector("[data-cast-invite-lead]"), u = c.querySelector("[data-cast-invite-status]"), f = c.querySelector("[data-cast-invite-follow]"), d = c.querySelector("[data-cast-invite-join]"), b = c.querySelector("[data-cast-invite-decline]"), m = c.querySelector("[data-cast-invite-close]");
+  function g() {
+    h && (h.textContent = r.inviteTitle), d && (d.textContent = r.joinNoFollow), b && (b.textContent = r.doNotJoin), m instanceof HTMLElement && m.setAttribute("aria-label", r.closeAria), f && s ? f.textContent = ie(
+      r.joinAndFollowHost,
+      { host: s.hostLabel || r.hostFallback }
+    ) : f && (f.textContent = r.joinAndFollow);
   }
-  function h(g) {
-    s = g;
-    for (const E of [a, b, l])
-      E instanceof HTMLButtonElement && (E.disabled = g);
+  g();
+  function y(S, x) {
+    if (!(u instanceof HTMLElement)) return;
+    const U = String(x || "").trim();
+    u.hidden = !U, u.textContent = U, u.classList.toggle(_(n, "status-error"), S === "error");
   }
-  function m() {
-    o.hidden = true, i = null, u("", ""), h(false);
+  function N(S) {
+    o = S;
+    for (const x of [f, d, b])
+      x instanceof HTMLButtonElement && (x.disabled = S);
   }
-  function y(g) {
-    const E = String((g == null ? void 0 : g.hostLabel) || (g == null ? void 0 : g.hostUserName) || (g == null ? void 0 : g.hostTopic) || "host").trim() || "host", w = String((g == null ? void 0 : g.title) || "").trim();
-    i = {
+  function T() {
+    c.hidden = true, s = null, y("", ""), N(false);
+  }
+  function L(S) {
+    const x = String(
+      (S == null ? void 0 : S.hostLabel) || (S == null ? void 0 : S.hostUserName) || (S == null ? void 0 : S.hostTopic) || r.hostFallback
+    ).trim() || r.hostFallback, U = String((S == null ? void 0 : S.title) || "").trim();
+    s = {
       hubEvent: "conference-start",
-      title: w,
-      hostTopic: String((g == null ? void 0 : g.hostTopic) || "").trim(),
-      hostUserName: String((g == null ? void 0 : g.hostUserName) || "").trim(),
-      hostLabel: E
-    }, d instanceof HTMLElement && (d.textContent = w ? `${w} \u2014 join and follow ${E}?` : `Join conference and follow ${E}?`), a instanceof HTMLElement && (a.textContent = `Join and follow ${E}`), u("", ""), o.hidden = false, c instanceof HTMLElement && c.focus({ preventScroll: true });
+      title: U,
+      hostTopic: String((S == null ? void 0 : S.hostTopic) || "").trim(),
+      hostUserName: String((S == null ? void 0 : S.hostUserName) || "").trim(),
+      hostLabel: x
+    }, a instanceof HTMLElement && (a.textContent = U ? ie(r.inviteLeadWithTitle, {
+      title: U,
+      host: x
+    }) : ie(r.inviteLeadNoTitle, {
+      host: x
+    })), f instanceof HTMLElement && (f.textContent = ie(
+      r.joinAndFollowHost,
+      { host: x }
+    )), y("", ""), c.hidden = false, l instanceof HTMLElement && l.focus({ preventScroll: true });
   }
-  async function S(g) {
-    if (s || !i) return;
-    const E = i;
-    h(true);
+  async function A(S) {
+    if (o || !s) return;
+    const x = s;
+    N(true);
     try {
-      t && await t(g, E), m();
-    } catch (w) {
-      u(
+      t && await t(S, x), T();
+    } catch (U) {
+      y(
         "error",
-        w instanceof Error ? w.message : "Failed to update conference."
-      ), h(false);
+        U instanceof Error ? U.message : r.failedUpdate
+      ), N(false);
     }
   }
-  return a == null || a.addEventListener("click", () => {
-    S("join-follow");
+  return f == null || f.addEventListener("click", () => {
+    A("join-follow");
+  }), d == null || d.addEventListener("click", () => {
+    A("join");
   }), b == null || b.addEventListener("click", () => {
-    S("join");
-  }), l == null || l.addEventListener("click", () => {
-    S("decline");
-  }), o.querySelectorAll("[data-cast-invite-close]").forEach((g) => {
-    g.addEventListener("click", () => m());
-  }), o.addEventListener("click", (g) => {
-    g.target === o && m();
+    A("decline");
+  }), c.querySelectorAll("[data-cast-invite-close]").forEach((S) => {
+    S.addEventListener("click", () => T());
+  }), c.addEventListener("click", (S) => {
+    S.target === c && T();
   }), {
-    open: y,
-    close: m,
+    open: L,
+    close: T,
+    /**
+     * @param {Partial<import('./conferenceStrings.js').CastConferenceStrings> | null | undefined} next
+     */
+    setStrings(S) {
+      r = W(S), g(), s && !c.hidden && L(s);
+    },
     destroy() {
-      m(), o.remove();
+      T(), c.remove();
     },
     isOpen() {
-      return !o.hidden;
+      return !c.hidden;
     },
     getInvite() {
-      return i;
+      return s;
     },
-    element: o
+    element: c
   };
 }
-function ur(e) {
-  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.shouldShow) == "function" ? e.shouldShow : () => true, r = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, i = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, s = (e == null ? void 0 : e.dialog) || zt({
+function Kr(e) {
+  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.shouldShow) == "function" ? e.shouldShow : () => true, i = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, r = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, s = typeof (e == null ? void 0 : e.onLeadChange) == "function" ? e.onLeadChange : null, o = (e == null ? void 0 : e.dialog) || yn({
     root: e == null ? void 0 : e.root,
     classPrefix: e == null ? void 0 : e.classPrefix,
-    onDecision: async (f, a) => {
-      await c(f, a);
+    strings: e == null ? void 0 : e.strings,
+    onDecision: async (a, u) => {
+      await l(a, u);
     }
   });
-  async function o() {
-    const f = t(), a = await jt(
-      f.hubEndpoint || "",
-      f.topic || "",
-      f.subscriberName || "",
-      f.userName || ""
+  async function c() {
+    const a = t(), u = await dn(
+      a.hubEndpoint || "",
+      a.topic || "",
+      a.subscriberName || "",
+      a.userName || ""
     );
-    return r == null || r(a), a;
+    return i == null || i(u), u;
   }
-  async function c(f, a) {
-    const b = t(), l = String((a == null ? void 0 : a.hostTopic) || "").trim();
-    if (!l)
+  async function l(a, u) {
+    const f = t(), d = String((u == null ? void 0 : u.hostTopic) || "").trim();
+    if (!d)
       throw new Error("Missing conference host topic.");
-    if (f === "decline") {
-      await Ze(
-        b.hubEndpoint || "",
-        l,
-        b.topic || ""
-      ), i == null || i(false), r == null || r(null);
+    if (a === "decline") {
+      await pt(
+        f.hubEndpoint || "",
+        d,
+        f.topic || ""
+      ), r == null || r(false), i == null || i(null);
       return;
     }
-    const u = f === "join-follow";
-    i == null || i(u, u ? a : void 0), await o();
+    const b = a === "join-follow";
+    r == null || r(b, b ? u : void 0), await c();
   }
-  function d(f) {
-    const a = qt(f);
-    if (!a) return false;
-    const b = t(), l = String(b.topic || "").trim();
-    if (a.hubEvent === "conference-end") {
-      const u = (
-        /** @type {{ context?: Record<string, unknown> }} */
-        f.event || {}
-      ), h = u.context && typeof u.context == "object" ? u.context : {}, m = String(h.leaveTopic || "").trim();
-      return !m || m === l ? (s.close(), i == null || i(false), r == null || r(null)) : o(), true;
+  function h(a) {
+    const u = gn(a);
+    if (!u) return false;
+    const f = t(), d = String(f.topic || "").trim();
+    if (u.hubEvent === "conference-lead") {
+      const m = String(u.sceneLeaderTopic || "").trim(), g = !!d && !!m && (d === m || d.toLowerCase() === m.toLowerCase());
+      return r == null || r(!g, u), c().then(() => {
+        s == null || s(u);
+      }), true;
     }
-    return l && a.hostTopic && (l === a.hostTopic || l.toLowerCase() === a.hostTopic.toLowerCase()) ? (i == null || i(false), o(), true) : n() ? (s.open(a), o(), true) : (o(), true);
+    if (u.hubEvent === "conference-end") {
+      const m = (
+        /** @type {{ context?: Record<string, unknown> }} */
+        a.event || {}
+      ), g = m.context && typeof m.context == "object" ? m.context : {}, y = String(g.leaveTopic || "").trim();
+      return !y || y === d ? (o.close(), r == null || r(false), i == null || i(null)) : c(), true;
+    }
+    if (d && u.hostTopic && (d === u.hostTopic || d.toLowerCase() === u.hostTopic.toLowerCase()))
+      return r == null || r(false), c(), true;
+    const b = String(u.joinedTopic || "").trim();
+    return d && b && (d === b || d.toLowerCase() === b.toLowerCase()) ? (r == null || r(true, u), c(), true) : n() ? (o.open(u), c(), true) : (c(), true);
   }
   return {
-    handleHubMessage: d,
-    open: (f) => s.open(f),
-    close: () => s.close(),
-    destroy: () => s.destroy(),
-    refresh: o,
-    dialog: s
+    handleHubMessage: h,
+    open: (a) => o.open(a),
+    close: () => o.close(),
+    destroy: () => o.destroy(),
+    refresh: c,
+    /**
+     * @param {Partial<import('./conferenceStrings.js').CastConferenceStrings> | null | undefined} next
+     */
+    setStrings(a) {
+      var u;
+      (u = o.setStrings) == null || u.call(o, a);
+    },
+    dialog: o
   };
 }
-var re = "http://fhircast.hl7.org/StructureDefinition/fhircast-imaging-study-open";
-var ie = "urn:dicom:uid";
-var et = "urn:cast:nifti-url";
-var tt = "urn:cast:nifti-filename";
-var pe = "urn:cast:volview-sample-id";
-var H = "urn:cast:worklist-sample-id";
-var ye = "urn:cast:ohif-mode";
-var G = "urn:cast:open-mode";
-var X = "dicomweb";
-var ge = "dicom-url";
-var j = "files";
-var Se = "idc";
-var Ce = "local-dicom";
-var we = "idc";
-var Ee = "idc-source-bucket";
-var nt = "urn:cast:dicomweb-root";
-function _(e) {
+function Xr(e = {}) {
+  return new Promise((t) => {
+    if (typeof document > "u") {
+      t(false);
+      return;
+    }
+    const n = W(e.strings), i = String(
+      e.classPrefix || "cast-conference-takeover"
+    ).trim(), r = e.root || document.body, s = document.createElement("div");
+    s.className = `${i}-overlay`, s.setAttribute("role", "presentation"), s.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      "z-index:10040",
+      "display:flex",
+      "align-items:center",
+      "justify-content:center",
+      "background:rgba(0,0,0,.45)",
+      "padding:16px"
+    ].join(";");
+    const o = document.createElement("div");
+    o.className = `${i}-dialog`, o.setAttribute("role", "dialog"), o.setAttribute("aria-modal", "true"), o.setAttribute("aria-labelledby", `${i}-title`), o.tabIndex = -1, o.style.cssText = [
+      "width:min(420px,100%)",
+      "background:#121820",
+      "color:#e8eef8",
+      "border:1px solid #33507e",
+      "border-radius:10px",
+      "box-shadow:0 16px 40px rgba(0,0,0,.4)",
+      "padding:18px 18px 14px",
+      "font:14px/1.45 -apple-system,system-ui,sans-serif"
+    ].join(";"), o.innerHTML = `
+      <h2 id="${i}-title" style="margin:0 0 10px;font:700 16px/1.3 -apple-system,system-ui,sans-serif;"></h2>
+      <p data-cast-takeover-body style="margin:0 0 16px;opacity:.92;"></p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+        <button type="button" data-cast-takeover-cancel style="padding:7px 12px;border-radius:6px;border:1px solid #4a628a;background:#1a2332;color:#e8eef8;cursor:pointer;font:600 13px -apple-system,system-ui,sans-serif;"></button>
+        <button type="button" data-cast-takeover-confirm style="padding:7px 12px;border-radius:6px;border:1px solid #2b6cb0;background:#2b6cb0;color:#fff;cursor:pointer;font:600 13px -apple-system,system-ui,sans-serif;"></button>
+      </div>
+    `;
+    const c = o.querySelector(`#${i}-title`), l = o.querySelector("[data-cast-takeover-body]"), h = o.querySelector("[data-cast-takeover-cancel]"), a = o.querySelector("[data-cast-takeover-confirm]");
+    c && (c.textContent = n.takeoverTitle), l && (l.textContent = n.takeoverBody), h && (h.textContent = n.cancel), a && (a.textContent = n.takeOver), s.appendChild(o), r.appendChild(s);
+    let u = false;
+    const f = (d) => {
+      u || (u = true, s.remove(), t(!!d));
+    };
+    s.addEventListener("click", (d) => {
+      d.target === s && f(false);
+    }), h == null || h.addEventListener("click", () => f(false)), a == null || a.addEventListener("click", () => f(true)), o.addEventListener("keydown", (d) => {
+      d.key === "Escape" && (d.preventDefault(), f(false));
+    }), o.focus({ preventScroll: true });
+  });
+}
+function Qr(e, t = {}) {
+  var l;
+  const n = String(e || "").trim();
+  if (!n || typeof document > "u")
+    return;
+  const i = Math.max(1e3, Number(t.ms) || 4e3), r = String(t.classPrefix || "cast-info-toast").trim(), s = t.root || (typeof document < "u" ? document.body : null);
+  if (!s)
+    return;
+  const o = (l = s.querySelector) == null ? void 0 : l.call(s, `.${r}`);
+  o && o.remove();
+  const c = document.createElement("div");
+  c.className = r, c.setAttribute("role", "status"), c.textContent = n, c.style.cssText = [
+    "position:fixed",
+    "left:50%",
+    "bottom:28px",
+    "transform:translateX(-50%)",
+    "z-index:10050",
+    "max-width:min(420px,calc(100vw - 32px))",
+    "padding:10px 16px",
+    "border-radius:8px",
+    "background:#1a2332",
+    "color:#e8eef8",
+    "font:600 13px/1.35 -apple-system,system-ui,sans-serif",
+    "box-shadow:0 8px 28px rgba(0,0,0,.35)",
+    "pointer-events:none"
+  ].join(";"), s.appendChild(c), window.setTimeout(() => {
+    c.remove();
+  }, i);
+}
+var me = "http://fhircast.hl7.org/StructureDefinition/fhircast-imaging-study-open";
+var pe = "urn:dicom:uid";
+var St = "urn:cast:nifti-url";
+var wt = "urn:cast:nifti-filename";
+var Ie = "urn:cast:volview-sample-id";
+var Q = "urn:cast:worklist-sample-id";
+var $e = "urn:cast:ohif-mode";
+var ee = "urn:cast:open-mode";
+var ue = "dicomweb";
+var _e = "dicom-url";
+var Y = "files";
+var Ue = "idc";
+var Me = "local-dicom";
+var Pe = "idc";
+var Re = "idc-source-bucket";
+var Et = "urn:cast:dicomweb-root";
+function P(e) {
   return typeof e != "string" ? "" : e.trim().replace(/^urn:oid:/i, "");
 }
-function gt(e) {
+function Bt(e) {
   return typeof e == "string" ? e.trim().toLowerCase() : "";
 }
-function z(e, t) {
+function X(e, t) {
   if (!Array.isArray(e))
     return null;
-  const n = String(t || "").trim().toLowerCase(), r = e.find(
-    (i) => i && typeof i == "object" && typeof i.key == "string" && i.key.trim().toLowerCase() === n
+  const n = String(t || "").trim().toLowerCase(), i = e.find(
+    (r) => r && typeof r == "object" && typeof r.key == "string" && r.key.trim().toLowerCase() === n
   );
-  return !(r != null && r.resource) || typeof r.resource != "object" ? null : r.resource;
+  return !(i != null && i.resource) || typeof i.resource != "object" ? null : i.resource;
 }
-function k(e, t) {
-  const n = z(e, "study");
+function R(e, t) {
+  const n = X(e, "study");
   if (!n)
     return "";
-  const r = Array.isArray(n.identifier) ? n.identifier : [], i = gt(t), s = r.find(
-    (o) => gt(o == null ? void 0 : o.system) === i
+  const i = Array.isArray(n.identifier) ? n.identifier : [], r = Bt(t), s = i.find(
+    (o) => Bt(o == null ? void 0 : o.system) === r
   );
   return typeof (s == null ? void 0 : s.value) == "string" ? s.value.trim() : "";
 }
-function B(e) {
-  const t = z(e, "study");
-  return t ? _(t.uid) || _(k(e, ie)) : "";
+function J(e) {
+  const t = X(e, "study");
+  return t ? P(t.uid) || P(R(e, pe)) : "";
 }
-function M(e) {
-  const t = z(e, "series");
+function V(e) {
+  const t = X(e, "series");
   if (t)
-    return _(t.uid);
-  const n = z(e, "study"), i = (Array.isArray(n == null ? void 0 : n.series) ? n.series : [])[0];
-  return !i || typeof i != "object" ? "" : _(i.uid);
+    return P(t.uid);
+  const n = X(e, "study"), r = (Array.isArray(n == null ? void 0 : n.series) ? n.series : [])[0];
+  return !r || typeof r != "object" ? "" : P(r.uid);
 }
-function De(e) {
-  const t = k(e, nt);
+function tt(e) {
+  const t = R(e, Et);
   if (!t)
     return "";
   try {
@@ -11780,8 +13350,8 @@ function De(e) {
   }
   return "";
 }
-function Z(e) {
-  const t = k(e, et);
+function le(e) {
+  const t = R(e, St);
   if (!t)
     return "";
   try {
@@ -11793,117 +13363,117 @@ function Z(e) {
   }
   return "";
 }
-function rt(e) {
-  return k(e, tt);
+function Tt(e) {
+  return R(e, wt);
 }
-function Ht(e) {
-  return k(e, ye);
+function Cn(e) {
+  return R(e, $e);
 }
-function Gt(e) {
-  return k(e, pe) || k(e, H);
+function Sn(e) {
+  return R(e, Ie) || R(e, Q);
 }
-function lr(e) {
+function ei(e) {
   return typeof e.url == "string" ? e.url.trim() : typeof e.uri == "string" ? e.uri.trim() : "";
 }
-function fr(e) {
+function ti(e) {
   return typeof e.fileName == "string" ? e.fileName.trim() : typeof e.filename == "string" ? e.filename.trim() : "";
 }
-var dr = /* @__PURE__ */ new Set(["http:", "https:", "s3:", "gs:"]);
-function Te(e) {
+var ni = /* @__PURE__ */ new Set(["http:", "https:", "s3:", "gs:"]);
+function Fe(e) {
   if (!e || typeof e != "object")
     return null;
-  const t = lr(e);
+  const t = ei(e);
   if (!t)
     return null;
   try {
     const o = new URL(t);
-    if (!dr.has(o.protocol))
+    if (!ni.has(o.protocol))
       return null;
   } catch {
     return null;
   }
-  const n = fr(e), r = typeof e.mimeType == "string" ? e.mimeType.trim() : "", i = typeof e.role == "string" ? e.role.trim() : "", s = typeof e.label == "string" ? e.label.trim() : "";
+  const n = ti(e), i = typeof e.mimeType == "string" ? e.mimeType.trim() : "", r = typeof e.role == "string" ? e.role.trim() : "", s = typeof e.label == "string" ? e.label.trim() : "";
   return {
     url: t,
     fileName: n,
-    mimeType: r,
-    role: i,
+    mimeType: i,
+    role: r,
     label: s
   };
 }
-function q(e) {
-  const t = z(e, "files"), r = (Array.isArray(t == null ? void 0 : t.files) ? t.files : []).map((s) => Te(s)).filter((s) => s !== null);
-  if (r.length > 0)
-    return r;
-  const i = Z(e);
-  return i ? [
+function K(e) {
+  const t = X(e, "files"), i = (Array.isArray(t == null ? void 0 : t.files) ? t.files : []).map((s) => Fe(s)).filter((s) => s !== null);
+  if (i.length > 0)
+    return i;
+  const r = le(e);
+  return r ? [
     {
-      url: i,
-      fileName: rt(e),
+      url: r,
+      fileName: Tt(e),
       mimeType: "",
       role: "",
       label: ""
     }
   ] : [];
 }
-function Me(e) {
-  return _(k(e, we));
+function nt(e) {
+  return P(R(e, Pe));
 }
-function Be(e) {
-  return k(
+function rt(e) {
+  return R(
     e,
-    Ee
+    Re
   ).toLowerCase() === "gcs" ? "gcs" : "aws";
 }
-function Wt(e) {
-  const t = k(e, G);
-  return t === X || t === ge || t === j || t === Se || t === Ce ? t : q(e).length > 0 || Z(e) ? j : B(e) && !Z(e) ? X : "";
+function wn(e) {
+  const t = R(e, ee);
+  return t === ue || t === _e || t === Y || t === Ue || t === Me ? t : K(e).length > 0 || le(e) ? Y : J(e) && !le(e) ? ue : "";
 }
-function Vt({
+function En({
   id: e,
   files: t,
   patientReference: n,
-  openMode: r,
-  includeLegacyNiftiIdentifiers: i = false
+  openMode: i,
+  includeLegacyNiftiIdentifiers: r = false
 }) {
-  const s = String(e || "").trim() || "study", o = (Array.isArray(t) ? t : []).map((a) => Te(a)).filter((a) => a !== null), c = [
-    { system: G, value: r },
+  const s = String(e || "").trim() || "study", o = (Array.isArray(t) ? t : []).map((a) => Fe(a)).filter((a) => a !== null), c = [
+    { system: ee, value: i },
     {
-      system: H,
+      system: Q,
       value: s
     },
     {
-      system: pe,
+      system: Ie,
       value: s
     }
   ];
-  if (i && o.length === 1) {
+  if (r && o.length === 1) {
     const [a] = o;
     c.push({
-      system: et,
+      system: St,
       value: a.url
     }), a.fileName && c.push({
-      system: tt,
+      system: wt,
       value: a.fileName
     });
   }
-  const d = {
+  const l = {
     resourceType: "ImagingStudy",
     id: s,
     meta: {
-      profile: [re]
+      profile: [me]
     },
     identifier: c,
     status: "available"
   };
-  n && (d.subject = { reference: String(n).trim() });
-  const f = [
+  n && (l.subject = { reference: String(n).trim() });
+  const h = [
     {
       key: "study",
-      resource: d
+      resource: l
     }
   ];
-  return o.length > 0 && f.push({
+  return o.length > 0 && h.push({
     key: "files",
     resource: {
       files: o.map((a) => ({
@@ -11914,193 +13484,91 @@ function Vt({
         label: a.label || void 0
       }))
     }
-  }), f;
+  }), h;
 }
-function Jt({
+function Tn({
   id: e,
   files: t,
   patientReference: n,
-  includeLegacyNiftiIdentifiers: r = true
+  includeLegacyNiftiIdentifiers: i = true
 }) {
-  return Vt({
+  return En({
     id: e,
     files: t,
     patientReference: n,
-    openMode: j,
-    includeLegacyNiftiIdentifiers: r
+    openMode: Y,
+    includeLegacyNiftiIdentifiers: i
   });
 }
-function br({
+function ri({
   id: e,
   files: t,
   patientReference: n
 }) {
-  return Vt({
+  return En({
     id: e,
     files: t,
     patientReference: n,
-    openMode: ge,
+    openMode: _e,
     includeLegacyNiftiIdentifiers: false
   });
 }
-function hr({
+function ii({
   id: e,
   studyInstanceUID: t,
   seriesInstanceUID: n,
-  dicomwebRoot: r,
-  patientReference: i,
+  dicomwebRoot: i,
+  patientReference: r,
   ohifMode: s,
   files: o,
   sourceBucket: c
 }) {
-  const d = String(e || "").trim() || "study", f = _(t), a = _(n), b = String(r || "").trim().replace(/\/$/, ""), l = [
-    { system: G, value: X },
-    { system: ie, value: f },
+  const l = String(e || "").trim() || "study", h = P(t), a = P(n), u = String(i || "").trim().replace(/\/$/, ""), f = [
+    { system: ee, value: ue },
+    { system: pe, value: h },
     {
-      system: H,
-      value: d
+      system: Q,
+      value: l
     }
   ];
-  b && l.push({ system: nt, value: b });
-  const u = String(s || "").trim();
-  u && l.push({
-    system: ye,
-    value: u
+  u && f.push({ system: Et, value: u });
+  const d = String(s || "").trim();
+  d && f.push({
+    system: $e,
+    value: d
   });
-  const h = (Array.isArray(o) ? o : []).map((S) => Te(S)).filter((S) => S !== null);
-  if (h.length > 0) {
-    const S = String(c || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws";
-    l.push({
-      system: Ee,
-      value: S
-    }), a && l.push({ system: we, value: a });
+  const b = (Array.isArray(o) ? o : []).map((y) => Fe(y)).filter((y) => y !== null);
+  if (b.length > 0) {
+    const y = String(c || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws";
+    f.push({
+      system: Re,
+      value: y
+    }), a && f.push({ system: Pe, value: a });
   }
   const m = {
     resourceType: "ImagingStudy",
-    id: d,
-    uid: f,
+    id: l,
+    uid: h,
     meta: {
-      profile: [re]
+      profile: [me]
     },
-    identifier: l,
+    identifier: f,
     status: "available"
   };
-  i && (m.subject = { reference: String(i).trim() });
-  const y = [
+  r && (m.subject = { reference: String(r).trim() });
+  const g = [
     {
       key: "study",
       resource: m
     }
   ];
-  return a && y.push({
+  return a && g.push({
     key: "series",
     resource: {
       resourceType: "ImagingStudy",
       uid: a
     }
-  }), h.length > 0 && y.push({
-    key: "files",
-    resource: {
-      files: h.map((S) => ({
-        url: S.url,
-        fileName: S.fileName || void 0,
-        mimeType: S.mimeType || void 0,
-        role: S.role || void 0,
-        label: S.label || void 0
-      }))
-    }
-  }), y;
-}
-function mr({
-  id: e,
-  studyInstanceUID: t,
-  seriesInstanceUID: n,
-  patientReference: r
-}) {
-  const i = String(e || "").trim() || "study", s = _(t), o = _(n), d = {
-    resourceType: "ImagingStudy",
-    id: i,
-    uid: s,
-    meta: {
-      profile: [re]
-    },
-    identifier: [
-      { system: G, value: Ce },
-      { system: ie, value: s },
-      {
-        system: H,
-        value: i
-      }
-    ],
-    status: "available"
-  };
-  r && (d.subject = { reference: String(r).trim() });
-  const f = [
-    {
-      key: "study",
-      resource: d
-    }
-  ];
-  return o && f.push({
-    key: "series",
-    resource: {
-      resourceType: "ImagingStudy",
-      uid: o
-    }
-  }), f;
-}
-function pr({
-  id: e,
-  studyInstanceUID: t,
-  seriesInstanceUID: n,
-  sourceBucket: r,
-  files: i,
-  patientReference: s,
-  ohifMode: o
-}) {
-  const c = String(e || "").trim() || "study", d = _(t), f = _(n), a = String(r || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws", b = (Array.isArray(i) ? i : []).map((y) => Te(y)).filter((y) => y !== null), l = [
-    { system: G, value: Se },
-    { system: ie, value: d },
-    {
-      system: H,
-      value: c
-    },
-    {
-      system: pe,
-      value: c
-    },
-    { system: Ee, value: a }
-  ];
-  f && l.push({ system: we, value: f });
-  const u = String(o || "").trim();
-  u && l.push({
-    system: ye,
-    value: u
-  });
-  const h = {
-    resourceType: "ImagingStudy",
-    id: c,
-    uid: d,
-    meta: {
-      profile: [re]
-    },
-    identifier: l,
-    status: "available"
-  };
-  s && (h.subject = { reference: String(s).trim() });
-  const m = [
-    {
-      key: "study",
-      resource: h
-    }
-  ];
-  return f && m.push({
-    key: "series",
-    resource: {
-      resourceType: "ImagingStudy",
-      uid: f
-    }
-  }), b.length > 0 && m.push({
+  }), b.length > 0 && g.push({
     key: "files",
     resource: {
       files: b.map((y) => ({
@@ -12111,135 +13579,260 @@ function pr({
         label: y.label || void 0
       }))
     }
+  }), g;
+}
+function oi({
+  id: e,
+  studyInstanceUID: t,
+  seriesInstanceUID: n,
+  patientReference: i
+}) {
+  const r = String(e || "").trim() || "study", s = P(t), o = P(n), l = {
+    resourceType: "ImagingStudy",
+    id: r,
+    uid: s,
+    meta: {
+      profile: [me]
+    },
+    identifier: [
+      { system: ee, value: Me },
+      { system: pe, value: s },
+      {
+        system: Q,
+        value: r
+      }
+    ],
+    status: "available"
+  };
+  i && (l.subject = { reference: String(i).trim() });
+  const h = [
+    {
+      key: "study",
+      resource: l
+    }
+  ];
+  return o && h.push({
+    key: "series",
+    resource: {
+      resourceType: "ImagingStudy",
+      uid: o
+    }
+  }), h;
+}
+function si({
+  id: e,
+  studyInstanceUID: t,
+  seriesInstanceUID: n,
+  sourceBucket: i,
+  files: r,
+  patientReference: s,
+  ohifMode: o
+}) {
+  const c = String(e || "").trim() || "study", l = P(t), h = P(n), a = String(i || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws", u = (Array.isArray(r) ? r : []).map((g) => Fe(g)).filter((g) => g !== null), f = [
+    { system: ee, value: Ue },
+    { system: pe, value: l },
+    {
+      system: Q,
+      value: c
+    },
+    {
+      system: Ie,
+      value: c
+    },
+    { system: Re, value: a }
+  ];
+  h && f.push({ system: Pe, value: h });
+  const d = String(o || "").trim();
+  d && f.push({
+    system: $e,
+    value: d
+  });
+  const b = {
+    resourceType: "ImagingStudy",
+    id: c,
+    uid: l,
+    meta: {
+      profile: [me]
+    },
+    identifier: f,
+    status: "available"
+  };
+  s && (b.subject = { reference: String(s).trim() });
+  const m = [
+    {
+      key: "study",
+      resource: b
+    }
+  ];
+  return h && m.push({
+    key: "series",
+    resource: {
+      resourceType: "ImagingStudy",
+      uid: h
+    }
+  }), u.length > 0 && m.push({
+    key: "files",
+    resource: {
+      files: u.map((g) => ({
+        url: g.url,
+        fileName: g.fileName || void 0,
+        mimeType: g.mimeType || void 0,
+        role: g.role || void 0,
+        label: g.label || void 0
+      }))
+    }
   }), m;
 }
-function yr({
+function ai({
   id: e,
   url: t,
   filename: n,
-  patientReference: r
+  patientReference: i
 }) {
-  return Jt({
+  return Tn({
     id: e,
     files: [{ url: t, fileName: n }],
-    patientReference: r,
+    patientReference: i,
     includeLegacyNiftiIdentifiers: true
   });
 }
-function it(e) {
+function vt(e) {
   if (Array.isArray(e) || !e || typeof e != "object")
     return e;
-  const t = Object.entries(e).reduce((n, [r, i]) => (i && typeof i == "object" && !Array.isArray(i) && n.push({ key: r, resource: i }), n), []);
+  const t = Object.entries(e).reduce((n, [i, r]) => (r && typeof r == "object" && !Array.isArray(r) && n.push({ key: i, resource: r }), n), []);
   return t.length ? t : e;
 }
-function St(e, t, n) {
-  const r = it(e), i = q(r);
-  return i.length === 0 ? null : { mode: "files", studyId: t, files: i, ohifMode: n };
+function jt(e, t, n) {
+  const i = vt(e), r = K(i);
+  return r.length === 0 ? null : { mode: "files", studyId: t, files: r, ohifMode: n };
 }
-function gr(e) {
-  const t = it(e), n = Gt(t) || "study", r = Wt(t), i = Ht(t) || void 0;
-  if (r === X) {
-    const d = B(t);
-    if (!d)
+function ci(e) {
+  const t = vt(e), n = Sn(t) || "study", i = wn(t), r = Cn(t) || void 0;
+  if (i === ue) {
+    const l = J(t);
+    if (!l)
       return null;
-    const f = {
+    const h = {
       mode: "dicomweb",
       studyId: n,
-      studyInstanceUID: d,
-      seriesInstanceUID: M(t) || void 0,
-      dicomwebRoot: De(t) || void 0,
-      ohifMode: i
-    }, a = q(t);
-    return a.length > 0 && (f.idcFallback = {
-      studyInstanceUID: d,
-      seriesInstanceUID: Me(t) || M(t) || void 0,
-      sourceBucket: Be(t),
+      studyInstanceUID: l,
+      seriesInstanceUID: V(t) || void 0,
+      dicomwebRoot: tt(t) || void 0,
+      ohifMode: r
+    }, a = K(t);
+    return a.length > 0 && (h.idcFallback = {
+      studyInstanceUID: l,
+      seriesInstanceUID: nt(t) || V(t) || void 0,
+      sourceBucket: rt(t),
       files: a
-    }), f;
+    }), h;
   }
-  if (r === j) {
-    const d = St(t, n, i);
-    if (d)
-      return d;
+  if (i === Y) {
+    const l = jt(t, n, r);
+    if (l)
+      return l;
   }
-  if (r === ge) {
-    const d = q(t);
-    return d.length ? { mode: "dicom-url", studyId: n, files: d, ohifMode: i } : null;
+  if (i === _e) {
+    const l = K(t);
+    return l.length ? { mode: "dicom-url", studyId: n, files: l, ohifMode: r } : null;
   }
-  if (r === Se) {
-    const d = B(t);
-    if (!d)
+  if (i === Ue) {
+    const l = J(t);
+    if (!l)
       return null;
-    const f = q(t);
-    return f.length ? {
+    const h = K(t);
+    return h.length ? {
       mode: "idc",
       studyId: n,
-      studyInstanceUID: d,
-      seriesInstanceUID: Me(t) || M(t) || void 0,
-      sourceBucket: Be(t),
-      files: f,
-      ohifMode: i
+      studyInstanceUID: l,
+      seriesInstanceUID: nt(t) || V(t) || void 0,
+      sourceBucket: rt(t),
+      files: h,
+      ohifMode: r
     } : null;
   }
-  if (r === Ce) {
-    const d = B(t);
-    return d ? {
+  if (i === Me) {
+    const l = J(t);
+    return l ? {
       mode: "local-dicom",
       studyId: n,
-      studyInstanceUID: d,
-      seriesInstanceUID: M(t) || void 0,
-      ohifMode: i
+      studyInstanceUID: l,
+      seriesInstanceUID: V(t) || void 0,
+      ohifMode: r
     } : null;
   }
-  const s = St(t, n, i);
+  const s = jt(t, n, r);
   if (s)
     return s;
-  const o = Z(t);
+  const o = le(t);
   if (o) {
-    const d = rt(t);
+    const l = Tt(t);
     return {
       mode: "files",
       studyId: n,
-      files: [{ url: o, fileName: d || "volume.nii.gz", label: n }],
-      ohifMode: i
+      files: [{ url: o, fileName: l || "volume.nii.gz", label: n }],
+      ohifMode: r
     };
   }
-  const c = B(t);
+  const c = J(t);
   return c ? {
     mode: "dicomweb",
     studyId: n,
     studyInstanceUID: c,
-    seriesInstanceUID: M(t) || void 0,
-    dicomwebRoot: De(t) || void 0,
-    ohifMode: i
+    seriesInstanceUID: V(t) || void 0,
+    dicomwebRoot: tt(t) || void 0,
+    ohifMode: r
   } : null;
 }
-function Fe(e) {
+function it(e) {
   return typeof e != "string" ? "" : e.trim().replace(/^urn:oid:/i, "");
 }
-function Sr(e) {
+function ui(e) {
   if (!e || typeof e != "object")
     return "";
-  const t = Fe(e.uid);
+  const t = it(e.uid);
   if (t)
     return t;
-  const r = (Array.isArray(e.identifier) ? e.identifier : []).find(
-    (i) => typeof (i == null ? void 0 : i.system) == "string" && i.system.toLowerCase() === "urn:dicom:uid"
+  const i = (Array.isArray(e.identifier) ? e.identifier : []).find(
+    (r) => typeof (r == null ? void 0 : r.system) == "string" && r.system.toLowerCase() === "urn:dicom:uid"
   );
-  return Fe(r == null ? void 0 : r.value);
+  return it(i == null ? void 0 : i.value);
 }
-function se(e) {
+function vn(e, t, n = "cast-dialog-anchored") {
+  e instanceof HTMLElement && e.classList.remove(n), t instanceof HTMLElement && (t.style.top = "", t.style.left = "", t.style.right = "", t.style.bottom = "", t.style.maxWidth = "", t.style.position = "", t.style.margin = "");
+}
+function li(e) {
+  const t = e == null ? void 0 : e.overlay, n = e == null ? void 0 : e.dialog, i = e == null ? void 0 : e.anchor, r = String((e == null ? void 0 : e.anchoredClass) || "cast-dialog-anchored").trim(), s = Number.isFinite(e == null ? void 0 : e.gap) ? Number(e.gap) : 6, o = Number.isFinite(e == null ? void 0 : e.pad) ? Number(e.pad) : 8;
+  if (!(t instanceof HTMLElement) || !(n instanceof HTMLElement))
+    return;
+  if (!(i instanceof HTMLElement)) {
+    vn(t, n, r);
+    return;
+  }
+  const c = i.getBoundingClientRect();
+  t.classList.add(r), n.style.position = "absolute", n.style.margin = "0";
+  const l = Math.max(
+    280,
+    Math.min(n.offsetWidth || 480, window.innerWidth - o * 2)
+  );
+  let h = c.left, a = c.bottom + s;
+  const u = window.innerWidth - l - o;
+  h > u && (h = Math.max(o, u)), h < o && (h = o);
+  const f = n.offsetHeight || 280;
+  a + f > window.innerHeight - o && (a = Math.max(o, c.top - f - s)), n.style.left = `${Math.round(h)}px`, n.style.top = `${Math.round(a)}px`, n.style.maxWidth = `${Math.round(l)}px`;
+}
+function ge(e) {
   const t = e == null ? void 0 : e["hub.event"];
   return typeof t == "string" ? t.trim().toLowerCase() : "";
 }
-function Yt(e) {
+function Ln(e) {
   return typeof e == "string" ? e.trim().toUpperCase() : !e || typeof e != "object" ? "" : (typeof e.keyword == "string" && e.keyword || typeof e.id == "string" && e.id || typeof e.key == "string" && e.key || "").trim().toUpperCase();
 }
-function Cr(e) {
+function fi(e) {
   const t = e == null ? void 0 : e["target.actor"];
-  return t == null ? "" : Yt(t);
+  return t == null ? "" : Ln(t);
 }
-function wr(e) {
+function di(e) {
   if (!Array.isArray(e))
     return [];
   try {
@@ -12252,129 +13845,129 @@ function wr(e) {
     }
   }
 }
-function Er(e) {
+function hi(e) {
   const t = e == null ? void 0 : e.event;
   return t && typeof t == "object" && t.context != null ? t.context : [];
 }
-function Tr(e) {
+function bi(e) {
   return String(
     (e == null ? void 0 : e["subscriber.name"]) || (e == null ? void 0 : e.subscriber) || ""
   ).trim() || null;
 }
-function Nr(e) {
+function mi(e) {
   return String((e == null ? void 0 : e["subscriber.product.name"]) || "").trim();
 }
-function Ar(e) {
+function pi(e) {
   const t = String((e == null ? void 0 : e["subscriber.actor"]) || "").trim();
   if (t)
     return t;
   const n = e == null ? void 0 : e["subscriber.actors"];
   if (Array.isArray(n))
-    for (const r of n) {
-      const i = String(r || "").trim();
-      if (i)
-        return i;
+    for (const i of n) {
+      const r = String(i || "").trim();
+      if (r)
+        return r;
     }
   return "";
 }
-function vr(e) {
+function gi(e) {
   const t = e == null ? void 0 : e.event;
-  if (se(t) !== "status-update")
+  if (ge(t) !== "status-update")
     return null;
   const n = t != null && t.context && typeof t.context == "object" && !Array.isArray(t.context) ? t.context : {};
   return { message: String(n.message ?? "").trim(), level: String(n.level ?? "info") };
 }
-function Lr(e) {
+function yi(e) {
   const t = atob(e), n = new Uint8Array(t.length);
-  for (let r = 0; r < t.length; r += 1)
-    n[r] = t.charCodeAt(r);
+  for (let i = 0; i < t.length; i += 1)
+    n[i] = t.charCodeAt(i);
   return n;
 }
-function Kt(e) {
+function An(e) {
   try {
-    const t = Lr(e), n = new ArrayBuffer(t.byteLength);
+    const t = yi(e), n = new ArrayBuffer(t.byteLength);
     return new Uint8Array(n).set(t), n;
   } catch {
     return null;
   }
 }
-function Xt(e) {
+function Nn(e) {
   const t = e == null ? void 0 : e.context;
   if (!t || typeof t != "object" || Array.isArray(t))
     return [];
   const n = t.files;
-  return Array.isArray(n) ? n.filter((r) => !!(r && typeof r == "object")) : [];
+  return Array.isArray(n) ? n.filter((i) => !!(i && typeof i == "object")) : [];
 }
-function Ir(e) {
+function Ci(e) {
   const t = e == null ? void 0 : e.context;
   return Array.isArray(t) ? t : t != null ? [t] : [];
 }
-function Ct(e, t, n) {
+function Ht(e, t, n) {
   return e instanceof ArrayBuffer ? { arrayBuffer: e, fileName: t, mimeType: n } : typeof e == "string" && e ? { fileName: t, data: e, mimeType: n } : null;
 }
-function Zt(e) {
+function xn(e) {
   return e === "nifti-send" ? "application/vnd.unknown.nifti-1" : "application/dicom";
 }
-function _r(e, t) {
+function Si(e, t) {
   return e === "nifti-send" ? `cast-nifti-send-${t + 1}.nii.gz` : `cast-dicom-send-${t + 1}.dcm`;
 }
-function kr(e, t) {
+function wi(e, t) {
   return e === "nifti-send" ? `cast-nifti-send-${t + 1}.nii.gz` : "dicom-sr.dcm";
 }
-function $r(e, t) {
-  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : Zt(t);
+function Ei(e, t) {
+  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : xn(t);
 }
-function Ur(e, t) {
-  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : typeof e.contentType == "string" && e.contentType.trim() ? e.contentType.trim() : Zt(t);
+function Ti(e, t) {
+  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : typeof e.contentType == "string" && e.contentType.trim() ? e.contentType.trim() : xn(t);
 }
-function Rr(e, t) {
+function vi(e, t) {
   const n = e == null ? void 0 : e.event;
-  if (se(n) !== t.toLowerCase())
+  if (ge(n) !== t.toLowerCase())
     return [];
-  const r = Xt(n);
-  if (r.length) {
-    const s = r.map((o, c) => {
-      const d = $r(o, t), f = typeof o.fileName == "string" && o.fileName.trim() ? o.fileName.trim() : _r(t, c);
-      return Ct(o.data, f, d);
+  const i = Nn(n);
+  if (i.length) {
+    const s = i.map((o, c) => {
+      const l = Ei(o, t), h = typeof o.fileName == "string" && o.fileName.trim() ? o.fileName.trim() : Si(t, c);
+      return Ht(o.data, h, l);
     }).filter(Boolean);
     if (s.length)
       return s;
   }
-  return Ir(n).map((s, o) => {
+  return Ci(n).map((s, o) => {
     if (!s || typeof s != "object")
       return null;
     const c = s.resource;
     if (!c || typeof c != "object")
       return null;
-    const d = Ur(c, t), f = typeof c.fileName == "string" && c.fileName.trim() ? c.fileName.trim() : kr(t, o);
-    return Ct(c.data, f, d);
+    const l = Ti(c, t), h = typeof c.fileName == "string" && c.fileName.trim() ? c.fileName.trim() : wi(t, o);
+    return Ht(c.data, h, l);
   }).filter(Boolean);
 }
-function Qt(e) {
-  return (e == null ? void 0 : e.arrayBuffer) instanceof ArrayBuffer ? e.arrayBuffer : typeof (e == null ? void 0 : e.data) == "string" ? Kt(e.data) : null;
+function kn(e) {
+  return (e == null ? void 0 : e.arrayBuffer) instanceof ArrayBuffer ? e.arrayBuffer : typeof (e == null ? void 0 : e.data) == "string" ? An(e.data) : null;
 }
-function xr(e, t, n) {
-  const r = Qt(e);
-  if (!r)
+function Li(e, t, n) {
+  const i = kn(e);
+  if (!i)
     return null;
-  const i = (e == null ? void 0 : e.fileName) || t, s = (e == null ? void 0 : e.mimeType) || n;
-  return new File([r], i, { type: s });
+  const r = (e == null ? void 0 : e.fileName) || t, s = (e == null ? void 0 : e.mimeType) || n;
+  return new File([i], r, { type: s });
 }
-var wt = 4e3;
-var Pr = 480;
-var le = "[binary/redacted]";
-function fe(e, t) {
-  return t > 8 ? "[max-depth]" : e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? le : typeof e == "string" ? e.length > Pr ? `${e.slice(0, 160)}\u2026 (${e.length} chars)` : e : Array.isArray(e) ? e.map((n) => fe(n, t + 1)) : e && typeof e == "object" ? Object.entries(e).reduce((n, [r, i]) => (r.toLowerCase() === "data" && typeof i == "string" && i.length > 200 ? n[r] = le : n[r] = fe(i, t + 1), n), {}) : e;
+var qt = 4e3;
+var Ai = 480;
+var ve = "[binary/redacted]";
+function Le(e, t) {
+  return t > 8 ? "[max-depth]" : e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? ve : typeof e == "string" ? e.length > Ai ? `${e.slice(0, 160)}\u2026 (${e.length} chars)` : e : Array.isArray(e) ? e.map((n) => Le(n, t + 1)) : e && typeof e == "object" ? Object.entries(e).reduce((n, [i, r]) => (i.toLowerCase() === "data" && typeof r == "string" && r.length > 200 ? n[i] = ve : n[i] = Le(r, t + 1), n), {}) : e;
 }
-function je(e) {
+function ot(e) {
   try {
-    const t = JSON.stringify(fe(e, 0));
-    return t.length > wt ? `${t.slice(0, wt)}\u2026` : t;
+    const t = JSON.stringify(Le(e, 0));
+    return t.length > qt ? `${t.slice(0, qt)}\u2026` : t;
   } catch {
     return "[unserializable]";
   }
 }
-function st(e) {
+function Lt(e) {
   if (!e)
     return 0;
   const { context: t } = e;
@@ -12386,238 +13979,280 @@ function st(e) {
   }
   return 0;
 }
-function en(e, t) {
+function In(e, t) {
   if (!e)
     return t === 1 ? "1 object" : `${t} objects`;
   if (t === 0)
     return e;
-  const n = e === "dicom-send" || e === "nifti-send" ? "image" : "object", r = t === 1 ? n : `${n}s`;
-  return `${e} (${t} ${r})`;
+  const n = e === "dicom-send" || e === "nifti-send" ? "image" : "object", i = t === 1 ? n : `${n}s`;
+  return `${e} (${t} ${i})`;
 }
-function Or(e) {
-  const t = e != null && e.event && typeof e.event == "object" ? e.event : void 0, r = se(t) || "publish", i = st(t);
-  return { label: en(r, i), detail: "" };
+function Ni(e) {
+  const t = e != null && e.event && typeof e.event == "object" ? e.event : void 0, i = ge(t) || "publish", r = Lt(t);
+  return { label: In(i, r), detail: "" };
 }
-function Dr(e) {
+function xi(e) {
   if (!e || typeof e != "object")
-    return { label: "raw", detail: je(e) };
-  const t = e.event, r = se(t) || (typeof (t == null ? void 0 : t.event) == "string" ? String(t.event) : "message"), i = st(t);
-  return { label: en(r, i), detail: je(e) };
+    return { label: "raw", detail: ot(e) };
+  const t = e.event, i = ge(t) || (typeof (t == null ? void 0 : t.event) == "string" ? String(t.event) : "message"), r = Lt(t);
+  return { label: In(i, r), detail: ot(e) };
 }
-function Mr(e) {
-  return fe(e, 0);
+function ki(e) {
+  return Le(e, 0);
 }
-var R = "*";
-var Ne = "ID";
-var Br = {
-  subscriberName: R,
-  subscriberActor: Ne,
-  targetActor: R,
-  targetProductName: R
+var q = "*";
+var Oe = "ID";
+var Ii = {
+  subscriberName: q,
+  subscriberActor: Oe,
+  targetActor: q,
+  targetProductName: q
 };
-function Q(e) {
-  return String(e ?? "").trim() || R;
+function fe(e) {
+  return String(e ?? "").trim() || q;
 }
-function Fr(e, t) {
+function $i(e, t) {
   return {
-    subscriberName: (e.subscriberName ?? "").trim() || t.subscriberName || R,
-    subscriberActor: (e.subscriberActor ?? "").trim() || Ne,
-    targetActor: Q(e.targetActor),
-    targetProductName: Q(e.targetProductName)
+    subscriberName: (e.subscriberName ?? "").trim() || t.subscriberName || q,
+    subscriberActor: (e.subscriberActor ?? "").trim() || Oe,
+    targetActor: fe(e.targetActor),
+    targetProductName: fe(e.targetProductName)
   };
 }
-function jr(e, t) {
-  e["subscriber.name"] = t.subscriberName.trim() || R, e["subscriber.actor"] = t.subscriberActor.trim() || Ne, e["target.actor"] = Q(t.targetActor), e["target.product.name"] = Q(
+function _i(e, t) {
+  e["subscriber.name"] = t.subscriberName.trim() || q, e["subscriber.actor"] = t.subscriberActor.trim() || Oe, e["target.actor"] = fe(t.targetActor), e["target.product.name"] = fe(
     t.targetProductName
   );
 }
-function tn(e) {
+function $n(e) {
   const t = e == null ? void 0 : e.event;
-  return !!(t && Re(t));
+  return !!(t && Ye(t));
 }
-async function qr(e, t) {
-  var i, s;
-  if (!(((i = e == null ? void 0 : e.hasPendingPayload) == null ? void 0 : i.call(e, t)) || tn(t)))
+async function Ui(e, t) {
+  var r, s;
+  if (!(((r = e == null ? void 0 : e.hasPendingPayload) == null ? void 0 : r.call(e, t)) || $n(t)))
     return t;
-  let r = t;
+  let i = t;
   if (e != null && e.fetchAllPayloads)
-    r = await e.fetchAllPayloads(t);
+    i = await e.fetchAllPayloads(t);
   else if (e != null && e.fetchPayload)
-    for (; (s = e.hasPendingPayload) != null && s.call(e, r); )
-      r = await e.fetchPayload(r);
-  return r;
+    for (; (s = e.hasPendingPayload) != null && s.call(e, i); )
+      i = await e.fetchPayload(i);
+  return i;
 }
-var nn = [
+var _n = [
   "TOTALSEG",
   "TOTAL_SEGMENTATOR",
   "TOTAL-SEGMENTATOR"
 ];
-var rn = [
+var Un = [
   "LUNGSCREENING",
   "LUNG_SCREENING"
 ];
-var sn = [
+var Mn = [
   "NEURO_SEG",
   "NEUROSEG",
   "NEURO-SEG"
 ];
-var on = [
+var Pn = [
   "DENTAL_SEG",
   "DENTALSEG",
   "DENTAL-SEG",
   "DENTALSEGMENTATOR"
 ];
-function qe(e) {
+var Rn = ["MHUB", "MHUB_AI", "MHUBAI"];
+function st(e) {
   return String(e || "").trim().toUpperCase().replace(/-/g, "_");
 }
-function Ae(e, t) {
-  const n = qe(e);
+function ye(e, t) {
+  const n = st(e);
   if (!n)
     return false;
-  const r = n.replace(/_/g, "");
-  return t.some((i) => {
-    const s = qe(i);
-    return s === n || s.replace(/_/g, "") === r;
+  const i = n.replace(/_/g, "");
+  return t.some((r) => {
+    const s = st(r);
+    return s === n || s.replace(/_/g, "") === i;
   });
 }
-function ve(e) {
-  return Ae(e, nn);
+function De(e) {
+  return ye(e, _n);
 }
-function Le(e) {
-  return Ae(e, rn);
+function Be(e) {
+  return ye(e, Un);
 }
-function Ie(e) {
-  return Ae(e, sn);
+function je(e) {
+  return ye(e, Mn);
 }
-function _e(e) {
-  return Ae(e, on);
+function He(e) {
+  return ye(e, Pn);
 }
-function zr(e) {
-  return ve(e) || Le(e) || Ie(e) || _e(e);
+function qe(e) {
+  return ye(e, Rn);
 }
-function ot(e, t) {
+function Mi(e) {
+  return qe(e) || De(e) || Be(e) || je(e) || He(e);
+}
+function At(e, t) {
   if (!Array.isArray(e))
     return;
-  const n = String(t).trim().toLowerCase(), r = e.find((s) => !s || typeof s != "object" ? false : String(s.key ?? "").trim().toLowerCase() === n);
-  if (!r)
+  const n = String(t).trim().toLowerCase(), i = e.find((s) => !s || typeof s != "object" ? false : String(s.key ?? "").trim().toLowerCase() === n);
+  if (!i)
     return;
-  const i = r.value;
-  return typeof i == "string" ? i.trim() : void 0;
+  const r = i.value;
+  return typeof r == "string" ? r.trim() : void 0;
 }
-function at(e) {
+function Nt(e) {
   if (!e || typeof e != "object" || e.source !== "status")
     return false;
-  const t = ot(e.items, "availability");
+  const t = At(e.items, "availability");
   return t ? t.toLowerCase() === "online" : Array.isArray(e.items) && e.items.length > 0;
 }
-function ke(e) {
+function ze(e) {
   const t = String((e == null ? void 0 : e.productName) ?? "").trim();
   if (t)
     return t;
   const n = e == null ? void 0 : e.data;
   if (n && typeof n == "object") {
-    const r = String(n.product ?? "").trim();
-    if (r)
-      return r;
+    const i = String(n.product ?? "").trim();
+    if (i)
+      return i;
   }
   return "";
 }
-function $e(e, t) {
+function Ce(e, t) {
   return Array.isArray(e) ? e.some((n) => {
-    const r = ke(n);
-    return t(r) && at(n.data);
+    const i = ze(n);
+    return t(i) && Nt(n.data);
   }) : false;
 }
-function Hr(e) {
-  return $e(
+function Pi(e) {
+  return Ce(
     e,
-    ve
+    De
   );
 }
-function Gr(e) {
-  return $e(e, Le);
+function Ri(e) {
+  return Ce(e, Be);
 }
-function Wr(e) {
-  return $e(e, Ie);
+function Fi(e) {
+  return Ce(e, je);
 }
-function Vr(e) {
-  return $e(e, _e);
+function Oi(e) {
+  return Ce(e, He);
 }
-function Jr(e) {
+function Di(e) {
+  return Ce(e, qe);
+}
+function Bi(e) {
   return typeof e != "string" ? false : e.trim().toUpperCase() === "STATUS";
 }
-var Yr = "lung";
-var Kr = "LUNGSCREENING";
-var Xr = "Lung Screening";
-var Zr = "Toronto, Canada";
-var Qr = "CT lung screening (dicom-send / nifti-send). Returns a screening result line.";
-var ei = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/lung_screening.py";
-var ti = "https://projectweek.na-mic.org/PW45_2026_Boston/Projects/ExtractingDeepLearningFeaturesFromCtImagesOfTheThoracicRegionForLungCancerApplications/";
-var ni = "dicom-send";
-var ri = {
-  id: Yr,
-  product: Kr,
-  title: Xr,
-  location: Zr,
-  summary: Qr,
-  githubUrl: ei,
-  websiteUrl: ti,
-  hubEvent: ni
+var ji = "mhub";
+var Hi = "MHUB";
+var qi = "MHub models";
+var zi = "Boston, USA";
+var Wi = "Medical Imaging Model Hub \u2014 peer-reviewed deep learning models via standardized Docker I/O.";
+var Gi = "https://github.com/MHubAI/";
+var Vi = "https://mhub.ai";
+var Ji = "dicom-send";
+var Zi = true;
+var Yi = "https://github.com/MHubAI.png";
+var Ki = {
+  id: ji,
+  product: Hi,
+  title: qi,
+  location: zi,
+  summary: Wi,
+  githubUrl: Gi,
+  websiteUrl: Vi,
+  hubEvent: Ji,
+  enabled: Zi,
+  iconUrl: Yi
 };
-var ii = "totalseg";
-var si = "TOTALSEG";
-var oi = "Total Segmentator";
-var ai = "Frankfurt, Germany";
-var ci = "Whole-body CT/MR multi-organ segmentation (dicom-send / nifti-send jobs). Returns DICOM SEG via dicom-send.";
-var ui = "https://github.com/wasserth/TotalSegmentator";
-var li = "https://totalsegmentator.com/";
-var fi = "dicom-send";
-var di = {
-  id: ii,
-  product: si,
-  title: oi,
-  location: ai,
-  summary: ci,
-  githubUrl: ui,
-  websiteUrl: li,
-  hubEvent: fi
+var Xi = "lung";
+var Qi = "LUNGSCREENING";
+var eo = "Lung Screening";
+var to = "Toronto, Canada";
+var no = "CT lung screening.";
+var ro = "https://github.com/rphellan/slicerW45";
+var io = "https://projectweek.na-mic.org/PW45_2026_Boston/Projects/ExtractingDeepLearningFeaturesFromCtImagesOfTheThoracicRegionForLungCancerApplications/";
+var oo = "dicom-send";
+var so = false;
+var ao = {
+  id: Xi,
+  product: Qi,
+  title: eo,
+  location: to,
+  summary: no,
+  githubUrl: ro,
+  websiteUrl: io,
+  hubEvent: oo,
+  enabled: so
 };
-var bi = "neuro";
-var hi = "NEURO_SEG";
-var mi = "Subcortical segmentation";
-var pi = "Montreal, Canada";
-var yi = "Neuro / subcortical segmentation (nifti-send). Prefers a NIfTI volume input.";
-var gi = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/neuro_seg.py";
-var Si = "nifti-send";
-var Ci = {
-  id: bi,
-  product: hi,
-  title: mi,
-  location: pi,
-  summary: yi,
-  githubUrl: gi,
-  hubEvent: Si
+var co = "totalseg";
+var uo = "TOTALSEG";
+var lo = "Total Segmentator";
+var fo = "Basel, Switzerland";
+var ho = "Whole-body CT/MR multi-organ segmentation.";
+var bo = "https://github.com/wasserth/TotalSegmentator";
+var mo = "https://totalsegmentator.com/";
+var po = "https://www.buymeacoffee.com/totalsegmentator";
+var go = "dicom-send";
+var yo = true;
+var Co = "https://pubs.rsna.org/doi/10.1148/ryai.230024";
+var So = {
+  id: co,
+  product: uo,
+  title: lo,
+  location: fo,
+  summary: ho,
+  githubUrl: bo,
+  websiteUrl: mo,
+  buyMeACoffeeUrl: po,
+  hubEvent: go,
+  enabled: yo,
+  citeUrl: Co
 };
-var wi = "dental";
-var Ei = "DENTAL_SEG";
-var Ti = "Dental Segmentator";
-var Ni = "Paris, France";
-var Ai = "Fully automatic CT/CBCT dental segmentation (maxilla, mandible, upper/lower teeth, mandibular canal). Accepts dicom-send / nifti-send.";
-var vi = "https://github.com/gaudot/SlicerDentalSegmentator";
-var Li = "https://www.kitware.com/dental-segmentator/";
-var Ii = "dicom-send";
-var _i = {
-  id: wi,
-  product: Ei,
-  title: Ti,
-  location: Ni,
-  summary: Ai,
-  githubUrl: vi,
-  websiteUrl: Li,
-  hubEvent: Ii
+var wo = "neuro";
+var Eo = "NEURO_SEG";
+var To = "Subcortical segmentation";
+var vo = "Montreal, Canada";
+var Lo = "Neuro / subcortical segmentation. Improved white and pial surfaces and parcellation (aparc+aseg) from recon-all pipeline (FreeSurfer 7.4.1) through added dataset";
+var Ao = "https://projectweek.na-mic.org/PW45_2026_Boston/Projects/ReconAllCorrectionScriptBasedOnManualSubcorticalSegmentationFiles/";
+var No = "nifti-send";
+var xo = true;
+var ko = {
+  id: wo,
+  product: Eo,
+  title: To,
+  location: vo,
+  summary: Lo,
+  websiteUrl: Ao,
+  hubEvent: No,
+  enabled: xo
 };
-function ae(e) {
-  const t = String(e.summary || e.capabilities || "").trim(), n = e.hubEvent === "nifti-send" ? "nifti-send" : "dicom-send", r = {
+var Io = "dental";
+var $o = "DENTAL_SEG";
+var _o = "Dental Segmentator";
+var Uo = "Paris, France";
+var Mo = "Fully automatic CT/CBCT dental segmentation (maxilla, mandible, upper/lower teeth, mandibular canal).";
+var Po = "https://github.com/gaudot/SlicerDentalSegmentator";
+var Ro = "https://www.kitware.com/dental-segmentator/";
+var Fo = "dicom-send";
+var Oo = true;
+var Do = {
+  id: Io,
+  product: $o,
+  title: _o,
+  location: Uo,
+  summary: Mo,
+  githubUrl: Po,
+  websiteUrl: Ro,
+  hubEvent: Fo,
+  enabled: Oo
+};
+var Bo = "data:image/svg+xml,%3csvg%20width='35'%20height='50'%20viewBox='0%200%2035%2050'%20fill='none'%20xmlns='http://www.w3.org/2000/svg'%3e%3cpath%20d='M30.7512%2011.6307L30.7171%2011.6106L30.6382%2011.5865C30.6699%2011.6134%2030.7097%2011.6289%2030.7512%2011.6307Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M31.2481%2015.2031L31.21%2015.2138L31.2481%2015.2031Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.7659%2011.6253C30.761%2011.6247%2030.7563%2011.6236%2030.7517%2011.6219C30.7514%2011.6251%2030.7514%2011.6283%2030.7517%2011.6314C30.7569%2011.6307%2030.7618%2011.6286%2030.7659%2011.6253Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.7515%2011.6314H30.7572V11.6278L30.7515%2011.6314Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M31.2178%2015.1962L31.2753%2015.1634L31.2967%2015.1514L31.3161%2015.1307C31.2796%2015.1464%2031.2463%2015.1686%2031.2178%2015.1962Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.8507%2011.7088L30.7945%2011.6553L30.7563%2011.6345C30.7768%2011.6707%2030.8107%2011.6973%2030.8507%2011.7088Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M16.715%2046.3714C16.6701%2046.3908%2016.6307%2046.4212%2016.6006%2046.4597L16.636%2046.4369C16.6601%2046.4149%2016.6942%2046.3888%2016.715%2046.3714Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M24.9235%2044.7473C24.9235%2044.6965%2024.8987%2044.7059%2024.9048%2044.8864C24.9048%2044.8717%2024.9108%2044.857%2024.9134%2044.843C24.9168%2044.8109%2024.9195%2044.7794%2024.9235%2044.7473Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M24.0719%2046.3714C24.027%2046.3908%2023.9877%2046.4212%2023.9575%2046.4597L23.993%2046.4369C24.017%2046.4149%2024.0512%2046.3888%2024.0719%2046.3714Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M10.9344%2046.7574C10.9003%2046.7277%2010.8586%2046.7082%2010.814%2046.7012C10.8501%2046.7186%2010.8862%2046.736%2010.9103%2046.7493L10.9344%2046.7574Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M9.63391%2045.5042C9.62859%2045.4515%209.61242%2045.4005%209.58643%2045.3544C9.60484%2045.4024%209.62025%2045.4516%209.63258%2045.5015L9.63391%2045.5042Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M18.3715%2023.0976C16.5857%2023.8665%2014.5591%2024.7382%2011.9326%2024.7382C10.8339%2024.736%209.74049%2024.5844%208.68213%2024.2875L10.4987%2043.0444C10.563%2043.8284%2010.9181%2044.5594%2011.4935%2045.0923C12.0689%2045.6251%2012.8225%2045.9208%2013.6047%2045.9207C13.6047%2045.9207%2016.1804%2046.0552%2017.0398%2046.0552C17.9648%2046.0552%2020.7385%2045.9207%2020.7385%2045.9207C21.5205%2045.9207%2022.274%2045.6249%2022.8493%2045.092C23.4245%2044.5592%2023.7795%2043.8283%2023.8438%2043.0444L25.7895%2022.3173C24.92%2022.0187%2024.0425%2021.8203%2023.0533%2021.8203C21.3424%2021.8196%2019.964%2022.4122%2018.3715%2023.0976Z'%20fill='%23FFFFFF'/%3e%3cpath%20d='M3.05859%2015.095L3.08936%2015.1238L3.10943%2015.1358C3.09397%2015.1205%203.07693%2015.1068%203.05859%2015.095Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M34.1896%2013.3639L33.916%2011.9762C33.6706%2010.7312%2033.1134%209.55468%2031.8426%209.10468C31.4353%208.96073%2030.9732%208.89885%2030.6608%208.60086C30.3485%208.30288%2030.2562%207.84009%2030.1839%207.41094C30.0502%206.62326%2029.9244%205.83492%2029.7873%205.04859C29.6689%204.37257%2029.5753%203.61315%2029.267%202.99296C28.8657%202.16022%2028.033%201.67322%2027.205%201.35102C26.7807%201.19173%2026.3477%201.05698%2025.9081%200.947426C23.8394%200.398542%2021.6644%200.196746%2019.5362%200.0817228C16.9817%20-0.0600379%2014.4204%20-0.0173274%2011.872%200.209526C9.97525%200.383071%207.97745%200.592939%206.17495%201.25281C5.51616%201.49429%204.8373%201.7842%204.33634%202.29609C3.72169%202.92502%203.52104%203.89768%203.96982%204.68199C4.28886%205.23895%204.82927%205.63245%205.40246%205.89276C6.14906%206.22818%206.92877%206.48341%207.72865%206.65421C9.95585%207.14928%2012.2626%207.34368%2014.538%207.42641C17.0599%207.52878%2019.5859%207.44582%2022.0958%207.1782C22.7165%207.10959%2023.336%207.0273%2023.9545%206.93134C24.6828%206.81901%2025.1503%205.86115%2024.9356%205.19388C24.6788%204.39611%2023.9886%204.08669%2023.208%204.2071C23.093%204.22526%2022.9786%204.24208%2022.8636%204.25889L22.7807%204.271C22.5163%204.30463%2022.2518%204.33602%2021.9874%204.36517C21.4412%204.42437%2020.8937%204.4728%2020.3448%204.51046C19.1155%204.59656%2017.8828%204.63625%2016.6508%204.63827C15.4403%204.63827%2014.229%204.60396%2013.0211%204.52392C12.47%204.48759%2011.9202%204.4414%2011.3718%204.38535C11.1223%204.35912%2010.8735%204.33154%2010.6247%204.3006L10.3879%204.27033L10.3364%204.26293L10.091%204.22728C9.58933%204.15127%209.08771%204.06382%208.59144%203.95822C8.54136%203.94704%208.49657%203.91902%208.46446%203.87879C8.43236%203.83855%208.41486%203.7885%208.41486%203.73691C8.41486%203.68533%208.43236%203.63528%208.46446%203.59504C8.49657%203.55481%208.54136%203.52679%208.59144%203.51561H8.6008C9.03086%203.42346%209.46426%203.34476%209.899%203.27615C10.0439%203.25328%2010.1893%203.23086%2010.3351%203.20888H10.3391C10.6113%203.19072%2010.8849%203.14162%2011.1557%203.10933C13.5125%202.86279%2015.8832%202.77874%2018.2513%202.85776C19.4011%202.89139%2020.5501%202.95933%2021.6945%203.07637C21.9406%203.10193%2022.1854%203.12884%2022.4302%203.15911C22.5238%203.17054%2022.6181%203.18399%2022.7124%203.19543L22.9024%203.22301C23.4562%203.30597%2024.0071%203.40664%2024.5551%203.52503C25.367%203.70261%2026.4097%203.76046%2026.7709%204.65508C26.8859%204.93894%2026.9381%205.25442%2027.0016%205.5524L27.0826%205.93245C27.0847%205.93927%2027.0863%205.94624%2027.0873%205.9533C27.2785%206.85017%2027.4701%207.74704%2027.6618%208.64391C27.6758%208.71017%2027.6762%208.77862%2027.6628%208.84501C27.6493%208.9114%2027.6225%208.97429%2027.5838%209.02977C27.5451%209.08525%2027.4955%209.13212%2027.4381%209.16746C27.3806%209.2028%2027.3165%209.22585%2027.2498%209.23517H27.2444L27.1274%209.25132L27.0117%209.26679C26.6452%209.31477%2026.2782%209.35961%2025.9108%209.40132C25.1871%209.48428%2024.4623%209.55603%2023.7364%209.61657C22.294%209.7372%2020.8486%209.81635%2019.4004%209.85401C18.6625%209.87374%2017.9247%209.88294%2017.1872%209.88159C14.2517%209.87926%2011.3188%209.70768%208.40283%209.36769C8.08714%209.33002%207.77145%209.28966%207.45577%209.24863C7.70056%209.28024%207.27786%209.22441%207.19225%209.2123C6.9916%209.18405%206.79095%209.15468%206.5903%209.12419C5.91679%209.02262%205.24729%208.8975%204.57511%208.78786C3.76249%208.65333%202.98531%208.72059%202.25026%209.12419C1.6469%209.45624%201.15857%209.96544%200.850401%2010.5838C0.533376%2011.243%200.439071%2011.9608%200.297279%2012.6691C0.155487%2013.3774%20-0.0652275%2014.1395%200.0183763%2014.8666C0.198292%2016.4359%201.28915%2017.7113%202.85823%2017.9965C4.33434%2018.2655%205.81847%2018.4835%207.30662%2018.6691C13.1524%2019.3892%2019.0582%2019.4753%2024.9223%2018.9261C25.3998%2018.8812%2025.8767%2018.8324%2026.3529%2018.7794C26.5016%2018.763%2026.6521%2018.7802%2026.7934%2018.8299C26.9347%2018.8795%2027.0631%2018.9603%2027.1693%2019.0663C27.2755%2019.1724%2027.3567%2019.3009%2027.4071%2019.4426C27.4575%2019.5843%2027.4757%2019.7356%2027.4605%2019.8853L27.312%2021.3369C27.0128%2024.2701%2026.7136%2027.2031%2026.4144%2030.1358C26.1023%2033.2157%2025.7882%2036.2953%2025.472%2039.3747C25.3829%2040.242%2025.2937%2041.109%2025.2045%2041.9758C25.1189%2042.8294%2025.1069%2043.7099%2024.9457%2044.5534C24.6915%2045.8799%2023.7986%2046.6945%2022.4957%2046.9925C21.3021%2047.2657%2020.0827%2047.4091%2018.8586%2047.4203C17.5016%2047.4277%2016.1452%2047.3672%2014.7881%2047.3746C13.3395%2047.3826%2011.5651%2047.2481%2010.4468%2046.1638C9.46426%2045.2113%209.32849%2043.72%209.19472%2042.4306C9.01637%2040.7234%208.83957%2039.0164%208.66434%2037.3097L7.68116%2027.8192L7.0451%2021.6786C7.0344%2021.577%207.0237%2021.4768%207.01367%2021.3745C6.93742%2020.642%206.42176%2019.925%205.60913%2019.962C4.91354%2019.9929%204.12299%2020.5875%204.20458%2021.3745L4.67611%2025.927L5.65126%2035.3442C5.92905%2038.0191%206.20617%2040.6944%206.48262%2043.3703C6.53613%2043.8828%206.58628%2044.3967%206.64247%2044.9093C6.94812%2047.7102%209.075%2049.2196%2011.7089%2049.6448C13.2472%2049.8936%2014.8229%2049.9448%2016.384%2049.9703C18.3851%2050.0026%2020.4063%2050.08%2022.3747%2049.7154C25.2915%2049.1773%2027.4799%2047.2185%2027.7922%2044.1801C27.8814%2043.303%2027.9706%2042.4256%2028.0597%2041.548C28.3563%2038.6458%2028.6523%2035.7433%2028.9479%2032.8406L29.9151%2023.3562L30.3585%2019.0095C30.3806%2018.794%2030.4711%2018.5913%2030.6166%2018.4315C30.7621%2018.2717%2030.9549%2018.1633%2031.1665%2018.1223C32.0005%2017.9588%2032.7977%2017.6796%2033.391%2017.0413C34.3354%2016.0249%2034.5233%2014.6998%2034.1896%2013.3639ZM2.81542%2014.3016C2.82813%2014.2955%202.80472%2014.4052%202.79469%2014.4563C2.79268%2014.3789%202.7967%2014.3103%202.81542%2014.3016ZM2.89635%2014.9312C2.90304%2014.9265%202.9231%2014.9534%202.94384%2014.9857C2.9124%2014.9561%202.89234%2014.9339%202.89568%2014.9312H2.89635ZM2.97594%2015.0368C3.0047%2015.0859%203.02009%2015.1168%202.97594%2015.0368V15.0368ZM3.13579%2015.1673H3.1398C3.1398%2015.172%203.14716%2015.1767%203.14984%2015.1814C3.1454%2015.1762%203.14048%2015.1715%203.13513%2015.1673H3.13579ZM31.1277%2014.9722C30.828%2015.2588%2030.3766%2015.392%2029.9305%2015.4586C24.9276%2016.2052%2019.8519%2016.5832%2014.7942%2016.4164C11.1745%2016.292%207.59287%2015.8877%204.00928%2015.3785C3.65815%2015.3287%203.27758%2015.2642%203.03614%2015.0038C2.58133%2014.5128%202.80472%2013.524%202.9231%2012.9307C3.03145%2012.3872%203.23879%2011.6628%203.88154%2011.5854C4.88478%2011.467%206.04989%2011.8928%207.04243%2012.0442C8.2374%2012.2276%209.43684%2012.3744%2010.6407%2012.4848C15.7787%2012.9556%2021.0029%2012.8823%2026.1181%2012.1935C27.0505%2012.0675%2027.9795%2011.9211%2028.9051%2011.7543C29.7298%2011.6056%2030.6441%2011.3264%2031.1424%2012.1854C31.4841%2012.7706%2031.5296%2013.5536%2031.4768%2014.2148C31.4605%2014.5029%2031.3354%2014.7739%2031.127%2014.9722H31.1277Z'%20fill='%23FFDD00'/%3e%3c/svg%3e";
+function jo(e) {
+  const t = String(e.summary || e.capabilities || "").trim(), n = e.hubEvent === "nifti-send" ? "nifti-send" : "dicom-send", i = {
     id: String(e.id || "").trim(),
     product: String(e.product || "").trim(),
     title: String(e.title || "").trim(),
@@ -12625,101 +14260,121 @@ function ae(e) {
     summary: t,
     capabilities: t,
     hubEvent: n
-  }, i = String(e.githubUrl || "").trim();
-  i && (r.githubUrl = i);
+  }, r = String(e.githubUrl || "").trim();
+  r && (i.githubUrl = r);
   const s = String(e.websiteUrl || "").trim();
-  s && (r.websiteUrl = s);
+  s && (i.websiteUrl = s);
   const o = String(e.buyMeACoffeeUrl || "").trim();
-  return o && (r.buyMeACoffeeUrl = o), r;
+  o && (i.buyMeACoffeeUrl = o);
+  const c = String(e.iconUrl || "").trim();
+  c && (i.iconUrl = c);
+  const l = String(e.cite || "").trim();
+  l && (i.cite = l);
+  const h = String(e.citeUrl || "").trim();
+  return h && (i.citeUrl = h), i;
 }
-var x = Object.freeze([
-  ae(ri),
-  ae(di),
-  ae(Ci),
-  ae(_i)
-]);
-function W(e) {
+function Ho(e) {
+  return (e == null ? void 0 : e.enabled) !== false;
+}
+var z = Object.freeze(
+  [Ki, ao, So, ko, Do].filter(Ho).map(jo)
+);
+function F(e) {
   return String(e ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function ki(e) {
+function qo(e) {
   if (!e || typeof e != "object") return "";
-  const t = W(e.title), n = W(e.summary || e.capabilities), r = [
-    '<div class="cast-inference-info-card">',
-    `<div class="cast-inference-info-title">${t}</div>`
-  ];
-  n && r.push(`<p class="cast-inference-info-summary">${n}</p>`), r.push('<div class="cast-inference-info-links">');
-  const i = String(e.githubUrl || "").trim();
-  i && r.push(
-    `<a class="cast-inference-info-link cast-inference-info-github" href="${W(i)}" target="_blank" rel="noopener noreferrer"><svg class="cast-inference-info-github-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>`
+  const t = F(e.title), n = F(e.summary || e.capabilities), i = String(e.iconUrl || "").trim(), r = ['<div class="cast-inference-info-card">'];
+  i ? r.push(
+    `<div class="cast-inference-info-heading"><img class="cast-inference-info-icon" src="${F(i)}" alt="" width="28" height="28" decoding="async" /><div class="cast-inference-info-title">${t}</div></div>`
+  ) : r.push(`<div class="cast-inference-info-title">${t}</div>`), n && r.push(`<p class="cast-inference-info-summary">${n}</p>`);
+  const s = String(e.cite || "").trim(), o = String(e.citeUrl || "").trim();
+  if (s) {
+    const a = F(s);
+    o ? r.push(
+      `<p class="cast-inference-info-citation"><span class="cast-inference-info-citation-label">Citation:</span> <a class="cast-inference-info-citation-link" href="${F(o)}" target="_blank" rel="noopener noreferrer">${a}</a></p>`
+    ) : r.push(
+      `<p class="cast-inference-info-citation"><span class="cast-inference-info-citation-label">Citation:</span> ${a}</p>`
+    );
+  }
+  r.push('<div class="cast-inference-info-links">');
+  const c = String(e.githubUrl || "").trim();
+  c && r.push(
+    `<a class="cast-inference-info-link cast-inference-info-github" href="${F(c)}" target="_blank" rel="noopener noreferrer"><svg class="cast-inference-info-github-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>`
   );
-  const s = String(e.websiteUrl || "").trim();
-  s && r.push(
-    `<a class="cast-inference-info-link" href="${W(s)}" target="_blank" rel="noopener noreferrer">Website</a>`
+  const l = String(e.websiteUrl || "").trim();
+  l && r.push(
+    `<a class="cast-inference-info-link" href="${F(l)}" target="_blank" rel="noopener noreferrer">Website</a>`
+  ), o && r.push(
+    `<a class="cast-inference-info-link" href="${F(o)}" target="_blank" rel="noopener noreferrer" title="${F(s || "Citation")}">Cite</a>`
   );
-  const o = String(e.buyMeACoffeeUrl || "").trim();
-  return o && r.push(
-    `<a class="cast-inference-info-coffee" href="${W(o)}" target="_blank" rel="noopener noreferrer" title="Buy Me a Coffee"><span aria-hidden="true">\u2615</span> Buy me a coffee</a>`
+  const h = String(e.buyMeACoffeeUrl || "").trim();
+  return h && r.push(
+    `<a class="cast-inference-info-link cast-inference-info-coffee" href="${F(h)}" target="_blank" rel="noopener noreferrer" title="Buy Me a Coffee"><img class="cast-inference-info-coffee-icon" src="${Bo}" alt="" width="12" height="16" decoding="async" />Buy me a coffee</a>`
   ), r.push("</div></div>"), r.join("");
 }
-function $i(e, t) {
+function zo(e, t) {
   if (!e || typeof e != "object")
     return "";
   const n = [
     String(e.title || "").trim(),
     String(e.summary || e.capabilities || "").trim(),
     `Location: ${String(e.location || "").trim()}`
-  ].filter((i) => i && !i.endsWith(": "));
+  ].filter((s) => s && !s.endsWith(": "));
   t && n.push(`Status: ${t}`);
+  const i = String(e.cite || "").trim();
+  i && n.push(`Citation: ${i}`);
   const r = String(e.githubUrl || "").trim();
   return r && n.push(r), n.join(`
 `);
 }
-function an(e) {
+function Fn(e) {
   const t = String(e || "").trim().toUpperCase().replace(/-/g, "_");
   if (!t)
     return null;
   const n = t.replace(/_/g, "");
-  return x.find((r) => {
-    const i = String(r.product || "").trim().toUpperCase().replace(/-/g, "_");
-    return i === t || i.replace(/_/g, "") === n;
+  return z.find((i) => {
+    const r = String(i.product || "").trim().toUpperCase().replace(/-/g, "_");
+    return r === t || r.replace(/_/g, "") === n;
   }) || null;
 }
-function cn(e) {
+function On(e) {
   return String(e || "").trim().toUpperCase();
 }
-var un = Object.freeze({
+var Dn = Object.freeze({
   ira: (e) => e === "SLICERLIVE-IRA" || e.startsWith("SLICERLIVE-IRA"),
   ohif: (e) => e === "OHIF" || e.startsWith("OHIF"),
   volview: (e) => e === "VOLVIEW" || e.startsWith("VOLVIEW"),
   slicer: (e) => e === "3DSLICER-ID" || e === "SLICER-HUB" || e.startsWith("3DSLICER") || e.startsWith("SLICER-HUB"),
   /** hub-mirror Four-Up LiveScene stream client (not desktop Image Display). */
   hubMirror: (e) => e === "SLICERLIVE-HUB-MIRROR" || e.startsWith("SLICERLIVE-HUB-MIRROR"),
+  mhub: (e) => e === "MHUB" || e.startsWith("MHUB") || e === "MHUB_AI" || e.startsWith("MHUB_AI") || e === "MHUBAI" || e.startsWith("MHUBAI"),
   lung: (e) => e === "LUNGSCREENING" || e.startsWith("LUNGSCREENING"),
   totalseg: (e) => e === "TOTALSEG" || e.startsWith("TOTALSEG") || e === "TOTAL_SEGMENTATOR" || e.startsWith("TOTAL_SEGMENTATOR") || e === "TOTAL-SEGMENTATOR" || e.startsWith("TOTAL-SEGMENTATOR"),
   neuro: (e) => e === "NEURO_SEG" || e.startsWith("NEURO_SEG") || e === "NEUROSEG" || e.startsWith("NEUROSEG"),
   dental: (e) => e === "DENTAL_SEG" || e.startsWith("DENTAL_SEG") || e === "DENTALSEG" || e.startsWith("DENTALSEG") || e === "DENTALSEGMENTATOR" || e.startsWith("DENTALSEGMENTATOR"),
   reporting: (e) => e === "CAST-RPT" || e.startsWith("CAST-RPT")
 });
-function Ui(e, t) {
-  const n = un[t];
-  return n ? n(cn(e)) : false;
+function Wo(e, t) {
+  const n = Dn[t];
+  return n ? n(On(e)) : false;
 }
-function ln(e, t, n) {
+function Bn(e, t, n) {
   if (!e || typeof e != "object")
     return { online: false, items: [], raw: n, ...t ? { productName: t } : {} };
-  const r = (
+  const i = (
     /** @type {{ items?: unknown }} */
     e
-  ), i = Array.isArray(r.items) ? r.items : [], s = ot(i, "job");
+  ), r = Array.isArray(i.items) ? i.items : [], s = At(r, "job");
   return {
-    online: at(e),
-    items: i,
+    online: Nt(e),
+    items: r,
     ...s ? { job: s } : {},
     raw: n,
     ...t ? { productName: t } : {}
   };
 }
-function fn(e) {
+function jn(e) {
   if (!e || typeof e != "object")
     return { online: false, items: [], error: "Empty STATUS result" };
   const t = (
@@ -12733,94 +14388,94 @@ function fn(e) {
       error: `HTTP ${t.status ?? "?"}`,
       raw: t.data
     };
-  const { responses: n } = he(t.data);
-  for (const r of n) {
-    const i = r.data;
-    if (!i || typeof i != "object")
+  const { responses: n } = xe(t.data);
+  for (const i of n) {
+    const r = i.data;
+    if (!r || typeof r != "object")
       continue;
-    const s = ke(r) || void 0, o = ln(i, s, t.data);
+    const s = ze(i) || void 0, o = Bn(r, s, t.data);
     if (o.online || Array.isArray(
       /** @type {{ items?: unknown }} */
-      i.items
+      r.items
     ))
       return o;
   }
   return { online: false, items: [], raw: t.data };
 }
-async function ct(e, t) {
+async function xt(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
     return { ok: false, status: 0, data: { error: "No Cast client" } };
   if (!n)
     return { ok: false, status: 0, data: { error: "No subscriber name" } };
-  const r = String((t == null ? void 0 : t.topic) || "").trim(), i = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), o = String((t == null ? void 0 : t.targetActor) || "*").trim() || "*", c = String((t == null ? void 0 : t.targetProductName) || "").trim();
+  const i = String((t == null ? void 0 : t.topic) || "").trim(), r = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), o = String((t == null ? void 0 : t.targetActor) || "*").trim() || "*", c = String((t == null ? void 0 : t.targetProductName) || "").trim();
   return e.request({
     "subscriber.name": n,
-    ...i ? { "subscriber.product.name": i } : {},
+    ...r ? { "subscriber.product.name": r } : {},
     ...s ? { "subscriber.actor": s } : {},
     "target.actor": o,
     ...c ? { "target.product.name": c } : {},
     event: {
-      "hub.event": me("STATUS"),
-      ...r ? { "hub.topic": r } : {},
+      "hub.event": ke("STATUS"),
+      ...i ? { "hub.topic": i } : {},
       context: { dataType: "STATUS" }
     }
   });
 }
-async function Ri(e, t) {
+async function Go(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
     return { ok: false, status: 0, data: { error: "No Cast client" } };
   if (!n)
     return { ok: false, status: 0, data: { error: "No subscriber name" } };
-  const r = String((t == null ? void 0 : t.topic) || "").trim(), i = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), o = String((t == null ? void 0 : t.targetActor) || "ID").trim() || "ID", c = String((t == null ? void 0 : t.targetProductName) || "").trim();
+  const i = String((t == null ? void 0 : t.topic) || "").trim(), r = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), o = String((t == null ? void 0 : t.targetActor) || "ID").trim() || "ID", c = String((t == null ? void 0 : t.targetProductName) || "").trim();
   return e.request({
     "subscriber.name": n,
-    ...i ? { "subscriber.product.name": i } : {},
+    ...r ? { "subscriber.product.name": r } : {},
     ...s ? { "subscriber.actor": s } : {},
     "target.actor": o,
     ...c ? { "target.product.name": c } : {},
     event: {
-      "hub.event": me("LIVESCENE"),
-      ...r ? { "hub.topic": r } : {},
+      "hub.event": ke("LIVESCENE"),
+      ...i ? { "hub.topic": i } : {},
       context: { dataType: "LIVESCENE" }
     }
   });
 }
-async function xi(e, t) {
-  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.subscriberName) || "").trim();
+async function Vo(e, t) {
+  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), i = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
     return { online: false, items: [], error: "No Cast client" };
-  if (!r)
+  if (!i)
     return { online: false, items: [], error: "No subscriber name" };
   if (!n)
     return { online: false, items: [], error: "No target product" };
   try {
-    const i = await ct(e, {
-      subscriberName: r,
+    const r = await xt(e, {
+      subscriberName: i,
       subscriberProductName: t == null ? void 0 : t.subscriberProductName,
       subscriberActor: t == null ? void 0 : t.subscriberActor,
       topic: t == null ? void 0 : t.topic,
       targetProductName: n
     });
-    return fn(i);
-  } catch (i) {
+    return jn(r);
+  } catch (r) {
     return {
       online: false,
       items: [],
-      error: i instanceof Error ? i.message : String(i)
+      error: r instanceof Error ? r.message : String(r)
     };
   }
 }
-function Pi(e, t) {
+function Jo(e, t) {
   if (!e) return false;
-  const n = an(e);
-  return n && n.id === t.id ? true : t.id === "totalseg" ? ve(e) : t.id === "lung" ? Le(e) : t.id === "neuro" ? Ie(e) : t.id === "dental" ? _e(e) : false;
+  const n = Fn(e);
+  return n && n.id === t.id ? true : t.id === "mhub" ? qe(e) : t.id === "totalseg" ? De(e) : t.id === "lung" ? Be(e) : t.id === "neuro" ? je(e) : t.id === "dental" ? He(e) : false;
 }
-function dn(e) {
+function Hn(e) {
   if (!e || typeof e != "object")
-    return x.map((r) => ({
-      server: r,
+    return z.map((i) => ({
+      server: i,
       probe: { online: false, items: [], error: "Empty STATUS result" }
     }));
   const t = (
@@ -12828,38 +14483,38 @@ function dn(e) {
     e
   );
   if (t.ok === false) {
-    const r = `HTTP ${t.status ?? "?"}`;
-    return x.map((i) => ({
-      server: i,
-      probe: { online: false, items: [], error: r, raw: t.data }
+    const i = `HTTP ${t.status ?? "?"}`;
+    return z.map((r) => ({
+      server: r,
+      probe: { online: false, items: [], error: i, raw: t.data }
     }));
   }
-  const { responses: n } = he(t.data);
-  return x.map((r) => {
-    for (const i of n) {
-      const s = ke(i);
-      if (!Pi(s, r)) continue;
-      const o = i.data;
+  const { responses: n } = xe(t.data);
+  return z.map((i) => {
+    for (const r of n) {
+      const s = ze(r);
+      if (!Jo(s, i)) continue;
+      const o = r.data;
       return {
-        server: r,
-        probe: ln(
+        server: i,
+        probe: Bn(
           o,
-          s || r.product,
+          s || i.product,
           t.data
         )
       };
     }
     return {
-      server: r,
+      server: i,
       probe: { online: false, items: [], raw: t.data }
     };
   });
 }
-async function Oi(e, t) {
+async function Zo(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request) || !n)
-    return x.map((r) => ({
-      server: r,
+    return z.map((i) => ({
+      server: i,
       probe: {
         online: false,
         items: [],
@@ -12867,59 +14522,59 @@ async function Oi(e, t) {
       }
     }));
   try {
-    const r = await ct(e, {
+    const i = await xt(e, {
       subscriberName: n,
       subscriberProductName: t == null ? void 0 : t.subscriberProductName,
       subscriberActor: t == null ? void 0 : t.subscriberActor,
       topic: t == null ? void 0 : t.topic,
       targetActor: "*"
     });
-    return dn(r);
-  } catch (r) {
-    const i = r instanceof Error ? r.message : String(r);
-    return x.map((s) => ({
+    return Hn(i);
+  } catch (i) {
+    const r = i instanceof Error ? i.message : String(i);
+    return z.map((s) => ({
       server: s,
-      probe: { online: false, items: [], error: i }
+      probe: { online: false, items: [], error: r }
     }));
   }
 }
-async function Di(e, t) {
-  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.hubEvent) || "").trim(), i = String((t == null ? void 0 : t.subscriberName) || "").trim(), s = String((t == null ? void 0 : t.topic) || "").trim(), o = Array.isArray(t == null ? void 0 : t.files) ? t.files : [];
+async function Yo(e, t) {
+  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), i = String((t == null ? void 0 : t.hubEvent) || "").trim(), r = String((t == null ? void 0 : t.subscriberName) || "").trim(), s = String((t == null ? void 0 : t.topic) || "").trim(), o = Array.isArray(t == null ? void 0 : t.files) ? t.files : [];
   if (!(e != null && e.publish))
     return { ok: false, detail: "No Cast client" };
-  if (!i)
+  if (!r)
     return { ok: false, detail: "No subscriber name" };
   if (!s)
     return { ok: false, detail: "No Cast topic" };
   if (!n)
     return { ok: false, detail: "No target product" };
-  if (!r)
+  if (!i)
     return { ok: false, detail: "No hub.event" };
   if (!o.length)
     return { ok: false, detail: "No volume files" };
-  const c = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), d = String((t == null ? void 0 : t.subscriberActor) || "").trim(), f = t != null && t.contextExtras && typeof t.contextExtras == "object" ? t.contextExtras : {};
+  const c = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), l = String((t == null ? void 0 : t.subscriberActor) || "").trim(), h = t != null && t.contextExtras && typeof t.contextExtras == "object" ? t.contextExtras : {};
   try {
     const a = await e.publish({
-      "subscriber.name": i,
+      "subscriber.name": r,
       ...c ? { "subscriber.product.name": c } : {},
-      ...d ? { "subscriber.actor": d } : {},
+      ...l ? { "subscriber.actor": l } : {},
       "target.product.name": n,
       event: {
         "hub.topic": s,
-        "hub.event": r,
+        "hub.event": i,
         context: {
-          files: o.map((l) => ({
-            url: String(l.url || "").trim(),
-            fileName: String(l.fileName || "volume").trim() || "volume"
+          files: o.map((f) => ({
+            url: String(f.url || "").trim(),
+            fileName: String(f.fileName || "volume").trim() || "volume"
           })),
-          ...f
+          ...h
         }
       }
-    }), b = !!(a && /** @type {{ ok?: boolean }} */
+    }), u = !!(a && /** @type {{ ok?: boolean }} */
     a.ok !== false);
     return {
-      ok: b,
-      detail: b ? "published" : `publish status ${/** @type {{ status?: number }} */
+      ok: u,
+      detail: u ? "published" : `publish status ${/** @type {{ status?: number }} */
       (a == null ? void 0 : a.status) ?? "?"}`,
       response: a
     };
@@ -12930,9 +14585,9 @@ async function Di(e, t) {
     };
   }
 }
-var Mi = 1e4;
-var Et = 5e3;
-var Tt = {
+var Ko = 1e4;
+var zt = 5e3;
+var Wt = {
   config: {
     hub: {},
     session: {},
@@ -12949,16 +14604,16 @@ var Tt = {
   onMessageCallback: null,
   onConnectionStateChangeCallback: null
 };
-function Bi(e, t) {
+function Xo(e, t) {
   t.classHierarchy.push("vtkCastClient");
-  function n(a, b) {
-    t.onConnectionStateChangeCallback && t.onConnectionStateChangeCallback(a, b);
-  }
-  function r() {
-    const a = t.session.productName || t.config.productName || ze;
-    return En(a);
+  function n(a, u) {
+    t.onConnectionStateChangeCallback && t.onConnectionStateChangeCallback(a, u);
   }
   function i() {
+    const a = t.session.productName || t.config.productName || at;
+    return nr(a);
+  }
+  function r() {
     const a = t.hub.authorization_endpoint;
     if (typeof a == "string" && a.trim())
       return a.trim();
@@ -12971,31 +14626,31 @@ function Bi(e, t) {
   function s() {
     console.debug("CastClient: websocket is closed."), t.hub.resubscribeRequested = true, n("disconnected");
   }
-  const o = Kn(() => ({
+  const o = Ir(() => ({
     hubEndpoint: t.hub.hub_endpoint,
     accessToken: t.hub.token
   }));
   function c(a) {
     try {
-      const b = JSON.parse(a);
-      if (b["hub.mode"])
+      const u = JSON.parse(a);
+      if (u["hub.mode"])
         return;
-      const l = b.event;
-      if (!l || l["hub.event"] === "heartbeat" || b.id === t.hub.lastPublishedMessageID)
+      const f = u.event;
+      if (!f || f["hub.event"] === "heartbeat" || u.id === t.hub.lastPublishedMessageID)
         return;
-      t.onMessageCallback && t.onMessageCallback(b);
-    } catch (b) {
-      console.warn("CastClient: websocket processing error:", b);
+      t.onMessageCallback && t.onMessageCallback(u);
+    } catch (u) {
+      console.warn("CastClient: websocket processing error:", u);
     }
   }
-  async function d() {
+  async function l() {
     t.hub.resubscribeRequested && t.hub.subscribed && t.config.autoReconnect ? (console.debug("CastClient: Try to resubscribe"), t.hub.resubscribeRequested = false, await e.subscribe() !== 202 && (t.hub.resubscribeRequested = true)) : !t.hub.subscribed && t.hub.resubscribeRequested && (t.hub.resubscribeRequested = false);
   }
   e.onMessage = (a) => {
     t.onMessageCallback = a;
   }, e.onConnectionStateChange = (a) => {
     t.onConnectionStateChangeCallback = a;
-  }, e.delete = Cn(() => {
+  }, e.delete = er(() => {
     t.reconnectInterval && (clearInterval(t.reconnectInterval), t.reconnectInterval = null), e.unsubscribe();
   }, e.delete), e.getHubConfig = () => {
     const a = t.hub;
@@ -13040,7 +14695,7 @@ function Bi(e, t) {
   }, e.setUserName = (a) => {
     t.session.userName = a || "";
   }, e.authenticate = async () => {
-    const a = i();
+    const a = r();
     if (!a)
       throw new Error(
         "CastClient.authenticate: no authorization_endpoint or token_endpoint configured."
@@ -13054,34 +14709,34 @@ function Bi(e, t) {
     } catch {
       console.debug("CastClient: Authorizing at hub");
     }
-    const b = t.session.productName || t.config.productName || "CAST", l = new URLSearchParams();
-    t.hub.lastIdToken ? l.append("id_token", t.hub.lastIdToken) : t.session.userName && l.append("user_name", t.session.userName), l.append("client_product_name", b), t.session.topic && l.append("topic", t.session.topic);
-    let u;
+    const u = t.session.productName || t.config.productName || "CAST", f = new URLSearchParams();
+    t.hub.lastIdToken ? f.append("id_token", t.hub.lastIdToken) : t.session.userName && f.append("user_name", t.session.userName), f.append("client_product_name", u), t.session.topic && f.append("topic", t.session.topic);
+    let d;
     try {
-      u = await fetch(a, {
+      d = await fetch(a, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: l
+        body: f
       });
     } catch (m) {
-      const y = m instanceof Error ? m.message : String(m);
-      throw console.error("CastClient: Exception during authenticate:", y), m;
+      const g = m instanceof Error ? m.message : String(m);
+      throw console.error("CastClient: Exception during authenticate:", g), m;
     }
-    if (u.status !== 200) {
-      const m = await u.text().catch(() => "");
+    if (d.status !== 200) {
+      const m = await d.text().catch(() => "");
       throw console.error(
         "CastClient: Authenticate failed. Status:",
-        u.status,
+        d.status,
         m
       ), new Error(
-        `CastClient.authenticate failed (HTTP ${u.status})`
+        `CastClient.authenticate failed (HTTP ${d.status})`
       );
     }
-    const h = await u.json();
-    return typeof h.user_name == "string" && h.user_name && (t.session.userName = h.user_name), {
-      user_name: h.user_name || "",
-      code: h.code || "",
-      expires_in: typeof h.expires_in == "number" ? h.expires_in : void 0
+    const b = await d.json();
+    return typeof b.user_name == "string" && b.user_name && (t.session.userName = b.user_name), {
+      user_name: b.user_name || "",
+      code: b.code || "",
+      expires_in: typeof b.expires_in == "number" ? b.expires_in : void 0
     };
   }, e.getToken = async (a) => {
     if (typeof a != "string" || !a)
@@ -13089,91 +14744,91 @@ function Bi(e, t) {
         "CastClient.getToken: code is required (call authenticate() first)."
       ), false;
     try {
-      const u = new URL(t.hub.token_endpoint);
+      const d = new URL(t.hub.token_endpoint);
       console.debug(
         "CastClient: Exchanging code at:",
-        `${u.origin}${u.pathname}`
+        `${d.origin}${d.pathname}`
       );
     } catch {
       console.debug("CastClient: Exchanging code at hub");
     }
-    const b = t.session.productName || t.config.productName || "CAST", l = new URLSearchParams();
-    l.append("grant_type", "authorization_code"), l.append("code", a), l.append("client_id", t.hub.client_id || ""), l.append("client_secret", t.hub.client_secret || ""), l.append("client_product_name", b);
+    const u = t.session.productName || t.config.productName || "CAST", f = new URLSearchParams();
+    f.append("grant_type", "authorization_code"), f.append("code", a), f.append("client_id", t.hub.client_id || ""), f.append("client_secret", t.hub.client_secret || ""), f.append("client_product_name", u);
     try {
-      const u = await fetch(t.hub.token_endpoint, {
+      const d = await fetch(t.hub.token_endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: l
+        body: f
       });
-      if (u.status === 200) {
-        const h = await u.json();
-        return typeof h.access_token == "string" && h.access_token && (t.hub.token = h.access_token), typeof h.id_token == "string" && h.id_token && (t.hub.lastIdToken = h.id_token), h.topic && typeof h.topic == "string" && (t.config.preserveSessionTopicFromToken || e.setTopic(h.topic), t.config.autoStart && e.subscribe()), !!t.hub.token;
+      if (d.status === 200) {
+        const b = await d.json();
+        return typeof b.access_token == "string" && b.access_token && (t.hub.token = b.access_token), typeof b.id_token == "string" && b.id_token && (t.hub.lastIdToken = b.id_token), b.topic && typeof b.topic == "string" && (t.config.preserveSessionTopicFromToken || e.setTopic(b.topic), t.config.autoStart && e.subscribe()), !!t.hub.token;
       }
-      return await u.text(), console.error(
+      return await d.text(), console.error(
         "CastClient: Error getting token. Status:",
-        u.status
+        d.status
       ), false;
-    } catch (u) {
-      const h = u instanceof Error ? u.message : String(u);
-      return console.error("CastClient: Exception getting token:", h), false;
+    } catch (d) {
+      const b = d instanceof Error ? d.message : String(d);
+      return console.error("CastClient: Exception getting token:", b), false;
     }
   }, e.subscribe = async (a = false) => {
-    const b = t.session.topic && t.session.topic.trim();
-    if (!b)
+    const u = t.session.topic && t.session.topic.trim();
+    if (!u)
       return console.warn(
         "CastClient: Error. subscription not sent. No topic defined."
       ), "error: topic not defined";
-    if ((!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = He(
+    if ((!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = ct(
       t.session.productName || t.config.productName || "CAST"
     )), !t.hub.token)
       return console.warn(
         "CastClient: Error. subscription not sent. No token available."
       ), "error: no token";
-    const l = ht(t.config.callbackUrl), u = mt(
+    const f = Rt(t.config.callbackUrl), d = Ft(
       "subscribe",
       {
         ...t.session,
-        topic: b,
+        topic: u,
         subscriberName: t.session.subscriberName
       },
-      l,
+      f,
       t.config.productVersion
-    ), h = {
+    ), b = {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Authorization: `Bearer ${t.hub.token}`
       },
-      body: u,
-      signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(Et) : void 0
+      body: d,
+      signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(zt) : void 0
     };
     try {
       n("connecting");
-      const m = await fetch(t.hub.hub_endpoint, h);
+      const m = await fetch(t.hub.hub_endpoint, b);
       if (m.status === 202) {
         t.hub.resubscribeRequested = false;
-        let y;
+        let g;
         try {
-          y = await m.json();
-        } catch (w) {
+          g = await m.json();
+        } catch (L) {
           t.hub.subscribed = false;
-          const L = w instanceof Error ? w.message : String(w);
+          const A = L instanceof Error ? L.message : String(L);
           return console.error(
             "CastClient: Subscribe 202 body was not valid JSON:",
-            L
+            A
           ), n("error"), 0;
         }
-        const S = y["hub.channel.endpoint"];
-        if (!S || typeof S != "string")
+        const y = g["hub.channel.endpoint"];
+        if (!y || typeof y != "string")
           return t.hub.subscribed = false, console.error(
             "CastClient: Subscribe 202 missing hub.channel.endpoint"
           ), n("error"), 0;
-        let g = S;
+        let N = y;
         try {
-          const w = new URL(t.hub.hub_endpoint), L = new URL(S), $2 = w.protocol === "https:" ? "wss:" : "ws:";
-          g = S.replace(
-            L.origin,
-            `${$2}//${w.host}`
+          const L = new URL(t.hub.hub_endpoint), A = new URL(y), S = L.protocol === "https:" ? "wss:" : "ws:";
+          N = y.replace(
+            A.origin,
+            `${S}//${L.host}`
           );
         } catch {
         }
@@ -13184,25 +14839,25 @@ function Bi(e, t) {
           }
           t.hub.websocket = null;
         }
-        let E;
+        let T;
         try {
-          E = new WebSocket(g);
-        } catch (w) {
+          T = new WebSocket(N);
+        } catch (L) {
           t.hub.subscribed = false;
-          const L = w instanceof Error ? w.message : String(w);
+          const A = L instanceof Error ? L.message : String(L);
           return console.error(
             "CastClient: Failed to open WebSocket after subscribe:",
-            L
+            A
           ), n("error"), 0;
         }
-        return t.hub.subscribed = true, t.hub.websocket = E, t.hub.websocket.onopen = function() {
+        return t.hub.subscribed = true, t.hub.websocket = T, t.hub.websocket.onopen = function() {
           this.send(
             JSON.stringify({
-              "hub.channel.endpoint": g
+              "hub.channel.endpoint": N
             })
           ), n("connected");
-        }, t.hub.websocket.addEventListener("message", (w) => {
-          typeof w.data == "string" && c(w.data);
+        }, t.hub.websocket.addEventListener("message", (L) => {
+          typeof L.data == "string" && c(L.data);
         }), t.hub.websocket.addEventListener("close", s), t.hub.websocket.onerror = function() {
           console.warn("CastClient: Error reported on websocket"), n("error");
         }, m.status;
@@ -13213,14 +14868,14 @@ function Bi(e, t) {
         ), a)
           return m.status;
         try {
-          const { code: y } = await e.authenticate();
-          if (y && await e.getToken(y))
+          const { code: g } = await e.authenticate();
+          if (g && await e.getToken(g))
             return await e.subscribe(true);
-        } catch (y) {
-          const S = y instanceof Error ? y.message : String(y);
+        } catch (g) {
+          const y = g instanceof Error ? g.message : String(g);
           console.error(
             "CastClient: Token refresh after 401 failed:",
-            S
+            y
           );
         }
       } else
@@ -13231,12 +14886,12 @@ function Bi(e, t) {
       return m.status;
     } catch (m) {
       t.hub.subscribed = false;
-      const y = m instanceof Error ? m.message : String(m);
-      return console.error("CastClient: Exception subscribing to the hub:", y), 0;
+      const g = m instanceof Error ? m.message : String(m);
+      return console.error("CastClient: Exception subscribing to the hub:", g), 0;
     }
   }, e.unsubscribe = async () => {
     t.hub.subscribed = false, t.hub.resubscribeRequested = false;
-    const a = ht(t.config.callbackUrl), b = mt(
+    const a = Rt(t.config.callbackUrl), u = Ft(
       "unsubscribe",
       t.session,
       a,
@@ -13249,337 +14904,362 @@ function Bi(e, t) {
           "Content-Type": "application/x-www-form-urlencoded",
           Authorization: `Bearer ${t.hub.token}`
         },
-        body: b,
-        signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(Et) : void 0
+        body: u,
+        signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(zt) : void 0
       })).status === 202 && console.debug(
         "CastClient: Unsubscribe successfully from hub",
         t.hub.name
       );
-    } catch (l) {
-      const u = l instanceof Error ? l.message : String(l);
-      console.warn("CastClient: Error unsubscribing from the hub.", u);
+    } catch (f) {
+      const d = f instanceof Error ? f.message : String(f);
+      console.warn("CastClient: Error unsubscribing from the hub.", d);
     }
     t.hub.websocket && (t.hub.websocket.close(), t.hub.websocket = null), n("disconnected");
   };
-  function f(a, b = t.hub) {
-    const l = { ...a, timestamp: (/* @__PURE__ */ new Date()).toJSON() };
-    l.id = ce(r()), b.lastPublishedMessageID = l.id;
-    const u = t.session.subscriberName && t.session.subscriberName.trim(), h = t.session.productName && t.session.productName.trim();
-    if (u && l["subscriber.name"] === void 0 && (l["subscriber.name"] = u), h && l["subscriber.product.name"] === void 0 && (l["subscriber.product.name"] = h), l.event && !l.event["hub.topic"] && (l.event["hub.topic"] = t.session.topic), l["target.actor"] === void 0 && t.session.defaultTargetActor && !String(
-      l["target.subscriber.name"] || ""
+  function h(a, u = t.hub) {
+    const f = { ...a, timestamp: (/* @__PURE__ */ new Date()).toJSON() };
+    f.id = Ee(i()), u.lastPublishedMessageID = f.id;
+    const d = t.session.subscriberName && t.session.subscriberName.trim(), b = t.session.productName && t.session.productName.trim();
+    if (d && f["subscriber.name"] === void 0 && (f["subscriber.name"] = d), b && f["subscriber.product.name"] === void 0 && (f["subscriber.product.name"] = b), f.event && !f.event["hub.topic"] && (f.event["hub.topic"] = t.session.topic), f["target.actor"] === void 0 && t.session.defaultTargetActor && !String(
+      f["target.subscriber.name"] || ""
     ).trim()) {
-      const y = ue(
+      const g = Te(
         t.session.defaultTargetActor
       );
-      y && (l["target.actor"] = y);
+      g && (f["target.actor"] = g);
     }
-    return l;
+    return f;
   }
-  e.fetchPayload = (a) => o.fetchPayload(a), e.fetchAllPayloads = (a) => o.fetchAllPayloads(a), e.hasPendingPayload = (a) => o.hasPendingPayload(a), e.publishMultipart = async (a, b, l = t.hub) => {
-    let u = f(a, l);
-    const h = await de(b);
-    u = Ue(u);
-    let m = await bt(u);
+  e.fetchPayload = (a) => o.fetchPayload(a), e.fetchAllPayloads = (a) => o.fetchAllPayloads(a), e.hasPendingPayload = (a) => o.hasPendingPayload(a), e.publishMultipart = async (a, u, f = t.hub) => {
+    let d = h(a, f);
+    const b = await Ae(u);
+    d = Ze(d);
+    let m = await Pt(d);
     if (!m.length) {
-      const S = (u.event && typeof u.event["hub.event"] == "string" ? u.event["hub.event"] : "") === "dicom-send" ? "dicom-send.dcm" : "nifti-send.nii.gz";
-      u.event.context = {
+      const y = (d.event && typeof d.event["hub.event"] == "string" ? d.event["hub.event"] : "") === "dicom-send" ? "dicom-send.dcm" : "nifti-send.nii.gz";
+      d.event.context = {
         files: [
           {
-            data: h,
-            fileName: An(u, S),
+            data: b,
+            fileName: or(d, y),
             mimeType: "application/octet-stream",
-            byteLength: h.byteLength
+            byteLength: b.byteLength
           }
         ]
-      }, m = [h];
+      }, m = [b];
     }
-    return e.publishBinaryBatch(u, m, l);
-  }, e.publishBinaryBatch = async (a, b, l = t.hub) => {
-    const u = Ue(
-      f(a, l)
+    return e.publishBinaryBatch(d, m, f);
+  }, e.publishBinaryBatch = async (a, u, f = t.hub) => {
+    const d = Ze(
+      h(a, f)
     );
-    return $n({
-      msg: u,
-      fileBytesList: b,
-      hub: l,
-      messageIdPrefix: r
+    return fr({
+      msg: d,
+      fileBytesList: u,
+      hub: f,
+      messageIdPrefix: i
     });
-  }, e.publish = async (a, b = t.hub) => {
-    let l = f(a, b);
-    if (l = Ue(l), Ln(l)) {
-      const u = await bt(l);
-      if (u.length)
-        return e.publishBinaryBatch(l, u, b);
+  }, e.publish = async (a, u = t.hub) => {
+    let f = h(a, u);
+    if (f = Ze(f), ar(f)) {
+      const d = await Pt(f);
+      if (d.length)
+        return e.publishBinaryBatch(f, d, u);
     }
     try {
-      return await fetch(b.hub_endpoint, {
+      return await fetch(u.hub_endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${b.token}`
+          Authorization: `Bearer ${u.token}`
         },
-        body: JSON.stringify(l)
+        body: JSON.stringify(f)
       });
-    } catch (u) {
-      const h = u instanceof Error ? u.message : String(u);
-      return console.debug("CastClient:", h), null;
+    } catch (d) {
+      const b = d instanceof Error ? d.message : String(d);
+      return console.debug("CastClient:", b), null;
     }
-  }, e.publishNiftiMultipart = async (a, b, l) => e.publishBinaryBatch(a, [b], l), e.request = async (a = {}) => {
-    const b = String(a["subscriber.name"] || "").trim();
-    if (!b)
-      throw new Error('CastClient.request: "subscriber.name" is required.');
-    const l = t.hub, u = l.token && l.token.trim();
+  }, e.publishNiftiMultipart = async (a, u, f) => e.publishBinaryBatch(a, [u], f), e.request = async (a = {}) => {
+    const u = String(a["subscriber.name"] || "").trim();
     if (!u)
+      throw new Error('CastClient.request: "subscriber.name" is required.');
+    const f = t.hub, d = f.token && f.token.trim();
+    if (!d)
       throw new Error(
         "CastClient.request: token is required (call authenticate() then getToken(code) first)."
       );
-    const h = `${(l.hub_endpoint || "").replace(
+    const b = `${(f.hub_endpoint || "").replace(
       /\/+$/,
       ""
     )}/request`, m = {
-      "subscriber.name": b,
-      id: a.id && String(a.id).trim() || ce(r()),
+      "subscriber.name": u,
+      id: a.id && String(a.id).trim() || Ee(i()),
       timestamp: a.timestamp && String(a.timestamp).trim() || (/* @__PURE__ */ new Date()).toJSON()
     };
     if (a.event && typeof a.event == "object") {
       m.event = { ...a.event };
-      const P2 = t.session.topic && String(t.session.topic).trim();
-      P2 && !m.event["hub.topic"] && (m.event["hub.topic"] = P2);
+      const U = t.session.topic && String(t.session.topic).trim();
+      U && !m.event["hub.topic"] && (m.event["hub.topic"] = U);
     } else
       throw new Error(
         'CastClient.request: "event" with hub.event is required.'
       );
-    const y = m.event["hub.event"];
-    if (!y || !String(y).trim())
+    const g = m.event["hub.event"];
+    if (!g || !String(g).trim())
       throw new Error(
         'CastClient.request: event["hub.event"] must be a *-request event name.'
       );
     a["subscriber.actor"] && String(a["subscriber.actor"]).trim() && (m["subscriber.actor"] = String(a["subscriber.actor"]).trim());
-    const S = Object.prototype.hasOwnProperty.call(
+    const y = Object.prototype.hasOwnProperty.call(
       a,
       "target.actor"
     );
-    let g = S ? ue(a["target.actor"]) : void 0;
-    g === void 0 && !S && t.session.defaultTargetActor && (g = ue(t.session.defaultTargetActor)), g !== void 0 && (m["target.actor"] = g);
-    const E = a["target.product.name"] !== void 0 ? a["target.product.name"] : a.targetProductName, w = xt(E);
-    w !== void 0 && (m["target.product.name"] = w);
-    const L = await fetch(h, {
+    let N = y ? Te(a["target.actor"]) : void 0;
+    N === void 0 && !y && t.session.defaultTargetActor && (N = Te(t.session.defaultTargetActor)), N !== void 0 && (m["target.actor"] = N);
+    const T = a["target.product.name"] !== void 0 ? a["target.product.name"] : a.targetProductName, L = nn(T);
+    L !== void 0 && (m["target.product.name"] = L);
+    const A = await fetch(b, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${u}`
+        Authorization: `Bearer ${d}`
       },
       body: JSON.stringify(m)
     });
-    let $2;
-    if ((L.headers.get("content-type") || "").includes("application/json"))
+    let S;
+    if ((A.headers.get("content-type") || "").includes("application/json"))
       try {
-        $2 = await L.json();
+        S = await A.json();
       } catch {
-        $2 = "";
+        S = "";
       }
     else
-      $2 = await L.text();
-    return { ok: L.ok, status: L.status, data: $2 };
-  }, e.sendCastRequestResponse = (a, b, l, u) => {
+      S = await A.text();
+    return { ok: A.ok, status: A.status, data: S };
+  }, e.sendCastRequestResponse = (a, u, f, d) => {
     if (!t.hub.websocket || typeof WebSocket > "u" || t.hub.websocket.readyState !== WebSocket.OPEN)
       return;
-    let h = "";
-    if (typeof b == "string" ? h = b.trim() : b != null && (h = String(b).trim()), !h) {
+    let b = "";
+    if (typeof u == "string" ? b = u.trim() : u != null && (b = String(u).trim()), !b) {
       console.error(
         "CastClient.sendCastRequestResponse requires a non-empty dataType."
       );
       return;
     }
-    const m = _t(h), y = {
+    const m = Kt(b), g = {
       timestamp: (/* @__PURE__ */ new Date()).toJSON(),
-      id: ce(r()),
+      id: Ee(i()),
       "subscriber.name": t.session.subscriberName || void 0,
       "subscriber.product.name": t.session.productName || void 0,
       event: {
-        "hub.topic": u || t.session.topic,
+        "hub.topic": d || t.session.topic,
         "hub.event": m,
         context: {
           id: a,
-          dataType: h,
-          data: l
+          dataType: b,
+          data: f
         }
       }
     };
-    Array.isArray(t.session.actors) && t.session.actors.length > 0 && (y.actor = t.session.actors[0]), t.hub.websocket.send(JSON.stringify(y));
+    Array.isArray(t.session.actors) && t.session.actors.length > 0 && (g.actor = t.session.actors[0]), t.hub.websocket.send(JSON.stringify(g));
   }, t.config.autoReconnect && (t.reconnectInterval = setInterval(
-    d,
-    Mi
+    l,
+    Ko
   ));
 }
-function bn(e, t, n = {}) {
-  Object.assign(t, Tt, n), t.config = { ...Tt.config, ...n }, t.session = {
-    ...jn(),
+function qn(e, t, n = {}) {
+  Object.assign(t, Wt, n), t.config = { ...Wt.config, ...n }, t.session = {
+    ...wr(),
     ...t.config.session || {}
-  }, (!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = He(
+  }, (!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = ct(
     t.session.productName || t.config.productName || "CAST"
   )), t.hub = {
-    ...Fn(),
+    ...Sr(),
     ...t.config.hub || {},
-    ...qn()
-  }, gn(e, t), Sn(e, t, ["config"]), Bi(e, t);
+    ...Er()
+  }, Xn(e, t), Qn(e, t, ["config"]), Xo(e, t);
 }
-var Fi = wn(bn, "vtkCastClient");
-var ji = {
-  newInstance: Fi,
-  extend: bn,
-  applyCastPublishEnvelopeFields: jr,
-  batchContextFiles: Xt,
-  BINARY_PLACEHOLDER: le,
-  buildDicomwebImagingStudyOpenContext: hr,
-  buildDicomUrlImagingStudyOpenContext: br,
-  buildFilesImagingStudyOpenContext: Jt,
-  buildIdcImagingStudyOpenContext: pr,
-  buildLocalDicomImagingStudyOpenContext: mr,
-  buildNiftiUrlImagingStudyOpenContext: yr,
-  castMessageHasPendingFilePayloads: tn,
-  buildCastConferenceView: Qe,
-  CAST_CONFERENCE_EXIT_ACK_MS: Dt,
-  CAST_CONFERENCE_POLL_MS: sr,
-  CAST_CONFERENCE_POPUP_SIZE: Qn,
-  CAST_REPORTING_WINDOW_NAME: er,
-  CAST_CONFERENCE_TITLE_PRESETS: Mt,
-  CAST_DEFAULT_SUBSCRIBER_ACTOR: Ne,
-  createCastConferenceDialog: ar,
-  CAST_IMAGE_DISPLAY_ACTOR: Oe,
-  createCastConferenceInviteController: ur,
-  createCastConferenceInviteDialog: zt,
-  parseConferenceInviteFromMessage: qt,
-  shouldShowConferenceInvite: cr,
-  CAST_DICOMWEB_ROOT: nt,
-  CAST_ENVELOPE_ANY: R,
-  CAST_IDENTIFIER_DICOM_UID: ie,
-  CAST_IDENTIFIER_IDC: we,
-  CAST_IDENTIFIER_IDC_SOURCE_BUCKET: Ee,
-  CAST_IDENTIFIER_NIFTI_FILENAME: tt,
-  CAST_IDENTIFIER_NIFTI_URL: et,
-  CAST_IDENTIFIER_OHIF_MODE: ye,
-  CAST_IDENTIFIER_VOLVIEW_SAMPLE_ID: pe,
-  CAST_IDENTIFIER_WORKLIST_SAMPLE_ID: H,
-  CAST_IMAGING_STUDY_OPEN_PROFILE: re,
-  CAST_OPEN_MODE: G,
-  CAST_OPEN_MODE_DICOMWEB: X,
-  CAST_OPEN_MODE_DICOM_URL: ge,
-  CAST_OPEN_MODE_FILES: j,
-  CAST_OPEN_MODE_IDC: Se,
-  CAST_OPEN_MODE_LOCAL_DICOM: Ce,
-  CAST_RADIO_ICON_CLASS: kt,
-  CAST_RADIO_ICON_SVG: $t,
-  CAST_RADIO_SLASH_CLASS: Rt,
-  CAST_RADIO_STATUS_ICON_CLASS: Ut,
-  castRadioStatusMarkup: Mn,
-  castRadioStatusVisual: Bn,
-  collatedResponsesFromRequestResult: Un,
-  conferenceHostTopic: ne,
-  countEventContextObjects: st,
-  createCastConference: Ft,
-  dataTypeFromEventName: On,
-  decodeBase64ToArrayBuffer: Kt,
-  DEFAULT_CAST_PUBLISH_ENVELOPE_FIELDS: Br,
-  deleteCastConference: Ze,
-  ensureCastSubscribeEvents: Dn,
-  extractDicomSeriesUid: M,
-  extractDicomStudyUid: B,
-  extractDicomwebRoot: De,
-  extractFilePayloadsForEvent: Rr,
-  extractIdcSeriesUid: Me,
-  extractIdcSourceBucket: Be,
-  extractIdentifierValue: k,
-  extractImagingStudyFiles: q,
-  extractNiftiDownloadUrl: Z,
-  extractNiftiFilename: rt,
-  extractOhifMode: Ht,
-  extractOpenMode: Wt,
-  extractStudyContextItem: z,
-  extractStudyUIDFromResource: Sr,
-  extractVolviewSampleId: Gt,
-  fetchCastConferences: K,
-  fetchCastConferenceTopics: Bt,
-  filePayloadToArrayBuffer: Qt,
-  filePayloadToFile: xr,
-  findActiveCastConference: Y,
-  generateSubscriberName: He,
-  getActorKeyword: Yt,
-  getHubEventLower: se,
-  getInboundTargetActorKeyword: Cr,
-  httpUrlFromHubEndpoint: te,
-  isCastConferenceHost: Ke,
-  isCastConferenceParticipant: Xe,
-  isHubEndpointInCloud: It,
-  isRequestEvent: xn,
-  isResponseEvent: Pn,
-  isRunningInCloud: Lt,
-  isStatusPayloadOnline: at,
-  isStatusRequestDataType: Jr,
-  isTotalSegmentatorProduct: ve,
-  isLungScreeningProduct: Le,
-  isNeuroSegProduct: Ie,
-  isDentalSegProduct: _e,
-  isInferenceProduct: zr,
-  lungScreeningAvailableFromStatusResponses: Gr,
-  neuroSegAvailableFromStatusResponses: Wr,
-  dentalSegAvailableFromStatusResponses: Vr,
-  normalizeProductToken: qe,
-  CAST_INFERENCE_SERVERS: x,
-  findInferenceServerByProduct: an,
-  inferenceServerInfoText: $i,
-  renderInferenceServerInfoCardHtml: ki,
-  CAST_PRODUCT_MATCHERS: un,
-  matchesCastProduct: Ui,
-  normalizeCastProductName: cn,
-  parseProductStatusProbe: fn,
-  publishCastUrlSend: Di,
-  requestCastLiveScene: Ri,
-  requestCastProductStatus: xi,
-  requestCastStatus: ct,
-  mapInferenceServersFromStatusResult: dn,
-  probeCastInferenceServers: Oi,
-  cloneContextArray: wr,
-  messageEventContext: Er,
-  messageSubscriberName: Tr,
-  messageProductName: Nr,
-  messageActor: Ar,
-  parseStatusUpdateMessage: vr,
-  normalizeConferenceParticipants: Ye,
-  normalizeDataType: Ve,
-  normalizeImagingStudyContext: it,
-  normalizeOptionalEnvelopeField: Q,
-  normalizeStudyUID: Fe,
-  openCastHubPopup: ir,
-  castReportingPopupPlacement: tr,
-  castReportingPopupFeatures: nr,
-  placeCastPopupWindow: rr,
-  parseCollatedRequestResult: he,
-  productNameFromStatusResponseItem: ke,
-  REQUEST_SUFFIX: V,
-  requestEventFor: me,
-  resolveCastConferenceClientUrl: Zn,
-  resolveCastConferenceState: or,
-  resolveCastConferenceView: jt,
-  resolveCastFileMessage: qr,
-  resolveCastHubAdminUrl: Xn,
-  resolveCastPublishEnvelopeFields: Fr,
-  resolveImagingStudyOpenPlan: gr,
-  resolveTargetActorForWire: ue,
-  resolveTargetProductNameForWire: xt,
-  responseEventFor: _t,
-  RESPONSE_SUFFIX: J,
-  sanitizeCastMessageForDisplay: Mr,
-  selectFirstMatchingHubKey: Rn,
-  statusItemValue: ot,
-  stringifyForLog: je,
-  summarizeInboundCastMessage: Dr,
-  summarizeOutboundCastPublish: Or,
-  TOTAL_SEGMENTATOR_PRODUCT_ALIASES: nn,
-  LUNG_SCREENING_PRODUCT_ALIASES: rn,
-  NEURO_SEG_PRODUCT_ALIASES: sn,
-  DENTAL_SEG_PRODUCT_ALIASES: on,
-  totalSegmentatorAvailableFromStatusResponses: Hr
+var Qo = tr(qn, "vtkCastClient");
+var es = {
+  newInstance: Qo,
+  extend: qn,
+  applyCastPublishEnvelopeFields: _i,
+  batchContextFiles: Nn,
+  BINARY_PLACEHOLDER: ve,
+  buildDicomwebImagingStudyOpenContext: ii,
+  buildDicomUrlImagingStudyOpenContext: ri,
+  buildFilesImagingStudyOpenContext: Tn,
+  buildIdcImagingStudyOpenContext: si,
+  buildLocalDicomImagingStudyOpenContext: oi,
+  buildNiftiUrlImagingStudyOpenContext: ai,
+  castMessageHasPendingFilePayloads: $n,
+  buildCastConferenceView: gt,
+  castConferenceSelfStatusLabel: Ct,
+  castConferencePlaceStatusLabel: hn,
+  castConferenceLeaderPlace: yt,
+  castConferenceParticipantRowStatus: bn,
+  resolveCastConferenceHeaderActions: pn,
+  applyCastConferenceHeaderActions: Vr,
+  renderCastConferencePresence: zr,
+  openCastConferenceParticipantsPopup: Gr,
+  closeCastConferenceParticipantsPopup: O,
+  isCastConferenceParticipantsPopupOpen: Wr,
+  CAST_CONFERENCE_EXIT_ACK_MS: sn,
+  CAST_CONFERENCE_POLL_MS: Br,
+  CAST_CONFERENCE_POPUP_SIZE: Ur,
+  CAST_REPORTING_WINDOW_NAME: Mr,
+  CAST_WORKLIST_WINDOW_NAME: Pr,
+  clearCastDialogNearAnchor: vn,
+  placeCastDialogNearAnchor: li,
+  CAST_CONFERENCE_TITLE_PRESETS: an,
+  CAST_CONFERENCE_STRINGS_EN: Qe,
+  CAST_DEFAULT_SUBSCRIBER_ACTOR: Oe,
+  createCastConferenceDialog: Zr,
+  confirmCastConferenceTakeover: Xr,
+  CAST_IMAGE_DISPLAY_ACTOR: et,
+  createCastConferenceInviteController: Kr,
+  createCastConferenceInviteDialog: yn,
+  interpolateCastConferenceString: ie,
+  mergeCastConferenceStrings: W,
+  parseConferenceInviteFromMessage: gn,
+  shouldShowConferenceInvite: Yr,
+  showCastInfoToast: Qr,
+  CAST_DICOMWEB_ROOT: Et,
+  CAST_ENVELOPE_ANY: q,
+  CAST_IDENTIFIER_DICOM_UID: pe,
+  CAST_IDENTIFIER_IDC: Pe,
+  CAST_IDENTIFIER_IDC_SOURCE_BUCKET: Re,
+  CAST_IDENTIFIER_NIFTI_FILENAME: wt,
+  CAST_IDENTIFIER_NIFTI_URL: St,
+  CAST_IDENTIFIER_OHIF_MODE: $e,
+  CAST_IDENTIFIER_VOLVIEW_SAMPLE_ID: Ie,
+  CAST_IDENTIFIER_WORKLIST_SAMPLE_ID: Q,
+  CAST_IMAGING_STUDY_OPEN_PROFILE: me,
+  CAST_OPEN_MODE: ee,
+  CAST_OPEN_MODE_DICOMWEB: ue,
+  CAST_OPEN_MODE_DICOM_URL: _e,
+  CAST_OPEN_MODE_FILES: Y,
+  CAST_OPEN_MODE_IDC: Ue,
+  CAST_OPEN_MODE_LOCAL_DICOM: Me,
+  CAST_RADIO_ICON_CLASS: Xt,
+  CAST_RADIO_ICON_SVG: Qt,
+  CAST_RADIO_SLASH_CLASS: tn,
+  CAST_RADIO_STATUS_ICON_CLASS: en,
+  castRadioStatusMarkup: yr,
+  castRadioStatusVisual: Cr,
+  collatedResponsesFromRequestResult: dr,
+  conferenceHostTopic: D,
+  conferenceSceneLeaderTopic: ht,
+  countEventContextObjects: Lt,
+  createCastConference: ln,
+  joinCastConference: fn,
+  dataTypeFromEventName: pr,
+  decodeBase64ToArrayBuffer: An,
+  DEFAULT_CAST_PUBLISH_ENVELOPE_FIELDS: Ii,
+  deleteCastConference: pt,
+  ensureCastSubscribeEvents: gr,
+  extractDicomSeriesUid: V,
+  extractDicomStudyUid: J,
+  extractDicomwebRoot: tt,
+  extractFilePayloadsForEvent: vi,
+  extractIdcSeriesUid: nt,
+  extractIdcSourceBucket: rt,
+  extractIdentifierValue: R,
+  extractImagingStudyFiles: K,
+  extractNiftiDownloadUrl: le,
+  extractNiftiFilename: Tt,
+  extractOhifMode: Cn,
+  extractOpenMode: wn,
+  extractStudyContextItem: X,
+  extractStudyUIDFromResource: ui,
+  extractVolviewSampleId: Sn,
+  fetchCastConferences: ce,
+  fetchCastConferenceTopics: un,
+  filePayloadToArrayBuffer: kn,
+  filePayloadToFile: Li,
+  findActiveCastConference: ae,
+  generateSubscriberName: ct,
+  getActorKeyword: Ln,
+  getHubEventLower: ge,
+  getInboundTargetActorKeyword: fi,
+  httpUrlFromHubEndpoint: he,
+  isCastConferenceHost: bt,
+  isCastConferenceParticipant: mt,
+  isCastConferenceSceneLeader: cn,
+  isHubEndpointInCloud: Yt,
+  isRequestEvent: br,
+  isResponseEvent: mr,
+  isRunningInCloud: Zt,
+  isStatusPayloadOnline: Nt,
+  isStatusRequestDataType: Bi,
+  isTotalSegmentatorProduct: De,
+  isLungScreeningProduct: Be,
+  isNeuroSegProduct: je,
+  isDentalSegProduct: He,
+  isMhubProduct: qe,
+  isInferenceProduct: Mi,
+  lungScreeningAvailableFromStatusResponses: Ri,
+  neuroSegAvailableFromStatusResponses: Fi,
+  dentalSegAvailableFromStatusResponses: Oi,
+  mhubAvailableFromStatusResponses: Di,
+  normalizeProductToken: st,
+  CAST_INFERENCE_SERVERS: z,
+  findInferenceServerByProduct: Fn,
+  inferenceServerInfoText: zo,
+  renderInferenceServerInfoCardHtml: qo,
+  CAST_PRODUCT_MATCHERS: Dn,
+  matchesCastProduct: Wo,
+  normalizeCastProductName: On,
+  parseProductStatusProbe: jn,
+  publishCastUrlSend: Yo,
+  requestCastLiveScene: Go,
+  requestCastProductStatus: Vo,
+  requestCastStatus: xt,
+  mapInferenceServersFromStatusResult: Hn,
+  probeCastInferenceServers: Zo,
+  cloneContextArray: di,
+  messageEventContext: hi,
+  messageSubscriberName: bi,
+  messageProductName: mi,
+  messageActor: pi,
+  parseStatusUpdateMessage: gi,
+  normalizeConferenceParticipants: dt,
+  normalizeDataType: ft,
+  normalizeImagingStudyContext: vt,
+  normalizeOptionalEnvelopeField: fe,
+  normalizeStudyUID: it,
+  openCastHubPopup: Dr,
+  castReportingPopupPlacement: Rr,
+  castReportingPopupFeatures: Fr,
+  placeCastPopupWindow: Or,
+  parseCollatedRequestResult: xe,
+  productNameFromStatusResponseItem: ze,
+  REQUEST_SUFFIX: oe,
+  requestEventFor: ke,
+  resolveCastConferenceClientUrl: _r,
+  resolveCastConferenceState: Hr,
+  resolveCastConferenceView: dn,
+  resolveCastFileMessage: Ui,
+  resolveCastHubAdminUrl: $r,
+  resolveCastPublishEnvelopeFields: $i,
+  resolveImagingStudyOpenPlan: ci,
+  resolveTargetActorForWire: Te,
+  resolveTargetProductNameForWire: nn,
+  responseEventFor: Kt,
+  RESPONSE_SUFFIX: se,
+  sanitizeCastMessageForDisplay: ki,
+  selectFirstMatchingHubKey: hr,
+  statusItemValue: At,
+  stringifyForLog: ot,
+  summarizeInboundCastMessage: xi,
+  summarizeOutboundCastPublish: Ni,
+  TOTAL_SEGMENTATOR_PRODUCT_ALIASES: _n,
+  LUNG_SCREENING_PRODUCT_ALIASES: Un,
+  NEURO_SEG_PRODUCT_ALIASES: Mn,
+  DENTAL_SEG_PRODUCT_ALIASES: Pn,
+  MHUB_PRODUCT_ALIASES: Rn,
+  totalSegmentatorAvailableFromStatusResponses: Pi,
+  transferCastConferenceLead: jr
 };
 
 // logic/readers/nifti.ts
@@ -13593,10 +15273,10 @@ var DT = {
   512: { ctor: Uint16Array, bytes: 2, zarr: "<u2" },
   768: { ctor: Uint32Array, bytes: 4, zarr: "<u4" }
 };
-function isGzip(bytes) {
+function isGzip2(bytes) {
   return bytes.length > 2 && bytes[0] === 31 && bytes[1] === 139;
 }
-async function gunzip(bytes) {
+async function gunzip2(bytes) {
   const ds = new DecompressionStream("gzip");
   return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer());
 }
@@ -13627,10 +15307,10 @@ function quaternToMat(b, c, d, qfac, dx, dy, dz) {
     a * a + d * d - c * c - b * b
   ];
   const s = [dx, dy, dz * (qfac < 0 ? -1 : 1)];
-  return R2.map((v2, i) => v2 * s[i % 3]);
+  return R2.map((v, i) => v * s[i % 3]);
 }
 async function parseNifti(input, name) {
-  const bytes = isGzip(input) ? await gunzip(input) : input;
+  const bytes = isGzip2(input) ? await gunzip2(input) : input;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (bytes.length < 348) throw new Error("not a NIfTI file (too short)");
   const sizeof = dv.getInt32(0, true);
@@ -13767,13 +15447,13 @@ async function parseNrrd(buf) {
   if (raw.length < nvox * bpp) throw new Error(`NRRD: short data (${raw.length} < ${nvox * bpp})`);
   const out = new Float32Array(nvox);
   const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
-  let lo = Infinity, hi2 = -Infinity;
+  let lo2 = Infinity, hi2 = -Infinity;
   const read = type.includes("uchar") || type.includes("uint8") || type === "unsigned char" ? (i) => raw[i] : type.includes("char") || type === "int8" ? (i) => raw[i] << 24 >> 24 : type.includes("ushort") || type.includes("uint16") || type === "unsigned short" || type === "unsigned short int" ? (i) => dv.getUint16(i, little) : type.includes("short") ? (i) => dv.getInt16(i, little) : type.includes("uint") ? (i) => dv.getUint32(i, little) : type === "float" ? (i) => dv.getFloat32(i, little) : type === "double" ? (i) => dv.getFloat64(i, little) : (i) => dv.getInt32(i, little);
   for (let i = 0; i < nvox; i++) {
-    const v2 = read(i * bpp);
-    out[i] = v2;
-    if (v2 < lo) lo = v2;
-    if (v2 > hi2) hi2 = v2;
+    const v = read(i * bpp);
+    out[i] = v;
+    if (v < lo2) lo2 = v;
+    if (v > hi2) hi2 = v;
   }
   const dir = parseVectors(f["space directions"]);
   const org = parseVectors(f["space origin"] ?? "(0,0,0)")[0] ?? [0, 0, 0];
@@ -13798,7 +15478,7 @@ async function parseNrrd(buf) {
     0,
     1
   ];
-  return { data: out, dims: [nx, ny, nz], ijkToRAS, range: [lo, hi2] };
+  return { data: out, dims: [nx, ny, nz], ijkToRAS, range: [lo2, hi2] };
 }
 function parseVectors(s) {
   if (!s) return [];
@@ -13815,7 +15495,7 @@ function sniff(bytes, fileName = "") {
   if (bytes.length >= 4 && String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) === "NRRD") return "nrrd";
   if (bytes.length >= 132 && String.fromCharCode(bytes[128], bytes[129], bytes[130], bytes[131]) === "DICM") return "dicom";
   if (isNifti(bytes)) return "nifti";
-  if (isGzip(bytes)) return lower.endsWith(".nii.gz") ? "nifti" : lower.endsWith(".nrrd.gz") ? "nrrd" : "unknown";
+  if (isGzip2(bytes)) return lower.endsWith(".nii.gz") ? "nifti" : lower.endsWith(".nrrd.gz") ? "nrrd" : "unknown";
   if (lower.endsWith(".nii")) return "nifti";
   if (lower.endsWith(".nrrd") || lower.endsWith(".nhdr")) return "nrrd";
   if (lower.endsWith(".dcm")) return "dicom";
@@ -13825,7 +15505,7 @@ async function readVolume(bytes, fileName = "") {
   const fmt = sniff(bytes, fileName);
   if (fmt === "nifti") return parseNifti(bytes, fileName.replace(/\.nii(\.gz)?$/i, ""));
   if (fmt === "nrrd") {
-    const raw = isGzip(bytes) && !fileName.toLowerCase().endsWith(".nrrd") ? await gunzip(bytes) : bytes;
+    const raw = isGzip2(bytes) && !fileName.toLowerCase().endsWith(".nrrd") ? await gunzip2(bytes) : bytes;
     const n = await parseNrrd(raw);
     return { dims: n.dims, ijkToRAS: n.ijkToRAS, data: n.data, dtype: zarrDtype(n.data), name: fileName.replace(/\.nrrd$/i, "") };
   }
@@ -13849,23 +15529,23 @@ function histogramPercentiles(data, loP = 1e-3, hiP = 0.999) {
   const n = data.length;
   if (n === 0) return [0, 1];
   const step = n > 4e6 ? Math.floor(n / 4e6) : 1;
-  let mn = Infinity, mx = -Infinity;
+  let mn2 = Infinity, mx = -Infinity;
   for (let i = 0; i < n; i += step) {
-    const v2 = data[i];
-    if (v2 < mn) mn = v2;
-    if (v2 > mx) mx = v2;
+    const v = data[i];
+    if (v < mn2) mn2 = v;
+    if (v > mx) mx = v;
   }
-  if (mx <= mn) return [mn, mn];
+  if (mx <= mn2) return [mn2, mn2];
   const intType = isIntType(data);
-  const bins = intType ? Math.min(mx - mn + 1, 1 << 16) : 1e3;
-  const scale2 = (bins - 1) / (mx - mn);
+  const bins = intType ? Math.min(mx - mn2 + 1, 1 << 16) : 1e3;
+  const scale2 = (bins - 1) / (mx - mn2);
   const hist = new Float64Array(bins);
   let total = 0;
   for (let i = 0; i < n; i += step) {
-    hist[Math.round((data[i] - mn) * scale2)]++;
+    hist[Math.round((data[i] - mn2) * scale2)]++;
     total++;
   }
-  const binValue = (b) => mn + b / scale2;
+  const binValue = (b) => mn2 + b / scale2;
   const at2 = (frac) => {
     const target = frac * total;
     let c = 0;
@@ -13878,8 +15558,8 @@ function histogramPercentiles(data, loP = 1e-3, hiP = 0.999) {
   return [at2(loP), at2(hiP)];
 }
 function autoWindowLevel(data) {
-  const [lo, hi2] = histogramPercentiles(data, 1e-3, 0.999);
-  return { window: Math.max(1e-6, hi2 - lo), level: (lo + hi2) / 2 };
+  const [lo2, hi2] = histogramPercentiles(data, 1e-3, 0.999);
+  return { window: Math.max(1e-6, hi2 - lo2), level: (lo2 + hi2) / 2 };
 }
 
 // render/demos/ira/ira-scene.ts
@@ -13992,7 +15672,7 @@ function materializeLiveSceneBlobUrls(sceneDoc, files) {
   return { ...sceneDoc, blobBase: "", nodes };
 }
 function sceneUrlFromOpenContext(context) {
-  const plan = gr(context);
+  const plan = ci(context);
   if (!plan || plan.mode !== "files") return null;
   const files = Array.isArray(plan.files) ? plan.files : [];
   const sceneFile = files.find((f) => String(f.role || "").toLowerCase() === "scene") || files.find(looksLikeSceneJson) || files[0];
@@ -14038,7 +15718,7 @@ function imagingStudyContextFromSceneUrl(sceneUrl) {
     if (base) fileName = base;
   } catch {
   }
-  return Jt({
+  return Tn({
     id: `scene-${fileName.replace(/\.[^.]+$/, "") || "livescene"}`,
     files: [
       {
@@ -14053,7 +15733,7 @@ function imagingStudyContextFromSceneUrl(sceneUrl) {
 }
 function imagingStudyContextFromSceneDoc(doc, idHint) {
   const url = String(doc.url || "").trim();
-  const filesCtx = url ? imagingStudyContextFromSceneUrl(url) : Jt({
+  const filesCtx = url ? imagingStudyContextFromSceneUrl(url) : Tn({
     id: String(idHint || "livescene").trim() || "livescene",
     files: []
   });
@@ -14086,7 +15766,7 @@ function imagingStudyContextFromLocalStudy(opts) {
   const studyUid = String(opts.studyInstanceUID || "").trim();
   const seriesUid = String(opts.seriesInstanceUID || "").trim();
   const id = String(opts.id || "").trim() || studyUid || seriesUid || `local-${Date.now()}`;
-  const context = Jt({
+  const context = Tn({
     id,
     files: []
   });
@@ -14181,7 +15861,7 @@ function looksLikeVolumeFile(f) {
   return tip.endsWith(".nii") || tip.endsWith(".nii.gz") || tip.endsWith(".nrrd") || tip.endsWith(".nrrd.gz") || tip.endsWith(".nhdr");
 }
 function volumeFileFromOpenContext(context) {
-  const plan = gr(context);
+  const plan = ci(context);
   if (!plan || plan.mode !== "files") return null;
   const files = Array.isArray(plan.files) ? plan.files : [];
   const volFile = files.find((f) => looksLikeVolumeFile(f)) || files.find((f) => {
@@ -14256,6 +15936,1627 @@ function vrPresetFromSceneVolume(sv) {
   };
 }
 
+// ../reporting/segdb-lookup.ts
+var SEGDB_BY_ID = Object.freeze(
+  {
+    "LEFT_ADRENAL_GLAND": {
+      "name": "Left adrenal gland",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "23451007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Adrenal structure",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_ADRENAL_GLAND": {
+      "name": "Right adrenal gland",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "23451007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Adrenal structure",
+      "modifier": "M_RIGHT"
+    },
+    "AORTA": {
+      "name": "Aorta",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "15825003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Aortic structure",
+      "modifier": ""
+    },
+    "LEFT_AUTOCHTHONOUS_BACK_MUSCLE": {
+      "name": "Left autochthonous back muscle",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "244849004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Autochthonous back muscle structure",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_AUTOCHTHONOUS_BACK_MUSCLE": {
+      "name": "Right autochthonous back muscle",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "244849004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Autochthonous back muscle structure",
+      "modifier": "M_RIGHT"
+    },
+    "BRAIN": {
+      "name": "Brain",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "12738006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Brain structure",
+      "modifier": ""
+    },
+    "LEFT_CLAVICLE": {
+      "name": "Left clavicle",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "51299004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of clavicle",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_CLAVICLE": {
+      "name": "Right clavicle",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "51299004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of clavicle",
+      "modifier": "M_RIGHT"
+    },
+    "COLON": {
+      "name": "Colon",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "71854001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Colon structure",
+      "modifier": ""
+    },
+    "DUODENUM": {
+      "name": "Duodenum",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "38848004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Duodenal structure",
+      "modifier": ""
+    },
+    "ESOPHAGUS": {
+      "name": "Esophagus",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "32849002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Esophageal structure",
+      "modifier": ""
+    },
+    "FACE": {
+      "name": "Face",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "89545001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Face structure",
+      "modifier": ""
+    },
+    "LEFT_FEMUR": {
+      "name": "Left femur",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "71341001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of femur",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_FEMUR": {
+      "name": "Right femur",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "71341001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of femur",
+      "modifier": "M_RIGHT"
+    },
+    "GALLBLADDER": {
+      "name": "Gallbladder",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "28231008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Gallbladder structure",
+      "modifier": ""
+    },
+    "LEFT_GLUTEUS_MAXIMUS": {
+      "name": "Left gluteus maximus",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "181674001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Muscle structure of the gluteus maximus",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_GLUTEUS_MAXIMUS": {
+      "name": "Right gluteus maximus",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "181674001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Muscle structure of the gluteus maximus",
+      "modifier": "M_RIGHT"
+    },
+    "LEFT_GLUTEUS_MEDIUS": {
+      "name": "Left gluteus medius",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "78333006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Muscle structure of the gluteus medius",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_GLUTEUS_MEDIUS": {
+      "name": "Right gluteus medius",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "78333006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Muscle structure of the gluteus medius",
+      "modifier": "M_RIGHT"
+    },
+    "LEFT_GLUTEUS_MINIMUS": {
+      "name": "Left gluteus minimus",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "75297007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Muscle structure of the gluteus minumus",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_GLUTEUS_MINIMUS": {
+      "name": "Right gluteus minimus",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "75297007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Muscle structure of the gluteus minumus",
+      "modifier": "M_RIGHT"
+    },
+    "LEFT_ATRIUM": {
+      "name": "Left atrium",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "59652004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Atrial structure",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_ATRIUM": {
+      "name": "Right atrium",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "59652004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Atrial structure",
+      "modifier": "M_RIGHT"
+    },
+    "MYOCARDIUM": {
+      "name": "Myocardium",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "74281007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Muscle structure of the myocardium",
+      "modifier": ""
+    },
+    "LEFT_VENTRICLE": {
+      "name": "Left ventricle",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "87878005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Left cardiac ventricular structure",
+      "modifier": ""
+    },
+    "RIGHT_VENTRICLE": {
+      "name": "Right ventricle",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "53085002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Right cardiac ventricular structure",
+      "modifier": ""
+    },
+    "LEFT_HIP": {
+      "name": "Left hip",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "29836001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of the hip",
+      "modifier": ""
+    },
+    "RIGHT_HIP": {
+      "name": "Right hip",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "29836001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of the hip",
+      "modifier": ""
+    },
+    "LEFT_HUMERUS": {
+      "name": "Left humerus",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "85050009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of humerus",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_HUMERUS": {
+      "name": "Right humerus",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "85050009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of humerus",
+      "modifier": "M_RIGHT"
+    },
+    "LEFT_ILIAC_ARTERY": {
+      "name": "Left iliac artery",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "73634005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Common iliac artery structure",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_ILIAC_ARTERY": {
+      "name": "Right iliac artery",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "73634005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Common iliac artery structure",
+      "modifier": "M_RIGHT"
+    },
+    "LEFT_ILIAC_VEIN": {
+      "name": "Left iliac vein",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "46027005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of common iliac vein",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_ILIAC_VEIN": {
+      "name": "Right iliac vein",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "46027005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of common iliac vein",
+      "modifier": "M_RIGHT"
+    },
+    "LEFT_ILIOPSOAS": {
+      "name": "Left iliopsoas",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "68455001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Muscle structure of the iliopsoas",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_ILIOPSOAS": {
+      "name": "Right iliopsoas",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "68455001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Muscle structure of the iliopsoas",
+      "modifier": "M_RIGHT"
+    },
+    "INFERIOR_VENA_CAVA": {
+      "name": "Inferior vena cava",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "64131007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Inferior vena cava structure",
+      "modifier": ""
+    },
+    "SUPERIOR_VENA_CAVA": {
+      "name": "Superior vena cava",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "48345005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Superior vena cava structure",
+      "modifier": ""
+    },
+    "LEFT_KIDNEY": {
+      "name": "Left kidney",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "64033007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Kidney structure",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_KIDNEY": {
+      "name": "Right kidney",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "64033007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Kidney structure",
+      "modifier": "M_RIGHT"
+    },
+    "KIDNEY": {
+      "name": "Kidney",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "64033007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Kidney structure",
+      "modifier": ""
+    },
+    "LIVER": {
+      "name": "Liver",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "10200004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Liver structure",
+      "modifier": ""
+    },
+    "LEFT_LUNG": {
+      "name": "Left lung",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "39607008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of lung",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_LUNG": {
+      "name": "Right lung",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "39607008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of lung",
+      "modifier": "M_RIGHT"
+    },
+    "LEFT_LOWER_LUNG_LOBE": {
+      "name": "Left lower lung lobe",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "90572001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of lower lobe of lung",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_LOWER_LUNG_LOBE": {
+      "name": "Right lower lung lobe",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "90572001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of lower lobe of lung",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_MIDDLE_LUNG_LOBE": {
+      "name": "Right middle lung lobe",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "72481006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of middle lobe of right lung",
+      "modifier": ""
+    },
+    "LEFT_UPPER_LUNG_LOBE": {
+      "name": "Left upper lung lobe",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "45653009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of upper lobe of lung",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_UPPER_LUNG_LOBE": {
+      "name": "Right upper lung lobe",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "45653009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of upper lobe of lung",
+      "modifier": "M_RIGHT"
+    },
+    "PANCREAS": {
+      "name": "Pancreas",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "15776009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Pancreatic structure",
+      "modifier": ""
+    },
+    "PORTAL_AND_SPLENIC_VEIN": {
+      "name": "Portal and splenic vein",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "29092000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Venous structure",
+      "modifier": ""
+    },
+    "PULMONARY_ARTERY": {
+      "name": "Pulmonary artery",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "81040000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Pulmonary artery structure",
+      "modifier": ""
+    },
+    "LEFT_RIB_10": {
+      "name": "Left rib 10",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "77644006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of tenth rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_11": {
+      "name": "Left rib 11",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "58830002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of eleventh rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_12": {
+      "name": "Left rib 12",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "43993008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of twelfth rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_1": {
+      "name": "Left rib 1",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "48535007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of first rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_2": {
+      "name": "Left rib 2",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "78247007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of second rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_3": {
+      "name": "Left rib 3",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "25888004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of third rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_4": {
+      "name": "Left rib 4",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "25523003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of fourth rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_5": {
+      "name": "Left rib 5",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "15339008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of fifth rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_6": {
+      "name": "Left rib 6",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "59558009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of sixth rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_7": {
+      "name": "Left rib 7",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "24915002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of seventh rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_8": {
+      "name": "Left rib 8",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "5953002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of eight rib",
+      "modifier": "M_LEFT"
+    },
+    "LEFT_RIB_9": {
+      "name": "Left rib 9",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "22565002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of ninth rib",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_RIB_10": {
+      "name": "Right rib 10",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "77644006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of tenth rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_11": {
+      "name": "Right rib 11",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "58830002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of eleventh rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_12": {
+      "name": "Right rib 12",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "43993008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of twelfth rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_1": {
+      "name": "Right rib 1",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "48535007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of first rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_2": {
+      "name": "Right rib 2",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "78247007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of second rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_3": {
+      "name": "Right rib 3",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "25888004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of third rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_4": {
+      "name": "Right rib 4",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "25523003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of fourth rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_5": {
+      "name": "Right rib 5",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "15339008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of fifth rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_6": {
+      "name": "Right rib 6",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "59558009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of sixth rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_7": {
+      "name": "Right rib 7",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "24915002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of seventh rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_8": {
+      "name": "Right rib 8",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "5953002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of eight rib",
+      "modifier": "M_RIGHT"
+    },
+    "RIGHT_RIB_9": {
+      "name": "Right rib 9",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "22565002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of ninth rib",
+      "modifier": "M_RIGHT"
+    },
+    "SACRUM": {
+      "name": "Sacrum",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "54735007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of sacrum",
+      "modifier": ""
+    },
+    "LEFT_SCAPULA": {
+      "name": "Left scapula",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "79601000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of scapula",
+      "modifier": "M_LEFT"
+    },
+    "RIGHT_SCAPULA": {
+      "name": "Right scapula",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "79601000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of scapula",
+      "modifier": "M_RIGHT"
+    },
+    "SMALL_INTESTINE": {
+      "name": "Small intestine",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "30315005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of small intestine",
+      "modifier": ""
+    },
+    "SPLEEN": {
+      "name": "Spleen",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "78961009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Splenic structure",
+      "modifier": ""
+    },
+    "STOMACH": {
+      "name": "Stomach",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "69695003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Stomach structure",
+      "modifier": ""
+    },
+    "TRACHEA": {
+      "name": "Trachea",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "44567001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Tracheal structure",
+      "modifier": ""
+    },
+    "URINARY_BLADDER": {
+      "name": "Urinary bladder",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "89837001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Urinary bladder structure",
+      "modifier": ""
+    },
+    "VERTEBRAE_C1": {
+      "name": "Vertebrae C1",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "14806007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae C1",
+      "modifier": ""
+    },
+    "VERTEBRAE_C2": {
+      "name": "Vertebrae C2",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "39976000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae C2",
+      "modifier": ""
+    },
+    "VERTEBRAE_C3": {
+      "name": "Vertebrae C3",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "113205007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae C3",
+      "modifier": ""
+    },
+    "VERTEBRAE_C4": {
+      "name": "Vertebrae C4",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "5329002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae C4",
+      "modifier": ""
+    },
+    "VERTEBRAE_C5": {
+      "name": "Vertebrae C5",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "36978003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae C5",
+      "modifier": ""
+    },
+    "VERTEBRAE_C6": {
+      "name": "Vertebrae C6",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "36054005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae C6",
+      "modifier": ""
+    },
+    "VERTEBRAE_C7": {
+      "name": "Vertebrae C7",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "87391001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae C7",
+      "modifier": ""
+    },
+    "VERTEBRAE_L1": {
+      "name": "Vertebrae L1",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "66794005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae L1",
+      "modifier": ""
+    },
+    "VERTEBRAE_L2": {
+      "name": "Vertebrae L2",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "14293000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae L2",
+      "modifier": ""
+    },
+    "VERTEBRAE_L3": {
+      "name": "Vertebrae L3",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "36470004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae L3",
+      "modifier": ""
+    },
+    "VERTEBRAE_L4": {
+      "name": "Vertebrae L4",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "11994002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae L4",
+      "modifier": ""
+    },
+    "VERTEBRAE_L5": {
+      "name": "Vertebrae L5",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "49668003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae L5",
+      "modifier": ""
+    },
+    "VERTEBRAE_T10": {
+      "name": "Vertebrae T10",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "7610001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T10",
+      "modifier": ""
+    },
+    "VERTEBRAE_T11": {
+      "name": "Vertebrae T11",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "12989004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T11",
+      "modifier": ""
+    },
+    "VERTEBRAE_T12": {
+      "name": "Vertebrae T12",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "23215003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T12",
+      "modifier": ""
+    },
+    "VERTEBRAE_T1": {
+      "name": "Vertebrae T1",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "64864005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T1",
+      "modifier": ""
+    },
+    "VERTEBRAE_T2": {
+      "name": "Vertebrae T2",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "53733008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T2",
+      "modifier": ""
+    },
+    "VERTEBRAE_T3": {
+      "name": "Vertebrae T3",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "1626008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T3",
+      "modifier": ""
+    },
+    "VERTEBRAE_T4": {
+      "name": "Vertebrae T4",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "73071006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T4",
+      "modifier": ""
+    },
+    "VERTEBRAE_T5": {
+      "name": "Vertebrae T5",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "56401006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T5",
+      "modifier": ""
+    },
+    "VERTEBRAE_T6": {
+      "name": "Vertebrae T6",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "45296009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T6",
+      "modifier": ""
+    },
+    "VERTEBRAE_T7": {
+      "name": "Vertebrae T7",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "62487009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T7",
+      "modifier": ""
+    },
+    "VERTEBRAE_T8": {
+      "name": "Vertebrae T8",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "11068009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T8",
+      "modifier": ""
+    },
+    "VERTEBRAE_T9": {
+      "name": "Vertebrae T9",
+      "categoryCode": "85756007",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body tissue structure",
+      "typeCode": "82687006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bone structure of vertebrae T9",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_C2C3": {
+      "name": "Vertebrae Disk C2/C3",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "1078209008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of second cervical vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_C3C4": {
+      "name": "Vertebrae Disk C3/C4",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "58820006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of third cervical vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_C4C5": {
+      "name": "Vertebrae Disk C4/C5",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "49400002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of fourth cervical vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_C5C6": {
+      "name": "Vertebrae Disk C5/C6",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "73959003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of fifth cervical vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_C6C7": {
+      "name": "Vertebrae Disk C6/C7",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "75095006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of sixth cervical vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_C7T1": {
+      "name": "Vertebrae Disk C7/T1",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "37414007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of seventh cervical vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T1T2": {
+      "name": "Vertebrae Disk T1/T2",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "40908007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of first thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T2T3": {
+      "name": "Vertebrae Disk T2/T3",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "6004007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of second thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T3T4": {
+      "name": "Vertebrae Disk T3/T4",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "2620004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of third thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T4T5": {
+      "name": "Vertebrae Disk T4/T5",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "82965004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of fourth thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T5T6": {
+      "name": "Vertebrae Disk T5/T6",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "72692000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of fifth thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T6T7": {
+      "name": "Vertebrae Disk T6/T7",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "74401007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of sixth thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T7T8": {
+      "name": "Vertebrae Disk T7/T8",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "28693002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of seventh thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T8T9": {
+      "name": "Vertebrae Disk T8/T9",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "9188009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of eighth thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T9T10": {
+      "name": "Vertebrae Disk T9/T10",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "113209001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of ninth thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T10T11": {
+      "name": "Vertebrae Disk T10/T11",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "34959001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of tenth thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T11T12": {
+      "name": "Vertebrae Disk T11/T12",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "1537001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of eleventh thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_T12L1": {
+      "name": "Vertebrae Disk T12/L1",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "76206002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of twelfth thoracic vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_L1L2": {
+      "name": "Vertebrae Disk L1/L2",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "80064006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of first lumbar vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_L2L3": {
+      "name": "Vertebrae Disk L2/L3",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "67459009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of second lumbar vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_L3L4": {
+      "name": "Vertebrae Disk L3/L4",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "62551000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of third lumbar vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_L4L5": {
+      "name": "Vertebrae Disk L4/L5",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "84020006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Intervertebral disc structure of fourth lumbar vertebra (body structure)",
+      "modifier": ""
+    },
+    "VERTEBRAE_DISK_L5S1": {
+      "name": "Vertebrae Disk L5/S1",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "715056000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of intervertebral disc of L5 and S1 (body structure)",
+      "modifier": ""
+    },
+    "CORONARY_ARTERY_RIGHT": {
+      "name": "Right Coronary Artery",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "13647002",
+      "typeScheme": "SCT",
+      "typeMeaning": "Right coronary artery structure",
+      "modifier": ""
+    },
+    "CORONARY_ARTERY_LEFT": {
+      "name": "Left Coronary Artery",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "3227004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of left main coronary artery",
+      "modifier": ""
+    },
+    "CORONARY_ARTERY_CFLX": {
+      "name": "Circumflex Branch of the Coronary Artery",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "57396003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of circumflex branch of left coronary artery",
+      "modifier": ""
+    },
+    "CORONARY_ARTERY_LAD": {
+      "name": "Left Anterior Descending Coronary Artery",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "59438005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of left anterior descending artery",
+      "modifier": ""
+    },
+    "CORONARY_ARTERY": {
+      "name": "Coronary Artery",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "41801008",
+      "typeScheme": "SCT",
+      "typeMeaning": "Coronary artery structure (body structure)",
+      "modifier": ""
+    },
+    "HEART": {
+      "name": "Heart",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "80891009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Heart structure",
+      "modifier": ""
+    },
+    "NEOPLASM_MALIGNANT_PRIMARY": {
+      "name": "Primary malignant neoplasm",
+      "categoryCode": "49755003",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Morphologically abnormal structure",
+      "typeCode": "86049000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Malignant neoplasm, primary (morphologic abnormality)",
+      "modifier": ""
+    },
+    "AORTIC_VALVE": {
+      "name": "Aortic valve",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "34202007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Aortic valve structure",
+      "modifier": ""
+    },
+    "MITRAL_VALVE": {
+      "name": "Mitral valve",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "91134007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Mitral valve structure",
+      "modifier": ""
+    },
+    "PULMONARY_VALVE": {
+      "name": "Pulmonary valve",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "39057004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Pulmonary valve structure",
+      "modifier": ""
+    },
+    "TRICUSPID_VALVE": {
+      "name": "Tricuspid valve",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "46030003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Tricuspid valve structure",
+      "modifier": ""
+    },
+    "SINOTRIAL_NODE": {
+      "name": "Sinoatrial conduction node",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "88210001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of sinoatrial node",
+      "modifier": ""
+    },
+    "ATRIOVENTRICULAR_NODE": {
+      "name": "Atrioventricular conduction node",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "25943004",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of atrioventricular node",
+      "modifier": ""
+    },
+    "PROSTATE": {
+      "name": "Prostate",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "41216001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Prostatic structure",
+      "modifier": ""
+    },
+    "PROSTATE_PERIPHERAL_ZONE": {
+      "name": "Peripheral zone of prostate",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "279706003",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of peripheral glandular zone of prostate (body structure)",
+      "modifier": ""
+    },
+    "PROSTATE_TRANSITION_ZONE": {
+      "name": "Transition zone of prostate",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "399384005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of transition zone of prostate (body structure)",
+      "modifier": ""
+    },
+    "CYST": {
+      "name": "Cyst",
+      "categoryCode": "49755003",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Morphologically abnormal structure",
+      "typeCode": "367643001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Cyst (morphologic abnormality)",
+      "modifier": ""
+    },
+    "SPINAL_CANAL": {
+      "name": "Spinal canal",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "61853006",
+      "typeScheme": "SCT",
+      "typeMeaning": "Spinal canal structure (body structure)",
+      "modifier": ""
+    },
+    "PATHOLOGIC_CALCIFICATION": {
+      "name": "Pathologic calcification",
+      "categoryCode": "49755003",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Morphologically abnormal structure",
+      "typeCode": "18115005",
+      "typeScheme": "SCT",
+      "typeMeaning": "Pathologic calcification, calcified structure (morphologic abnormality)",
+      "modifier": ""
+    },
+    "PANCREATIC_DUCT": {
+      "name": "Pancreatic duct",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "69930009",
+      "typeScheme": "SCT",
+      "typeMeaning": "Pancreatic duct structure (body structure)",
+      "modifier": ""
+    },
+    "BILE_DUCT": {
+      "name": "Bile duct",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "28273000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Bile duct structure (body structure)",
+      "modifier": ""
+    },
+    "RENAL_VEIN": {
+      "name": "Renal vein",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "56400007",
+      "typeScheme": "SCT",
+      "typeMeaning": "Structure of renal vein (body structure)",
+      "modifier": ""
+    },
+    "ARTERY": {
+      "name": "Artery (unspecific)",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "51114001",
+      "typeScheme": "SCT",
+      "typeMeaning": "Arterial structure (body structure)",
+      "modifier": ""
+    },
+    "VEIN": {
+      "name": "Vein (unspecific)",
+      "categoryCode": "123037004",
+      "categoryScheme": "SCT",
+      "categoryMeaning": "Body structure",
+      "typeCode": "29092000",
+      "typeScheme": "SCT",
+      "typeMeaning": "Venous structure",
+      "modifier": ""
+    }
+  }
+);
+function normalizeSegKey(raw) {
+  return String(raw || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+function normalizeNameKey(raw) {
+  return String(raw || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+var SEGDB_BY_NAME = (() => {
+  const map = /* @__PURE__ */ new Map();
+  for (const [id, entry] of Object.entries(SEGDB_BY_ID)) {
+    const nameKey = normalizeNameKey(entry.name);
+    if (nameKey && !map.has(nameKey)) map.set(nameKey, id);
+    const idAsName = normalizeNameKey(id.replace(/_/g, " "));
+    if (idAsName && !map.has(idAsName)) map.set(idAsName, id);
+  }
+  return map;
+})();
+function resolveSegdbId(labelOrId) {
+  const raw = String(labelOrId || "").trim();
+  if (!raw) return null;
+  const asId = normalizeSegKey(raw);
+  if (asId && SEGDB_BY_ID[asId]) return asId;
+  const byName = SEGDB_BY_NAME.get(normalizeNameKey(raw));
+  return byName || null;
+}
+function coded(scheme, value, meaning) {
+  const v = String(value || "").trim();
+  if (!v) return null;
+  return {
+    scheme: String(scheme || "SCT"),
+    value: v,
+    meaning: String(meaning || "").trim()
+  };
+}
+function terminologyFromSegdbEntry(entry) {
+  return {
+    category: coded(
+      entry.categoryScheme,
+      entry.categoryCode,
+      entry.categoryMeaning
+    ),
+    type: coded(entry.typeScheme, entry.typeCode, entry.typeMeaning),
+    typeModifier: null,
+    region: null
+  };
+}
+function lookupSegdbTerminology(labelOrId) {
+  const id = resolveSegdbId(labelOrId);
+  if (!id) return null;
+  const entry = SEGDB_BY_ID[id];
+  if (!entry) return null;
+  return terminologyFromSegdbEntry(entry);
+}
+function enrichTerminologyFromSegdb(label, terminology) {
+  const hasType = Boolean(terminology?.type?.value);
+  const hasCategory = Boolean(terminology?.category?.value);
+  if (hasType && hasCategory) return terminology || void 0;
+  const fromDb = lookupSegdbTerminology(label);
+  if (!fromDb) return terminology || void 0;
+  return {
+    category: hasCategory ? terminology.category : fromDb.category,
+    type: hasType ? terminology.type : fromDb.type,
+    typeModifier: terminology?.typeModifier ?? fromDb.typeModifier,
+    region: terminology?.region ?? fromDb.region
+  };
+}
+
 // render/demos/ira/ira-seg-catalog.ts
 var EMPTY_SEG_CATALOG = { segmentations: [] };
 function voxelVolumeMm3(ijkToRAS) {
@@ -14271,7 +17572,7 @@ function voxelVolumeMm3(ijkToRAS) {
   const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
   return Number.isFinite(det) ? Math.abs(det) : 0;
 }
-function coded(c) {
+function coded2(c) {
   if (!c) return null;
   return {
     scheme: String(c.scheme || ""),
@@ -14282,18 +17583,18 @@ function coded(c) {
 function termFor(terminology) {
   if (!terminology) return void 0;
   return {
-    category: coded(terminology.category),
-    type: coded(terminology.type),
-    typeModifier: coded(terminology.typeModifier),
-    region: coded(terminology.region)
+    category: coded2(terminology.category),
+    type: coded2(terminology.type),
+    typeModifier: coded2(terminology.typeModifier),
+    region: coded2(terminology.region)
   };
 }
 function countSegmentVoxels(lab) {
   const counts = /* @__PURE__ */ new Map();
   for (let i = 0; i < lab.length; i++) {
-    const v2 = lab[i];
-    if (!v2) continue;
-    counts.set(v2, (counts.get(v2) || 0) + 1);
+    const v = lab[i];
+    if (!v) continue;
+    counts.set(v, (counts.get(v) || 0) + 1);
   }
   return counts;
 }
@@ -14313,11 +17614,16 @@ function buildSegCatalog(labmap, ijkToRAS, meta) {
     const voxelCount = counts.get(num2) || 0;
     const fromColors = labmap.colors.find(([n]) => n === num2);
     const color = fromColors ? [fromColors[1], fromColors[2], fromColors[3]] : [1, 1, 1];
+    const label = labmap.names[num2] || `Segment ${num2}`;
+    const terminology = enrichTerminologyFromSegdb(
+      label,
+      termFor(labmap.terminology?.[num2])
+    );
     segments.push({
       number: num2,
-      label: labmap.names[num2] || `Segment ${num2}`,
+      label,
       color,
-      terminology: termFor(labmap.terminology?.[num2]),
+      terminology,
       voxelCount,
       volumeMm3: voxelCount * voxVol
     });
@@ -14356,7 +17662,7 @@ function isHostedOnCastHub(location2 = globalThis.location) {
   return String(location2?.pathname || "").startsWith("/slicerlive");
 }
 function shouldUseSameOriginHub(location2 = globalThis.location) {
-  return isHostedOnCastHub(location2) || Lt(location2);
+  return isHostedOnCastHub(location2) || Zt(location2);
 }
 function resolveHubConfig(location2 = globalThis.location) {
   if (!shouldUseSameOriginHub(location2)) {
@@ -14410,6 +17716,14 @@ var onImagingStudyOpen = null;
 var onImagingStudyClose = null;
 var onLiveSceneChange = null;
 var reportingConnectedApps = /* @__PURE__ */ new Map();
+var worklistConnectedApps = /* @__PURE__ */ new Map();
+var TITLE_WORKLIST_ONLINE = "SlicerWorklist is connected on this topic";
+var TITLE_WORKLIST_OFFLINE = "Open SlicerWorklist (no worklist responded on this topic)";
+var TITLE_REPORTING_ONLINE = "DICOM SR is connected on this topic";
+var TITLE_REPORTING_OFFLINE = "Open DICOM SR reporting client (no reporting responded on this topic)";
+var TITLE_REMOTE_AI = "Remote AI \u2014 inference servers";
+var TITLE_REMOTE_AI_ONLINE = "Remote AI \u2014 inference server(s) online on this topic";
+var inferenceServersOnline = false;
 function setIraCastStatusListener(fn2) {
   onStatus = fn2;
 }
@@ -14452,8 +17766,8 @@ function syncIraStudyUrl(studyParams = {}) {
   if (nextTopic) url.searchParams.set("topic", nextTopic);
   if (nextToken) url.searchParams.set("id-token", nextToken);
   for (const [key, value] of Object.entries(studyParams)) {
-    const v2 = String(value || "").trim();
-    if (v2) url.searchParams.set(key, v2);
+    const v = String(value || "").trim();
+    if (v) url.searchParams.set(key, v);
   }
   globalThis.history.replaceState(null, "", url.toString());
 }
@@ -14465,7 +17779,8 @@ function getIraCastSessionInfo() {
     connection,
     connectionDetail,
     hubEndpoint: client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint,
-    conference
+    conference,
+    conferenceFollowHost
   };
 }
 function setIraConferenceView(view) {
@@ -14496,9 +17811,10 @@ function setIraConferenceFollowHost(followHost) {
   conferenceFollowChoice = Boolean(followHost);
   if (conference?.selfRole === "leading") {
     conferenceFollowHost = false;
-    return;
+  } else {
+    conferenceFollowHost = conferenceFollowChoice;
   }
-  conferenceFollowHost = conferenceFollowChoice;
+  onStatus?.(connection, connectionDetail);
 }
 function isIraConferenceHost() {
   return conference?.selfRole === "leading";
@@ -14518,7 +17834,7 @@ async function syncIraConferenceView() {
   }
   try {
     const hubEndpoint = client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
-    const view = await jt(
+    const view = await dn(
       hubEndpoint,
       topic,
       subscriberName,
@@ -14530,7 +17846,7 @@ async function syncIraConferenceView() {
 }
 function handleConferenceHubEvent(message) {
   const event = message?.event;
-  const hubEvent = se(event);
+  const hubEvent = ge(event);
   const inviteHandled = Boolean(conferenceHubHandler?.(message));
   if (inviteHandled) {
     if (hubEvent === "conference-start") {
@@ -14568,9 +17884,17 @@ function resolveIraReportingClientUrl(location2 = globalThis.location) {
   }
   return "http://localhost:8150/";
 }
-var REPORTING_WINDOW_NAME = er;
+function resolveIraWorklistUrl(location2 = globalThis.location) {
+  if (shouldUseSameOriginHub(location2)) {
+    return `${location2.origin}/worklist-client/`;
+  }
+  return "http://localhost:8140/";
+}
+var REPORTING_WINDOW_NAME = Mr;
+var WORKLIST_WINDOW_NAME = Pr;
 var worklistClientWindow = null;
 var reportingWindow = null;
+var worklistWindow = null;
 function parseClientWindow(raw) {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw;
@@ -14602,7 +17926,7 @@ function adoptWorklistClientWindowFromStatusResponses(responses) {
   }
 }
 function reportingPopupPlacement() {
-  return tr(worklistClientWindow);
+  return Rr();
 }
 function focusExistingReportingWindow() {
   if (!reportingWindow || reportingWindow.closed) {
@@ -14654,20 +17978,67 @@ function openIraReportingClient() {
   if (nextToken) url.searchParams.set("id-token", nextToken);
   const href = url.toString();
   const place = reportingPopupPlacement();
-  const features = nr(place);
+  const features = Fr(place);
   const win = globalThis.open(href, REPORTING_WINDOW_NAME, features);
   if (!win) {
     return globalThis.open(href, REPORTING_WINDOW_NAME);
   }
   reportingWindow = win;
-  rr(win, place);
+  Or(win, place);
+  return win;
+}
+function focusExistingWorklistWindow() {
+  if (worklistWindow && !worklistWindow.closed) {
+    try {
+      worklistWindow.focus();
+    } catch {
+    }
+    return true;
+  }
+  worklistWindow = null;
+  const opener = window.opener;
+  if (opener && !opener.closed) {
+    let openerName = "";
+    try {
+      openerName = String(opener.name || "");
+    } catch {
+      openerName = "";
+    }
+    if (openerName === WORKLIST_WINDOW_NAME) {
+      try {
+        opener.focus();
+      } catch {
+      }
+      worklistWindow = opener;
+      return true;
+    }
+  }
+  return false;
+}
+function openIraWorklistClient() {
+  if (connection !== "connected" && !topic) {
+    console.warn(`${LOG} open worklist skipped: not connected`);
+    return null;
+  }
+  if (focusExistingWorklistWindow()) {
+    return worklistWindow;
+  }
+  const url = new URL(resolveIraWorklistUrl());
+  const persisted = readPersistedCredentials();
+  const nextTopic = topic || persisted.topic;
+  const nextToken = String(client?.getConnectionState?.()?.token || "").trim() || persisted.token || String(client?.getHubConfig?.()?.token || "").trim();
+  if (nextTopic) url.searchParams.set("topic", nextTopic);
+  if (nextToken) url.searchParams.set("id-token", nextToken);
+  const href = url.toString();
+  const win = globalThis.open(href, WORKLIST_WINDOW_NAME);
+  if (win) worklistWindow = win;
   return win;
 }
 function setIraImagingStudyContext(context) {
   lastImagingStudyOpenContext = Array.isArray(context) ? context : [];
 }
 function getIraImagingStudyOpenContext() {
-  return wr(lastImagingStudyOpenContext);
+  return di(lastImagingStudyOpenContext);
 }
 var suppressInboundImagingStudy = 0;
 function beginSuppressInboundImagingStudy(ms = 1500) {
@@ -14689,8 +18060,8 @@ function buildIraPublishPayload(hubEvent, context) {
   };
 }
 async function publishIraImagingStudyTransition(nextContext) {
-  const next = Array.isArray(nextContext) ? wr(nextContext) : [];
-  const previous = wr(lastImagingStudyOpenContext);
+  const next = Array.isArray(nextContext) ? di(nextContext) : [];
+  const previous = di(lastImagingStudyOpenContext);
   if (!client || connection !== "connected" || !topic) {
     lastImagingStudyOpenContext = next;
     lastLiveScene = null;
@@ -14804,8 +18175,8 @@ function setIraPngFullSizeCaptureHandler(fn2) {
 }
 function handleSceneUpdateMessage(message) {
   const event = message?.event;
-  if (se(event) !== "scene-update") return false;
-  const context = Er(message);
+  if (ge(event) !== "scene-update") return false;
+  const context = hi(message);
   const items = Array.isArray(context) ? context : [];
   const deliver = conference && !conferenceFollowHost && !isIraConferenceHost() ? filterSceneUpdateContextForVanishing(items) : items;
   if (!deliver.length) {
@@ -14827,7 +18198,7 @@ async function publishInferenceJob(opts) {
   if (!subscriber) return { ok: false, detail: "No subscriber name" };
   if (!topic) return { ok: false, detail: "No Cast topic" };
   if (!opts.files.length) return { ok: false, detail: "No volume files" };
-  return Di(client, {
+  return Yo(client, {
     targetProductName: opts.product,
     hubEvent: opts.hubEvent,
     files: opts.files,
@@ -14891,7 +18262,7 @@ function withSegmentationContext(context) {
   return withoutSeg;
 }
 function buildStatusResponseData() {
-  let context = wr(lastImagingStudyOpenContext);
+  let context = di(lastImagingStudyOpenContext);
   if (lastLiveScene) {
     context = context.filter((item) => {
       if (!item || typeof item !== "object") return true;
@@ -14914,6 +18285,8 @@ function setConnection(next, detail) {
     conferenceFollowHost = false;
     conferenceFollowChoice = null;
     clearReportingConnectedApps();
+    clearWorklistConnectedApps();
+    clearInferenceServersOnline();
     worklistClientWindow = null;
   }
   onStatus?.(next, detail);
@@ -14924,7 +18297,43 @@ function setConnection(next, detail) {
 function updateIraReportingButton() {
   const btn = document.getElementById("iraReportingBtn");
   if (!btn) return;
-  btn.classList.toggle("ira-btn-connected", reportingConnectedApps.size > 0);
+  const online = reportingConnectedApps.size > 0;
+  btn.classList.toggle("ira-btn-connected", online);
+  btn.title = online ? TITLE_REPORTING_ONLINE : TITLE_REPORTING_OFFLINE;
+}
+function updateIraWorklistButton() {
+  const btn = document.getElementById("iraWorklistBtn");
+  if (!btn) return;
+  const online = worklistConnectedApps.size > 0;
+  btn.classList.toggle("ira-btn-connected", online);
+  btn.title = online ? TITLE_WORKLIST_ONLINE : TITLE_WORKLIST_OFFLINE;
+}
+function updateIraRemoteAiButton() {
+  const btn = document.getElementById("iraMedicalInferenceBtn");
+  if (!btn) return;
+  btn.classList.toggle("ira-btn-connected", inferenceServersOnline);
+  btn.title = inferenceServersOnline ? TITLE_REMOTE_AI_ONLINE : TITLE_REMOTE_AI;
+}
+function setInferenceServersOnline(online) {
+  inferenceServersOnline = online;
+  updateIraRemoteAiButton();
+}
+function clearInferenceServersOnline() {
+  if (!inferenceServersOnline) {
+    updateIraRemoteAiButton();
+    return;
+  }
+  inferenceServersOnline = false;
+  updateIraRemoteAiButton();
+}
+function applyInferenceOnlineFromStatusResult(result) {
+  const mapped = Hn(result);
+  const online = mapped.some((r) => r.probe?.online);
+  setInferenceServersOnline(online);
+  if (online) {
+    const titles = mapped.filter((r) => r.probe?.online).map((r) => r.server.title);
+    console.info(`${LOG} STATUS: AI online \u2014`, titles.join(", "));
+  }
 }
 function clearReportingConnectedApps() {
   if (reportingConnectedApps.size === 0) {
@@ -14934,16 +18343,30 @@ function clearReportingConnectedApps() {
   reportingConnectedApps.clear();
   updateIraReportingButton();
 }
+function clearWorklistConnectedApps() {
+  if (worklistConnectedApps.size === 0) {
+    updateIraWorklistButton();
+    return;
+  }
+  worklistConnectedApps.clear();
+  updateIraWorklistButton();
+}
 function isReportingPresencePeer(productName, actor) {
   const actorKey = actor.trim().toUpperCase();
   if (actorKey === REPORTING_ACTOR) return true;
-  return Ui(productName, "reporting");
+  return Wo(productName, "reporting");
+}
+function isWorklistPresencePeer(productName, actor) {
+  const actorKey = actor.trim().toUpperCase();
+  if (actorKey === WORKLIST_ACTOR) return true;
+  const product = productName.trim().toUpperCase();
+  return product === "CAST-WKLST" || product.startsWith("CAST-WKLST");
 }
 function markReportingConnectedApp(message) {
-  const subscriber = Tr(message);
+  const subscriber = bi(message);
   if (!subscriber) return;
-  const productName = Nr(message);
-  const actor = Ar(message);
+  const productName = mi(message);
+  const actor = pi(message);
   if (!isReportingPresencePeer(productName, actor)) return;
   const productKey = productName.trim().toUpperCase();
   if (productKey) {
@@ -14959,16 +18382,59 @@ function markReportingConnectedApp(message) {
   });
   updateIraReportingButton();
 }
+function markWorklistConnectedApp(message) {
+  const subscriber = bi(message);
+  if (!subscriber) return;
+  const productName = mi(message);
+  const actor = pi(message);
+  if (!isWorklistPresencePeer(productName, actor)) return;
+  const productKey = productName.trim().toUpperCase();
+  if (productKey) {
+    for (const [name, existing] of worklistConnectedApps) {
+      if (name !== subscriber && existing.productName.trim().toUpperCase() === productKey) {
+        worklistConnectedApps.delete(name);
+      }
+    }
+  }
+  worklistConnectedApps.set(subscriber, {
+    productName: productName.trim(),
+    actor: actor.trim()
+  });
+  updateIraWorklistButton();
+}
+function markWorklistConnectedFromStatusResponses(responses) {
+  let found = false;
+  for (const item of responses) {
+    const actor = String(item?.actor ?? "").trim();
+    if (!isWorklistPresencePeer("", actor)) continue;
+    const key = actor || WORKLIST_ACTOR;
+    worklistConnectedApps.set(key, {
+      productName: "CAST-WKLST",
+      actor: actor || WORKLIST_ACTOR
+    });
+    found = true;
+  }
+  if (found) updateIraWorklistButton();
+}
 function handleSubscriptionRemoved(message) {
   const event = message?.event;
-  if (!event || se(event) !== "subscription-removed") {
+  if (!event || ge(event) !== "subscription-removed") {
     return false;
   }
-  const subscriber = Tr(message);
-  if (!subscriber || !reportingConnectedApps.has(subscriber)) return false;
-  reportingConnectedApps.delete(subscriber);
-  updateIraReportingButton();
-  return true;
+  const subscriber = bi(message);
+  if (!subscriber) return false;
+  let changed = false;
+  if (reportingConnectedApps.has(subscriber)) {
+    reportingConnectedApps.delete(subscriber);
+    updateIraReportingButton();
+    changed = true;
+  }
+  if (worklistConnectedApps.has(subscriber)) {
+    worklistConnectedApps.delete(subscriber);
+    updateIraWorklistButton();
+    changed = true;
+  }
+  return changed;
 }
 function stripCastParamsFromUrl() {
   if (!globalThis.history?.replaceState) return;
@@ -15002,7 +18468,7 @@ function extractActorKeywords(actor) {
 }
 function handleStatusRequest(message) {
   const event = message?.event;
-  if (!event || !xn(se(event))) return false;
+  if (!event || !br(ge(event))) return false;
   const context = event.context && typeof event.context === "object" ? event.context : {};
   const correlationId = context.id;
   if (typeof correlationId !== "string" || !correlationId) return false;
@@ -15012,6 +18478,7 @@ function handleStatusRequest(message) {
   }
   if (context.dataType !== "STATUS") return false;
   markReportingConnectedApp(message);
+  markWorklistConnectedApp(message);
   const responseData = buildStatusResponseData();
   client?.sendCastRequestResponse(
     correlationId,
@@ -15023,13 +18490,13 @@ function handleStatusRequest(message) {
 }
 function isPngFullSizeRequest(message) {
   const event = message?.event;
-  if (!event || !xn(se(event))) return false;
+  if (!event || !br(ge(event))) return false;
   const context = event.context && typeof event.context === "object" ? event.context : {};
   return String(context.dataType || "").toUpperCase() === "PNGFULLSIZE";
 }
 async function handlePngFullSizeRequest(message) {
   const event = message?.event;
-  if (!event || !xn(se(event))) return false;
+  if (!event || !br(ge(event))) return false;
   const context = event.context && typeof event.context === "object" ? event.context : {};
   const correlationId = context.id;
   if (typeof correlationId !== "string" || !correlationId) return false;
@@ -15041,6 +18508,7 @@ async function handlePngFullSizeRequest(message) {
     return false;
   }
   markReportingConnectedApp(message);
+  markWorklistConnectedApp(message);
   let payload = null;
   try {
     payload = await onPngCapture?.() ?? null;
@@ -15071,29 +18539,29 @@ async function handlePngFullSizeRequest(message) {
   return true;
 }
 function handleStatusUpdate(message) {
-  const update = vr(message);
+  const update = gi(message);
   if (!update) return false;
   if (update.message) onStatusUpdate?.(update.message, update.level);
   return true;
 }
 function isNiftiSendMessage(message) {
   const event = message?.event;
-  return se(event) === "nifti-send";
+  return ge(event) === "nifti-send";
 }
 function isDicomSendMessage(message) {
   const event = message?.event;
-  return se(event) === "dicom-send";
+  return ge(event) === "dicom-send";
 }
 async function handleResolvedFileSend(message, kind, handler) {
   if (!client || !handler) return;
   try {
-    const resolved = await qr(client, message);
+    const resolved = await Ui(client, message);
     const event = resolved?.event ?? message.event;
     if (!event || typeof event !== "object") {
       console.warn(`${LOG} ${kind}: missing event after resolve`);
       return;
     }
-    const files = Xt(event);
+    const files = Nn(event);
     const withData = files.filter((f) => {
       const data = f.data;
       return data instanceof ArrayBuffer || data instanceof Uint8Array || typeof data === "string";
@@ -15119,7 +18587,7 @@ async function handleDicomSendMessage(message) {
 }
 function handleImagingStudyMessage(message) {
   const event = message?.event;
-  const name = se(event);
+  const name = ge(event);
   if (name === "imagingstudy-close") {
     if (suppressInboundImagingStudy > 0) {
       console.info(`${LOG} ImagingStudy-close ignored (local publish echo)`);
@@ -15138,11 +18606,11 @@ function handleImagingStudyMessage(message) {
   if (name !== "imagingstudy-open") return false;
   if (suppressInboundImagingStudy > 0) {
     const context = imagingStudyContextItems(message);
-    lastImagingStudyOpenContext = wr(context);
+    lastImagingStudyOpenContext = di(context);
     console.info(`${LOG} ImagingStudy-open ignored (local publish echo)`);
     return true;
   }
-  if (conference && !conferenceFollowHost) {
+  if (conference && !conferenceFollowHost && !isIraConferenceHost()) {
     console.info(`${LOG} ImagingStudy-open ignored (not following host)`);
     return true;
   }
@@ -15156,12 +18624,12 @@ function imagingStudyContextItems(message) {
   if (ctx && typeof ctx === "object") {
     return contextItemsFromOpenContext(ctx);
   }
-  return Er(message);
+  return hi(message);
 }
 async function resolveAndApplyImagingStudyOpen(message) {
   if (!client) return;
   try {
-    const resolved = await qr(client, message);
+    const resolved = await Ui(client, message);
     const event = resolved?.event ?? message.event;
     const ctx = event?.context;
     let items = imagingStudyContextItems(resolved);
@@ -15169,7 +18637,7 @@ async function resolveAndApplyImagingStudyOpen(message) {
       Array.isArray(ctx) ? ctx : ctx || items
     );
     if (sceneDoc) {
-      const files = Xt(event);
+      const files = Nn(event);
       sceneDoc = materializeLiveSceneBlobUrls(
         sceneDoc,
         files
@@ -15180,7 +18648,7 @@ async function resolveAndApplyImagingStudyOpen(message) {
       });
       items.push({ key: "scene", resource: sceneDoc });
     }
-    lastImagingStudyOpenContext = wr(items);
+    lastImagingStudyOpenContext = di(items);
     console.info(
       `${LOG} ImagingStudy-open context items=`,
       items.length,
@@ -15217,14 +18685,14 @@ async function requestStatusFromWorklist(opts) {
       "subscriber.name": subscriber,
       "subscriber.product.name": "SLICERLIVE-IRA",
       "subscriber.actor": ID_ACTOR,
-      "target.actor": WORKLIST_ACTOR,
+      "target.actor": "*",
       event: {
-        "hub.event": me(statusDataType),
+        "hub.event": ke(statusDataType),
         ...requestTopic ? { "hub.topic": requestTopic } : {},
         context: { dataType: statusDataType }
       }
     };
-    console.warn(`${LOG} STATUS request \u2192 ${WORKLIST_ACTOR}`, {
+    console.warn(`${LOG} STATUS request \u2192 *`, {
       subscriber,
       topic: requestTopic,
       presenceOnly: skipApplyStudy,
@@ -15240,9 +18708,11 @@ async function requestStatusFromWorklist(opts) {
       if (!forceApply) statusRequestState = "idle";
       return;
     }
+    applyInferenceOnlineFromStatusResult(result);
     const envelope = result.data && typeof result.data === "object" ? result.data : {};
     const responses = Array.isArray(envelope.responses) ? envelope.responses : [];
     adoptWorklistClientWindowFromStatusResponses(responses);
+    markWorklistConnectedFromStatusResponses(responses);
     if (!forceApply && (skipApplyStudy || lastImagingStudyOpenContext.length || iraUrlHasStudyParams())) {
       statusRequestState = "done";
       return;
@@ -15270,7 +18740,7 @@ async function requestStatusFromWorklist(opts) {
       statusRequestState = "done";
       return;
     }
-    const context = wr(chosen.context);
+    const context = di(chosen.context);
     if (!context.length) {
       console.warn(`${LOG} STATUS: ImagingStudy context empty`);
       if (!forceApply) statusRequestState = "idle";
@@ -15305,7 +18775,7 @@ function scheduleStatusRequestFromWorklist(delayMs) {
   }, delayMs);
 }
 function applyIraCastRadioVisual(statusEl) {
-  const visual = Bn(connection, {
+  const visual = Cr(connection, {
     conferenceActive: Boolean(conference)
   });
   statusEl.classList.remove(
@@ -15314,15 +18784,10 @@ function applyIraCastRadioVisual(statusEl) {
     "ira-cast-connected",
     "ira-cast-disconnected",
     "ira-cast-error",
-    "ira-cast-pulse",
-    "ira-cast-conference-pulse"
+    "ira-cast-pulse"
   );
   statusEl.classList.add(`ira-cast-${visual.tone}`);
   statusEl.classList.toggle("ira-cast-pulse", visual.pulse);
-  statusEl.classList.toggle(
-    "ira-cast-conference-pulse",
-    visual.conferencePulse
-  );
   const label = topic.trim() || "\u2014";
   statusEl.textContent = label;
   const tip = conference?.title ? `${connectionDetail} \xB7 ${conference.title}` : connectionDetail;
@@ -15349,9 +18814,9 @@ async function connectIraCast() {
   }
   stripCastParamsFromUrl();
   setConnection("connecting", "Connecting to Cast hub\u2026");
-  subscriberName = He("IRA");
+  subscriberName = ct("IRA");
   const hub = resolveHubConfig();
-  client = ji.newInstance({
+  client = es.newInstance({
     hub,
     session: {
       subscriberName,
@@ -15460,20 +18925,20 @@ async function connectIraCast() {
 
 // render/liveops.ts
 function pointerKeys(path) {
-  return path.replace(/^#/, "").split("/").filter((k2) => k2.length > 0);
+  return path.replace(/^#/, "").split("/").filter((k) => k.length > 0);
 }
 function setByPointer(obj, path, value) {
   const keys = pointerKeys(path);
   if (keys.length === 0) return false;
   let cur = obj;
   for (let i = 0; i < keys.length - 1; i++) {
-    const k2 = keys[i];
+    const k = keys[i];
     if (cur == null || typeof cur !== "object") return false;
     const container = cur;
-    let next = container[k2];
+    let next = container[k];
     if (next == null || typeof next !== "object") {
       next = /^\d+$/.test(keys[i + 1]) ? [] : {};
-      container[k2] = next;
+      container[k] = next;
     }
     cur = next;
   }
@@ -15493,9 +18958,9 @@ var CMDS = {
   },
   setCameraPose(node, args) {
     let did = false;
-    for (const k2 of ["position", "focalPoint", "viewUp"]) {
-      if (Array.isArray(args[k2])) {
-        node[k2] = [...args[k2]];
+    for (const k of ["position", "focalPoint", "viewUp"]) {
+      if (Array.isArray(args[k])) {
+        node[k] = [...args[k]];
         did = true;
       }
     }
@@ -15503,9 +18968,9 @@ var CMDS = {
   },
   setRoi(node, args) {
     let did = false;
-    for (const k2 of ["center", "size"]) {
-      if (Array.isArray(args[k2])) {
-        node[k2] = [...args[k2]];
+    for (const k of ["center", "size"]) {
+      if (Array.isArray(args[k])) {
+        node[k] = [...args[k]];
         did = true;
       }
     }
@@ -15545,6 +19010,7 @@ function applyOp(nodes, op) {
 var IRA_VOL_NODE_ID = "vol1";
 var IRA_SEG_NODE_ID = "seg1";
 var IRA_CAM_NODE_ID = "cam1";
+var IRA_LAYOUT_NODE_ID = "layout1";
 var IRA_SLICE_LAYOUT_BY_PLANE = {
   axial: "Red",
   sagittal: "Yellow",
@@ -15602,6 +19068,7 @@ function buildIraLiveSceneDoc(input) {
   const prevVol = nodes[IRA_VOL_NODE_ID];
   const volOpacity = typeof input.volumeOpacity === "number" && Number.isFinite(input.volumeOpacity) ? Math.max(0, Math.min(1, input.volumeOpacity)) : typeof prevVol?.opacity === "number" && Number.isFinite(prevVol.opacity) ? Math.max(0, Math.min(1, Number(prevVol.opacity))) : 1;
   const volShift = typeof input.volumeShift === "number" && Number.isFinite(input.volumeShift) ? Number(input.volumeShift) : typeof prevVol?.shift === "number" && Number.isFinite(prevVol.shift) ? Number(prevVol.shift) : 0;
+  const volShiftRange = typeof input.volumeShiftRange === "number" && Number.isFinite(input.volumeShiftRange) && input.volumeShiftRange > 0 ? Number(input.volumeShiftRange) : typeof prevVol?.shiftRange === "number" && Number.isFinite(prevVol.shiftRange) && Number(prevVol.shiftRange) > 0 ? Number(prevVol.shiftRange) : 500;
   const volPreset = input.volumePreset !== void 0 ? String(input.volumePreset || "").trim() : String(prevVol?.preset ?? "").trim();
   const cropEnabled = typeof input.cropEnabled === "boolean" ? input.cropEnabled : typeof prevVol?.cropEnabled === "boolean" ? Boolean(prevVol.cropEnabled) : false;
   const roiVisible = typeof input.roiVisible === "boolean" ? input.roiVisible : typeof prevVol?.roiVisible === "boolean" ? Boolean(prevVol.roiVisible) : false;
@@ -15615,6 +19082,7 @@ function buildIraLiveSceneDoc(input) {
     modality: input.modality || "CT",
     opacity: volOpacity,
     shift: volShift,
+    shiftRange: volShiftRange,
     preset: volPreset,
     cropEnabled,
     roiVisible
@@ -15692,6 +19160,16 @@ function buildIraLiveSceneDoc(input) {
       };
     }
   }
+  const prevLayout = nodes[IRA_LAYOUT_NODE_ID];
+  const maximizedCell = input.maximizedCell !== void 0 ? input.maximizedCell ? String(input.maximizedCell).trim() || null : null : prevLayout?.maximizedCell != null && String(prevLayout.maximizedCell).trim() ? String(prevLayout.maximizedCell).trim() : null;
+  nodes[IRA_LAYOUT_NODE_ID] = {
+    ...prevLayout || {},
+    type: "layout",
+    id: IRA_LAYOUT_NODE_ID,
+    name: String(prevLayout?.name || "Layout"),
+    arrangementName: String(prevLayout?.arrangementName || "fourUp"),
+    maximizedCell
+  };
   return {
     ...input.base || {},
     blobBase: String(input.base?.blobBase || "").trim() || "ira://local/",
@@ -15706,9 +19184,9 @@ function vec3From(value) {
   if (![a, b, c].every(Number.isFinite)) return null;
   return [a, b, c];
 }
-function norm3(v2) {
-  const l = Math.hypot(v2[0], v2[1], v2[2]) || 1;
-  return [v2[0] / l, v2[1] / l, v2[2] / l];
+function norm3(v) {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
 }
 function layoutNameFromSliceNode(node) {
   const raw = String(node.layoutName || node.name || "").trim();
@@ -15733,7 +19211,7 @@ function sliceIntentFromNode(node) {
   if (!layoutName) return null;
   const m = node.sliceToRAS;
   if (!Array.isArray(m) || m.length < 16) return null;
-  const nums = m.map((x2) => Number(x2));
+  const nums = m.map((x) => Number(x));
   if (!nums.every(Number.isFinite)) return null;
   const col = (c) => [
     nums[c],
@@ -15791,6 +19269,7 @@ function applySceneUpdateOps(doc, ops) {
   let roiVisible;
   let camera;
   const slicesByLayout = /* @__PURE__ */ new Map();
+  let maximizedCell;
   for (const op of ops) {
     if (!op || typeof op !== "object" || !op.op || !op.id) continue;
     const before = map.get(op.id);
@@ -15798,6 +19277,11 @@ function applySceneUpdateOps(doc, ops) {
     if (res.changed) changed = true;
     const after = map.get(op.id);
     if (!after) continue;
+    if (after.type === "layout") {
+      const raw = after.maximizedCell;
+      maximizedCell = raw == null || raw === "" ? null : String(raw).trim() || null;
+      continue;
+    }
     if (after.type === "camera") {
       const pose = cameraPoseFromNode(after);
       if (pose) camera = pose;
@@ -15839,13 +19323,13 @@ function applySceneUpdateOps(doc, ops) {
     const segs = after.segments;
     if (Array.isArray(segs)) {
       for (const s of segs) {
-        const lv = Number(s.labelValue);
-        if (!Number.isFinite(lv)) continue;
-        segmentVisibility.set(lv, s.visible !== false);
+        const lv3 = Number(s.labelValue);
+        if (!Number.isFinite(lv3)) continue;
+        segmentVisibility.set(lv3, s.visible !== false);
         const fromField = Number(s.opacity);
         const fromColor = Number(s.color?.[3]);
-        const so = Number.isFinite(fromField) ? fromField : Number.isFinite(fromColor) ? fromColor : 1;
-        segmentOpacity.set(lv, Math.max(0, Math.min(1, so)));
+        const so2 = Number.isFinite(fromField) ? fromField : Number.isFinite(fromColor) ? fromColor : 1;
+        segmentOpacity.set(lv3, Math.max(0, Math.min(1, so2)));
       }
     }
     if (op.op === "patch" && typeof op.path === "string" && /#\/segments\/\d+\/visible/.test(op.path)) {
@@ -15873,6 +19357,7 @@ function applySceneUpdateOps(doc, ops) {
       roiVisible,
       camera,
       slices: [...slicesByLayout.values()],
+      maximizedCell,
       changed
     }
   };
@@ -16032,6 +19517,17 @@ function buildIraDisplaySceneUpdateOps(doc, prev) {
         });
       }
     }
+    if (full || displayFieldChanged(prevVol, vol, "shiftRange")) {
+      const r = Number(vol.shiftRange);
+      if (Number.isFinite(r) && r > 0) {
+        ops.push({
+          op: "patch",
+          id: volId,
+          path: "#/shiftRange",
+          value: r
+        });
+      }
+    }
     if (full || displayFieldChanged(prevVol, vol, "preset")) {
       ops.push({
         op: "patch",
@@ -16074,10 +19570,10 @@ function buildIraDisplaySceneUpdateOps(doc, prev) {
       });
     }
   }
-  for (const layout of Object.keys(
+  for (const layout2 of Object.keys(
     IRA_SLICE_PLANE_BY_LAYOUT
   )) {
-    const id = iraSliceNodeId(layout);
+    const id = iraSliceNodeId(layout2);
     const slice = doc.nodes[id];
     const prevSlice = prev?.nodes?.[id];
     if (!slice || typeof slice !== "object" || slice.type !== "view") continue;
@@ -16088,6 +19584,18 @@ function buildIraDisplaySceneUpdateOps(doc, prev) {
         op: "put",
         id,
         node: structuredClone(slice)
+      });
+    }
+  }
+  const layoutId = IRA_LAYOUT_NODE_ID;
+  const layout = doc.nodes[layoutId];
+  const prevLayout = prev?.nodes?.[layoutId];
+  if (layout && typeof layout === "object" && layout.type === "layout") {
+    if (full || displayFieldChanged(prevLayout, layout, "maximizedCell")) {
+      ops.push({
+        op: "put",
+        id: layoutId,
+        node: structuredClone(layout)
       });
     }
   }
@@ -16113,106 +19621,28 @@ function fileBytes(entry) {
 }
 function colorForLabel(id) {
   const h = id * 0.618033988749895 % 1 * 6;
-  const x2 = 1 - Math.abs(h % 2 - 1);
+  const x = 1 - Math.abs(h % 2 - 1);
   let r = 0, g = 0, b = 0;
   if (h < 1) {
     r = 1;
-    g = x2;
+    g = x;
   } else if (h < 2) {
-    r = x2;
+    r = x;
     g = 1;
   } else if (h < 3) {
     g = 1;
-    b = x2;
+    b = x;
   } else if (h < 4) {
-    g = x2;
+    g = x;
     b = 1;
   } else if (h < 5) {
-    r = x2;
+    r = x;
     b = 1;
   } else {
     r = 1;
-    b = x2;
+    b = x;
   }
   return [0.25 + 0.7 * r, 0.25 + 0.7 * g, 0.25 + 0.7 * b];
-}
-function invAffineRowMajor(m) {
-  const a = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
-  const t = [m[3], m[7], m[11]];
-  const det = a[0] * (a[4] * a[8] - a[5] * a[7]) - a[1] * (a[3] * a[8] - a[5] * a[6]) + a[2] * (a[3] * a[7] - a[4] * a[6]);
-  if (!Number.isFinite(det) || Math.abs(det) < 1e-12) {
-    throw new Error("NIfTI ijkToRAS is singular \u2014 cannot resample onto CT");
-  }
-  const id = 1 / det;
-  const r = [
-    (a[4] * a[8] - a[5] * a[7]) * id,
-    (a[2] * a[7] - a[1] * a[8]) * id,
-    (a[1] * a[5] - a[2] * a[4]) * id,
-    (a[5] * a[6] - a[3] * a[8]) * id,
-    (a[0] * a[8] - a[2] * a[6]) * id,
-    (a[2] * a[3] - a[0] * a[5]) * id,
-    (a[3] * a[7] - a[4] * a[6]) * id,
-    (a[1] * a[6] - a[0] * a[7]) * id,
-    (a[0] * a[4] - a[1] * a[3]) * id
-  ];
-  return [
-    r[0],
-    r[1],
-    r[2],
-    -(r[0] * t[0] + r[1] * t[1] + r[2] * t[2]),
-    r[3],
-    r[4],
-    r[5],
-    -(r[3] * t[0] + r[4] * t[1] + r[5] * t[2]),
-    r[6],
-    r[7],
-    r[8],
-    -(r[6] * t[0] + r[7] * t[1] + r[8] * t[2]),
-    0,
-    0,
-    0,
-    1
-  ];
-}
-function applyRowMajor(m, i, j2, k2) {
-  return [
-    m[0] * i + m[1] * j2 + m[2] * k2 + m[3],
-    m[4] * i + m[5] * j2 + m[6] * k2 + m[7],
-    m[8] * i + m[9] * j2 + m[10] * k2 + m[11]
-  ];
-}
-function resampleLabelmapToCt(src, srcDims, srcIjkToRas, ctDims, ctIjkToRas) {
-  const [snx, sny, snz] = srcDims;
-  const [nx, ny, nz] = ctDims;
-  const rasToSrc = invAffineRowMajor(srcIjkToRas);
-  const lab = new Uint8Array(nx * ny * nz);
-  const present = /* @__PURE__ */ new Set();
-  let clipped = 0;
-  for (let k2 = 0; k2 < nz; k2++) {
-    const plane = k2 * nx * ny;
-    for (let j2 = 0; j2 < ny; j2++) {
-      const row = plane + j2 * nx;
-      for (let i = 0; i < nx; i++) {
-        const [rx, ry, rz] = applyRowMajor(ctIjkToRas, i, j2, k2);
-        const [si2, sj, sk] = applyRowMajor(rasToSrc, rx, ry, rz);
-        const ii2 = Math.round(si2);
-        const jj = Math.round(sj);
-        const kk = Math.round(sk);
-        if (ii2 < 0 || jj < 0 || kk < 0 || ii2 >= snx || jj >= sny || kk >= snz) {
-          continue;
-        }
-        let v2 = Math.round(Number(src[kk * snx * sny + jj * snx + ii2]));
-        if (!Number.isFinite(v2) || v2 <= 0) continue;
-        if (v2 > 255) {
-          clipped++;
-          v2 = 255;
-        }
-        lab[row + i] = v2;
-        present.add(v2);
-      }
-    }
-  }
-  return { lab, present, clipped };
 }
 function mergeSegLabelmaps(existing, incoming) {
   if (!existing?.lab?.length) {
@@ -16224,7 +19654,7 @@ function mergeSegLabelmaps(existing, incoming) {
     );
   }
   const used = /* @__PURE__ */ new Set();
-  for (const v2 of existing.lab) if (v2) used.add(v2);
+  for (const v of existing.lab) if (v) used.add(v);
   for (const [num2] of existing.colors) if (num2) used.add(num2);
   const freeIds = [];
   for (let id = 1; id <= 255; id++) {
@@ -16289,7 +19719,7 @@ function mergeSegLabelmaps(existing, incoming) {
   };
 }
 async function segLabelmapFromNiftiSendEvent(event, ctDims, ctIjkToRas) {
-  const files = Xt(event);
+  const files = Nn(event);
   let chosen = null;
   let bytes = null;
   for (const entry of files) {
@@ -16371,22 +19801,22 @@ async function segLabelmapFromNiftiSendEvent(event, ctDims, ctIjkToRas) {
 var cross2 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 var dot4 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 var sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-var lps2ras = (v2) => [-v2[0], -v2[1], v2[2]];
-var orientKey = (iop) => iop.map((v2) => Math.round(v2 * 1e3) / 1e3).join(",");
+var lps2ras = (v) => [-v[0], -v[1], v[2]];
+var orientKey = (iop) => iop.map((v) => Math.round(v * 1e3) / 1e3).join(",");
 function groupSeries(instances) {
   const byUid = /* @__PURE__ */ new Map();
   for (const i of instances) {
-    const k2 = i.seriesInstanceUID;
-    if (!byUid.has(k2)) byUid.set(k2, []);
-    byUid.get(k2).push(i);
+    const k = i.seriesInstanceUID;
+    if (!byUid.has(k)) byUid.set(k, []);
+    byUid.get(k).push(i);
   }
   const out = [];
   for (const [uid, list] of byUid) {
     const byOrient = /* @__PURE__ */ new Map();
     for (const i of list) {
-      const k2 = orientKey(i.imageOrientationPatient);
-      if (!byOrient.has(k2)) byOrient.set(k2, []);
-      byOrient.get(k2).push(i);
+      const k = orientKey(i.imageOrientationPatient);
+      if (!byOrient.has(k)) byOrient.set(k, []);
+      byOrient.get(k).push(i);
     }
     let idx = 0;
     for (const g of byOrient.values()) out.push({ seriesInstanceUID: byOrient.size > 1 ? `${uid}#${idx++}` : uid, description: g[0].seriesDescription, modality: g[0].modality, instances: g });
@@ -16402,14 +19832,14 @@ function reconstructSeries(instances) {
   const ps = s0.pixelSpacing;
   const p0 = slices[0].imagePositionPatient, p1 = slices[nz - 1].imagePositionPatient;
   const sliceSpacing = nz > 1 ? dot4(sub3(p1, p0), normal) / (nz - 1) : s0.sliceThickness || 1;
-  const c0 = lps2ras(rowDir.map((v2) => v2 * ps[1]));
-  const c1 = lps2ras(colDir.map((v2) => v2 * ps[0]));
-  const c2 = lps2ras(normal.map((v2) => v2 * sliceSpacing));
+  const c0 = lps2ras(rowDir.map((v) => v * ps[1]));
+  const c1 = lps2ras(colDir.map((v) => v * ps[0]));
+  const c2 = lps2ras(normal.map((v) => v * sliceSpacing));
   const o = lps2ras(p0);
   const ijkToRAS = [c0[0], c1[0], c2[0], o[0], c0[1], c1[1], c2[1], o[1], c0[2], c1[2], c2[2], o[2], 0, 0, 0, 1];
   const data = new Float32Array(nx * ny * nz);
-  for (let k2 = 0; k2 < nz; k2++) {
-    const s = slices[k2], slope = s.rescaleSlope ?? 1, inter = s.rescaleIntercept ?? 0, off = k2 * nx * ny, px = s.pixels;
+  for (let k = 0; k < nz; k++) {
+    const s = slices[k], slope = s.rescaleSlope ?? 1, inter = s.rescaleIntercept ?? 0, off = k * nx * ny, px = s.pixels;
     if (slope === 1 && inter === 0) {
       for (let p = 0; p < nx * ny; p++) data[off + p] = px[p];
     } else {
@@ -16451,8 +19881,8 @@ function loadDcmjs() {
   });
   return dcmjsPromise;
 }
-var num = (v2, d = 0) => {
-  const n = Number(Array.isArray(v2) ? v2[0] : v2);
+var num = (v, d = 0) => {
+  const n = Number(Array.isArray(v) ? v[0] : v);
   return Number.isFinite(n) ? n : d;
 };
 function pixelsFromPixelData(pd, signed, bitsAllocated, rows2, columns) {
@@ -16550,7 +19980,7 @@ function fileBytes2(entry) {
 function sub4(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
-var lps2ras2 = (v2) => [-v2[0], -v2[1], v2[2]];
+var lps2ras2 = (v) => [-v[0], -v[1], v[2]];
 function invAffine(m) {
   const a = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
   const t = [m[3], m[7], m[11]];
@@ -16639,8 +20069,8 @@ function buildLabelmap(ds, bits, ct2, dcmjs) {
   const sPsRaw = measures0.PixelSpacing ?? ct2.ps ?? [1, 1];
   const sIop = (Array.isArray(sIopRaw) ? sIopRaw : [sIopRaw]).map(Number);
   const sPs = (Array.isArray(sPsRaw) ? sPsRaw : [sPsRaw]).map(Number);
-  const colW = sIop.slice(0, 3).map((v2) => v2 * sPs[1]);
-  const rowW = sIop.slice(3, 6).map((v2) => v2 * sPs[0]);
+  const colW = sIop.slice(0, 3).map((v) => v * sPs[1]);
+  const rowW = sIop.slice(3, 6).map((v) => v * sPs[0]);
   const colors = [];
   const names = {};
   const terminology = {};
@@ -16704,9 +20134,9 @@ function buildLabelmap(ds, bits, ct2, dcmjs) {
         if (!(bits[fb + (p >> 3)] >> (p & 7) & 1)) continue;
         const i = Math.round(bi2 + col * diCol[0]);
         const j2 = Math.round(bj + col * diCol[1]);
-        const k2 = Math.round(bk + col * diCol[2]);
-        if (i >= 0 && i < nx && j2 >= 0 && j2 < ny && k2 >= 0 && k2 < nz) {
-          lab[k2 * nx * ny + j2 * nx + i] = segNum;
+        const k = Math.round(bk + col * diCol[2]);
+        if (i >= 0 && i < nx && j2 >= 0 && j2 < ny && k >= 0 && k < nz) {
+          lab[k * nx * ny + j2 * nx + i] = segNum;
         }
       }
     }
@@ -16720,7 +20150,7 @@ function isDicomSeg(ds) {
   return sop.includes("1.2.840.10008.5.1.4.1.1.66.4");
 }
 async function segLabelmapFromDicomSendEvent(event, ct2) {
-  const files = Xt(event);
+  const files = Nn(event);
   let chosen = null;
   let bytes = null;
   for (const entry of files) {
@@ -16775,7 +20205,7 @@ async function segLabelmapFromDicomSendEvent(event, ct2) {
     };
   }
   const present = /* @__PURE__ */ new Set();
-  for (const v2 of seg.lab) if (v2) present.add(v2);
+  for (const v of seg.lab) if (v) present.add(v);
   if (!present.size) {
     return { ok: false, error: "DICOM SEG labelmap is empty after resample onto CT" };
   }
@@ -16793,6 +20223,1472 @@ async function segLabelmapFromDicomSendEvent(event, ct2) {
     labelCount: present.size,
     seg
   };
+}
+
+// ../i18n/storage.ts
+var LOCALE_STORAGE_KEY = "pw46.locale";
+var LEGACY_LOCALE_KEY = "wl-locale";
+var LOCALE_COOKIE = "pw46.locale";
+function isAppLocale(value) {
+  return value === "en" || value === "fr" || value === "es" || value === "ca" || value === "de" || value === "it" || value === "pt" || value === "ko" || value === "pl" || value === "uk" || value === "cs" || value === "nl" || value === "el" || value === "lv" || value === "hu" || value === "lt" || value === "ro" || value === "no";
+}
+function readCookie(name) {
+  if (typeof document === "undefined") return null;
+  const prefix = `${encodeURIComponent(name)}=`;
+  for (const part of document.cookie.split(";")) {
+    const s = part.trim();
+    if (s.startsWith(prefix)) {
+      try {
+        return decodeURIComponent(s.slice(prefix.length));
+      } catch {
+        return s.slice(prefix.length);
+      }
+    }
+  }
+  return null;
+}
+function writeCookie(name, value) {
+  if (typeof document === "undefined") return;
+  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(
+    value
+  )}; path=/; max-age=31536000; SameSite=Lax`;
+}
+function fromNavigator() {
+  const nav = (typeof navigator !== "undefined" ? navigator.language || "" : "").toLowerCase();
+  if (nav.startsWith("ca")) return "ca";
+  if (nav.startsWith("es")) return "es";
+  if (nav.startsWith("fr")) return "fr";
+  if (nav.startsWith("de")) return "de";
+  if (nav.startsWith("it")) return "it";
+  if (nav.startsWith("pt")) return "pt";
+  if (nav.startsWith("ko")) return "ko";
+  if (nav.startsWith("pl")) return "pl";
+  if (nav.startsWith("uk")) return "uk";
+  if (nav.startsWith("cs")) return "cs";
+  if (nav.startsWith("nl")) return "nl";
+  if (nav.startsWith("el")) return "el";
+  if (nav.startsWith("lv")) return "lv";
+  if (nav.startsWith("hu")) return "hu";
+  if (nav.startsWith("lt")) return "lt";
+  if (nav.startsWith("ro")) return "ro";
+  if (nav.startsWith("no") || nav.startsWith("nb") || nav.startsWith("nn"))
+    return "no";
+  return "en";
+}
+function resolveStoredLocale() {
+  const cookie = readCookie(LOCALE_COOKIE)?.trim().toLowerCase();
+  if (isAppLocale(cookie)) {
+    try {
+      localStorage.setItem(LOCALE_STORAGE_KEY, cookie);
+      localStorage.removeItem(LEGACY_LOCALE_KEY);
+    } catch {
+    }
+    return cookie;
+  }
+  try {
+    const stored = localStorage.getItem(LOCALE_STORAGE_KEY)?.trim().toLowerCase();
+    if (isAppLocale(stored)) {
+      try {
+        writeCookie(LOCALE_COOKIE, stored);
+      } catch {
+      }
+      return stored;
+    }
+  } catch {
+  }
+  try {
+    const legacy = localStorage.getItem(LEGACY_LOCALE_KEY)?.trim().toLowerCase();
+    if (isAppLocale(legacy)) {
+      persistLocale(legacy);
+      return legacy;
+    }
+  } catch {
+  }
+  return fromNavigator();
+}
+function persistLocale(code2) {
+  try {
+    localStorage.setItem(LOCALE_STORAGE_KEY, code2);
+    localStorage.removeItem(LEGACY_LOCALE_KEY);
+  } catch {
+  }
+  try {
+    writeCookie(LOCALE_COOKIE, code2);
+  } catch {
+  }
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = code2;
+  }
+}
+
+// ../i18n/conference.ts
+var en2 = {
+  dialogTitle: "Conferencing",
+  close: "Close",
+  closeAria: "Close",
+  createSection: "Create a conference",
+  conferenceTitle: "Conference title",
+  selectConferenceTitle: "Select a conference title",
+  otherTitle: "Other\u2026",
+  customTitle: "Custom title",
+  customTitlePlaceholder: "Enter conference title",
+  users: "Users",
+  loadingUsers: "Loading users\u2026",
+  noUsers: "No users available",
+  createConference: "Create conference",
+  creating: "Creating\u2026",
+  joinSection: "Join a conference",
+  activeConferences: "Active conferences",
+  noConferences: "No conferences available",
+  selectConference: "Select a conference",
+  untitled: "Untitled",
+  joinConference: "Join conference",
+  joining: "Joining\u2026",
+  manageSection: "Manage conference",
+  titleLabel: "Title:",
+  na: "N/A",
+  participants: "Participants",
+  noPlaces: "No places",
+  leaveConference: "Leave conference",
+  endConference: "End conference",
+  ending: "Ending\u2026",
+  leaving: "Leaving\u2026",
+  conferenceEnded: "Conference ended.",
+  leftConference: "Left conference.",
+  connectHubFirst: "Connect to the Cast hub first.",
+  topicRequiredHost: "Cast topic is required to host a conference.",
+  topicRequiredJoin: "Cast topic is required to join a conference.",
+  titleRequired: "Conference title is required.",
+  selectAttendee: "Select at least one attendee topic.",
+  selectConferenceToJoin: "Select a conference to join.",
+  failedCreate: "Failed to create conference.",
+  failedJoin: "Failed to join conference.",
+  failedUpdate: "Failed to update conference.",
+  inviteTitle: "Conference invitation",
+  joinAndFollow: "Join and follow",
+  joinNoFollow: "Join but do not follow",
+  doNotJoin: "Do not join",
+  hostFallback: "host",
+  inviteLeadWithTitle: "{{title}} \u2014 join and follow {{host}}?",
+  inviteLeadNoTitle: "Join conference and follow {{host}}?",
+  joinAndFollowHost: "Join and follow {{host}}",
+  takeoverTitle: "Take over?",
+  takeoverBody: "The host and all participants will be notified that you are taking over. You will lead scene updates for this conference.",
+  cancel: "Cancel",
+  takeOver: "Take over",
+  conferencing: "Conferencing",
+  subscribeHubFirst: "Subscribe to the hub first",
+  stopFollowing: "Stop following",
+  resumeFollowing: "Resume following"
+};
+var de2 = {
+  dialogTitle: "Konferenz",
+  close: "Schlie\xDFen",
+  closeAria: "Schlie\xDFen",
+  createSection: "Konferenz erstellen",
+  conferenceTitle: "Konferenztitel",
+  selectConferenceTitle: "Titel ausw\xE4hlen",
+  otherTitle: "Andere\u2026",
+  customTitle: "Benutzerdefinierter Titel",
+  customTitlePlaceholder: "Konferenztitel eingeben",
+  users: "Benutzer",
+  loadingUsers: "Benutzer werden geladen\u2026",
+  noUsers: "Keine Benutzer verf\xFCgbar",
+  createConference: "Konferenz erstellen",
+  creating: "Wird erstellt\u2026",
+  joinSection: "An einer Konferenz teilnehmen",
+  activeConferences: "Aktive Konferenzen",
+  noConferences: "Keine Konferenzen verf\xFCgbar",
+  selectConference: "Konferenz ausw\xE4hlen",
+  untitled: "Ohne Titel",
+  joinConference: "Konferenz beitreten",
+  joining: "Beitritt\u2026",
+  manageSection: "Konferenz verwalten",
+  titleLabel: "Titel:",
+  na: "k. A.",
+  participants: "Teilnehmer",
+  noPlaces: "Keine Orte",
+  leaveConference: "Konferenz verlassen",
+  endConference: "Konferenz beenden",
+  ending: "Wird beendet\u2026",
+  leaving: "Verlassen\u2026",
+  conferenceEnded: "Konferenz beendet.",
+  leftConference: "Konferenz verlassen.",
+  connectHubFirst: "Stellen Sie zuerst eine Verbindung zum Cast-Hub her.",
+  topicRequiredHost: "Ein Cast-Topic ist erforderlich, um eine Konferenz zu hosten.",
+  topicRequiredJoin: "Ein Cast-Topic ist erforderlich, um einer Konferenz beizutreten.",
+  titleRequired: "Konferenztitel ist erforderlich.",
+  selectAttendee: "W\xE4hlen Sie mindestens einen Teilnehmer aus.",
+  selectConferenceToJoin: "W\xE4hlen Sie eine Konferenz zum Beitreten aus.",
+  failedCreate: "Konferenz konnte nicht erstellt werden.",
+  failedJoin: "Beitritt zur Konferenz fehlgeschlagen.",
+  failedUpdate: "Aktualisierung der Konferenz fehlgeschlagen.",
+  inviteTitle: "Konferenzeinladung",
+  joinAndFollow: "Beitreten und folgen",
+  joinNoFollow: "Beitreten, aber nicht folgen",
+  doNotJoin: "Nicht beitreten",
+  hostFallback: "Host",
+  inviteLeadWithTitle: "{{title}} \u2014 beitreten und {{host}} folgen?",
+  inviteLeadNoTitle: "Konferenz beitreten und {{host}} folgen?",
+  joinAndFollowHost: "Beitreten und {{host}} folgen",
+  takeoverTitle: "\xDCbernehmen?",
+  takeoverBody: "Der Host und alle Teilnehmer werden benachrichtigt, dass Sie die F\xFChrung \xFCbernehmen. Sie leiten dann die Szenenaktualisierungen f\xFCr diese Konferenz.",
+  cancel: "Abbrechen",
+  takeOver: "\xDCbernehmen",
+  conferencing: "Konferenz",
+  subscribeHubFirst: "Zuerst am Hub anmelden",
+  stopFollowing: "Folgen beenden",
+  resumeFollowing: "Folgen fortsetzen"
+};
+var fr2 = {
+  dialogTitle: "Conf\xE9rence",
+  close: "Fermer",
+  closeAria: "Fermer",
+  createSection: "Cr\xE9er une conf\xE9rence",
+  conferenceTitle: "Titre de la conf\xE9rence",
+  selectConferenceTitle: "S\xE9lectionner un titre",
+  otherTitle: "Autre\u2026",
+  customTitle: "Titre personnalis\xE9",
+  customTitlePlaceholder: "Saisir le titre de la conf\xE9rence",
+  users: "Utilisateurs",
+  loadingUsers: "Chargement des utilisateurs\u2026",
+  noUsers: "Aucun utilisateur disponible",
+  createConference: "Cr\xE9er la conf\xE9rence",
+  creating: "Cr\xE9ation\u2026",
+  joinSection: "Rejoindre une conf\xE9rence",
+  activeConferences: "Conf\xE9rences actives",
+  noConferences: "Aucune conf\xE9rence disponible",
+  selectConference: "S\xE9lectionner une conf\xE9rence",
+  untitled: "Sans titre",
+  joinConference: "Rejoindre la conf\xE9rence",
+  joining: "Connexion\u2026",
+  manageSection: "G\xE9rer la conf\xE9rence",
+  titleLabel: "Titre :",
+  na: "N/D",
+  participants: "Participants",
+  noPlaces: "Aucun lieu",
+  leaveConference: "Quitter la conf\xE9rence",
+  endConference: "Terminer la conf\xE9rence",
+  ending: "Fin\u2026",
+  leaving: "D\xE9part\u2026",
+  conferenceEnded: "Conf\xE9rence termin\xE9e.",
+  leftConference: "Vous avez quitt\xE9 la conf\xE9rence.",
+  connectHubFirst: "Connectez-vous d\u2019abord au hub Cast.",
+  topicRequiredHost: "Un topic Cast est requis pour animer une conf\xE9rence.",
+  topicRequiredJoin: "Un topic Cast est requis pour rejoindre une conf\xE9rence.",
+  titleRequired: "Le titre de la conf\xE9rence est requis.",
+  selectAttendee: "S\xE9lectionnez au moins un participant.",
+  selectConferenceToJoin: "S\xE9lectionnez une conf\xE9rence \xE0 rejoindre.",
+  failedCreate: "\xC9chec de la cr\xE9ation de la conf\xE9rence.",
+  failedJoin: "\xC9chec de la connexion \xE0 la conf\xE9rence.",
+  failedUpdate: "\xC9chec de la mise \xE0 jour de la conf\xE9rence.",
+  inviteTitle: "Invitation \xE0 la conf\xE9rence",
+  joinAndFollow: "Rejoindre et suivre",
+  joinNoFollow: "Rejoindre sans suivre",
+  doNotJoin: "Ne pas rejoindre",
+  hostFallback: "h\xF4te",
+  inviteLeadWithTitle: "{{title}} \u2014 rejoindre et suivre {{host}} ?",
+  inviteLeadNoTitle: "Rejoindre la conf\xE9rence et suivre {{host}} ?",
+  joinAndFollowHost: "Rejoindre et suivre {{host}}",
+  takeoverTitle: "Prendre la main ?",
+  takeoverBody: "L\u2019h\xF4te et tous les participants seront inform\xE9s que vous prenez la main. Vous dirigerez les mises \xE0 jour de sc\xE8ne pour cette conf\xE9rence.",
+  cancel: "Annuler",
+  takeOver: "Prendre la main",
+  conferencing: "Conf\xE9rence",
+  subscribeHubFirst: "Abonnez-vous d\u2019abord au hub",
+  stopFollowing: "Arr\xEAter de suivre",
+  resumeFollowing: "Reprendre le suivi"
+};
+var es2 = {
+  dialogTitle: "Conferencia",
+  close: "Cerrar",
+  closeAria: "Cerrar",
+  createSection: "Crear una conferencia",
+  conferenceTitle: "T\xEDtulo de la conferencia",
+  selectConferenceTitle: "Seleccionar un t\xEDtulo",
+  otherTitle: "Otro\u2026",
+  customTitle: "T\xEDtulo personalizado",
+  customTitlePlaceholder: "Introducir el t\xEDtulo de la conferencia",
+  users: "Usuarios",
+  loadingUsers: "Cargando usuarios\u2026",
+  noUsers: "No hay usuarios disponibles",
+  createConference: "Crear conferencia",
+  creating: "Creando\u2026",
+  joinSection: "Unirse a una conferencia",
+  activeConferences: "Conferencias activas",
+  noConferences: "No hay conferencias disponibles",
+  selectConference: "Seleccionar una conferencia",
+  untitled: "Sin t\xEDtulo",
+  joinConference: "Unirse a la conferencia",
+  joining: "Uni\xE9ndose\u2026",
+  manageSection: "Gestionar conferencia",
+  titleLabel: "T\xEDtulo:",
+  na: "N/D",
+  participants: "Participantes",
+  noPlaces: "Sin lugares",
+  leaveConference: "Abandonar la conferencia",
+  endConference: "Terminar la conferencia",
+  ending: "Terminando\u2026",
+  leaving: "Saliendo\u2026",
+  conferenceEnded: "Conferencia terminada.",
+  leftConference: "Has abandonado la conferencia.",
+  connectHubFirst: "Con\xE9ctate primero al hub Cast.",
+  topicRequiredHost: "Se requiere un topic Cast para organizar una conferencia.",
+  topicRequiredJoin: "Se requiere un topic Cast para unirse a una conferencia.",
+  titleRequired: "El t\xEDtulo de la conferencia es obligatorio.",
+  selectAttendee: "Selecciona al menos un participante.",
+  selectConferenceToJoin: "Selecciona una conferencia a la que unirte.",
+  failedCreate: "Error al crear la conferencia.",
+  failedJoin: "Error al unirse a la conferencia.",
+  failedUpdate: "Error al actualizar la conferencia.",
+  inviteTitle: "Invitaci\xF3n a la conferencia",
+  joinAndFollow: "Unirse y seguir",
+  joinNoFollow: "Unirse sin seguir",
+  doNotJoin: "No unirse",
+  hostFallback: "anfitri\xF3n",
+  inviteLeadWithTitle: "{{title}} \u2014 \xBFunirse y seguir a {{host}}?",
+  inviteLeadNoTitle: "\xBFUnirse a la conferencia y seguir a {{host}}?",
+  joinAndFollowHost: "Unirse y seguir a {{host}}",
+  takeoverTitle: "\xBFTomar el control?",
+  takeoverBody: "Se notificar\xE1 al anfitri\xF3n y a todos los participantes de que tomas el control. Dirigir\xE1s las actualizaciones de escena de esta conferencia.",
+  cancel: "Cancelar",
+  takeOver: "Tomar el control",
+  conferencing: "Conferencia",
+  subscribeHubFirst: "Suscr\xEDbete primero al hub",
+  stopFollowing: "Dejar de seguir",
+  resumeFollowing: "Reanudar el seguimiento"
+};
+var ca = {
+  dialogTitle: "Confer\xE8ncia",
+  close: "Tancar",
+  closeAria: "Tancar",
+  createSection: "Crear una confer\xE8ncia",
+  conferenceTitle: "T\xEDtol de la confer\xE8ncia",
+  selectConferenceTitle: "Seleccionar un t\xEDtol",
+  otherTitle: "Altre\u2026",
+  customTitle: "T\xEDtol personalitzat",
+  customTitlePlaceholder: "Introdu\xEFu el t\xEDtol de la confer\xE8ncia",
+  users: "Usuaris",
+  loadingUsers: "S\u2019estan carregant els usuaris\u2026",
+  noUsers: "No hi ha usuaris disponibles",
+  createConference: "Crear la confer\xE8ncia",
+  creating: "S\u2019est\xE0 creant\u2026",
+  joinSection: "Unir-se a una confer\xE8ncia",
+  activeConferences: "Confer\xE8ncies actives",
+  noConferences: "No hi ha confer\xE8ncies disponibles",
+  selectConference: "Seleccionar una confer\xE8ncia",
+  untitled: "Sense t\xEDtol",
+  joinConference: "Unir-se a la confer\xE8ncia",
+  joining: "S\u2019est\xE0 unint\u2026",
+  manageSection: "Gestionar la confer\xE8ncia",
+  titleLabel: "T\xEDtol:",
+  na: "N/D",
+  participants: "Participants",
+  noPlaces: "Sense llocs",
+  leaveConference: "Sortir de la confer\xE8ncia",
+  endConference: "Acabar la confer\xE8ncia",
+  ending: "S\u2019est\xE0 acabant\u2026",
+  leaving: "S\u2019est\xE0 sortint\u2026",
+  conferenceEnded: "Confer\xE8ncia acabada.",
+  leftConference: "Heu sortit de la confer\xE8ncia.",
+  connectHubFirst: "Connecteu-vos primer al hub Cast.",
+  topicRequiredHost: "Cal un topic Cast per organitzar una confer\xE8ncia.",
+  topicRequiredJoin: "Cal un topic Cast per unir-se a una confer\xE8ncia.",
+  titleRequired: "El t\xEDtol de la confer\xE8ncia \xE9s obligatori.",
+  selectAttendee: "Seleccioneu almenys un participant.",
+  selectConferenceToJoin: "Seleccioneu una confer\xE8ncia a la qual unir-vos.",
+  failedCreate: "No s\u2019ha pogut crear la confer\xE8ncia.",
+  failedJoin: "No s\u2019ha pogut unir a la confer\xE8ncia.",
+  failedUpdate: "No s\u2019ha pogut actualitzar la confer\xE8ncia.",
+  inviteTitle: "Invitaci\xF3 a la confer\xE8ncia",
+  joinAndFollow: "Unir-se i seguir",
+  joinNoFollow: "Unir-se sense seguir",
+  doNotJoin: "No unir-se",
+  hostFallback: "amfitri\xF3",
+  inviteLeadWithTitle: "{{title}} \u2014 unir-se i seguir {{host}}?",
+  inviteLeadNoTitle: "Unir-se a la confer\xE8ncia i seguir {{host}}?",
+  joinAndFollowHost: "Unir-se i seguir {{host}}",
+  takeoverTitle: "Prendre el control?",
+  takeoverBody: "Se notificar\xE0 a l\u2019amfitri\xF3 i a tots els participants que preneu el control. Direccioneu les actualitzacions d\u2019escena d\u2019aquesta confer\xE8ncia.",
+  cancel: "Cancel\xB7lar",
+  takeOver: "Prendre el control",
+  conferencing: "Confer\xE8ncia",
+  subscribeHubFirst: "Subscriviu-vos primer al hub",
+  stopFollowing: "Deixar de seguir",
+  resumeFollowing: "Reprendre el seguiment"
+};
+var it2 = {
+  dialogTitle: "Conferenza",
+  close: "Chiudi",
+  closeAria: "Chiudi",
+  createSection: "Crea una conferenza",
+  conferenceTitle: "Titolo della conferenza",
+  selectConferenceTitle: "Seleziona un titolo",
+  otherTitle: "Altro\u2026",
+  customTitle: "Titolo personalizzato",
+  customTitlePlaceholder: "Inserisci il titolo della conferenza",
+  users: "Utenti",
+  loadingUsers: "Caricamento utenti\u2026",
+  noUsers: "Nessun utente disponibile",
+  createConference: "Crea conferenza",
+  creating: "Creazione\u2026",
+  joinSection: "Partecipa a una conferenza",
+  activeConferences: "Conferenze attive",
+  noConferences: "Nessuna conferenza disponibile",
+  selectConference: "Seleziona una conferenza",
+  untitled: "Senza titolo",
+  joinConference: "Partecipa alla conferenza",
+  joining: "Accesso\u2026",
+  manageSection: "Gestisci conferenza",
+  titleLabel: "Titolo:",
+  na: "N/D",
+  participants: "Partecipanti",
+  noPlaces: "Nessun luogo",
+  leaveConference: "Lascia la conferenza",
+  endConference: "Termina la conferenza",
+  ending: "Chiusura\u2026",
+  leaving: "Uscita\u2026",
+  conferenceEnded: "Conferenza terminata.",
+  leftConference: "Hai lasciato la conferenza.",
+  connectHubFirst: "Connettiti prima all\u2019hub Cast.",
+  topicRequiredHost: "\xC8 richiesto un topic Cast per ospitare una conferenza.",
+  topicRequiredJoin: "\xC8 richiesto un topic Cast per partecipare a una conferenza.",
+  titleRequired: "Il titolo della conferenza \xE8 obbligatorio.",
+  selectAttendee: "Seleziona almeno un partecipante.",
+  selectConferenceToJoin: "Seleziona una conferenza a cui partecipare.",
+  failedCreate: "Creazione della conferenza non riuscita.",
+  failedJoin: "Partecipazione alla conferenza non riuscita.",
+  failedUpdate: "Aggiornamento della conferenza non riuscito.",
+  inviteTitle: "Invito alla conferenza",
+  joinAndFollow: "Partecipa e segui",
+  joinNoFollow: "Partecipa senza seguire",
+  doNotJoin: "Non partecipare",
+  hostFallback: "host",
+  inviteLeadWithTitle: "{{title}} \u2014 partecipare e seguire {{host}}?",
+  inviteLeadNoTitle: "Partecipare alla conferenza e seguire {{host}}?",
+  joinAndFollowHost: "Partecipa e segui {{host}}",
+  takeoverTitle: "Prendere il controllo?",
+  takeoverBody: "L\u2019host e tutti i partecipanti saranno avvisati che stai prendendo il controllo. Dirigerai gli aggiornamenti di scena di questa conferenza.",
+  cancel: "Annulla",
+  takeOver: "Prendi il controllo",
+  conferencing: "Conferenza",
+  subscribeHubFirst: "Iscriviti prima all\u2019hub",
+  stopFollowing: "Smetti di seguire",
+  resumeFollowing: "Riprendi a seguire"
+};
+var pt2 = {
+  dialogTitle: "Confer\xEAncia",
+  close: "Fechar",
+  closeAria: "Fechar",
+  createSection: "Criar uma confer\xEAncia",
+  conferenceTitle: "T\xEDtulo da confer\xEAncia",
+  selectConferenceTitle: "Selecionar um t\xEDtulo",
+  otherTitle: "Outro\u2026",
+  customTitle: "T\xEDtulo personalizado",
+  customTitlePlaceholder: "Introduza o t\xEDtulo da confer\xEAncia",
+  users: "Utilizadores",
+  loadingUsers: "A carregar utilizadores\u2026",
+  noUsers: "Nenhum utilizador dispon\xEDvel",
+  createConference: "Criar confer\xEAncia",
+  creating: "A criar\u2026",
+  joinSection: "Participar numa confer\xEAncia",
+  activeConferences: "Confer\xEAncias ativas",
+  noConferences: "Nenhuma confer\xEAncia dispon\xEDvel",
+  selectConference: "Selecionar uma confer\xEAncia",
+  untitled: "Sem t\xEDtulo",
+  joinConference: "Participar na confer\xEAncia",
+  joining: "A participar\u2026",
+  manageSection: "Gerir confer\xEAncia",
+  titleLabel: "T\xEDtulo:",
+  na: "N/D",
+  participants: "Participantes",
+  noPlaces: "Sem locais",
+  leaveConference: "Sair da confer\xEAncia",
+  endConference: "Terminar a confer\xEAncia",
+  ending: "A terminar\u2026",
+  leaving: "A sair\u2026",
+  conferenceEnded: "Confer\xEAncia terminada.",
+  leftConference: "Saiu da confer\xEAncia.",
+  connectHubFirst: "Ligue-se primeiro ao hub Cast.",
+  topicRequiredHost: "\xC9 necess\xE1rio um topic Cast para organizar uma confer\xEAncia.",
+  topicRequiredJoin: "\xC9 necess\xE1rio um topic Cast para participar numa confer\xEAncia.",
+  titleRequired: "O t\xEDtulo da confer\xEAncia \xE9 obrigat\xF3rio.",
+  selectAttendee: "Selecione pelo menos um participante.",
+  selectConferenceToJoin: "Selecione uma confer\xEAncia a que participar.",
+  failedCreate: "Falha ao criar a confer\xEAncia.",
+  failedJoin: "Falha ao participar na confer\xEAncia.",
+  failedUpdate: "Falha ao atualizar a confer\xEAncia.",
+  inviteTitle: "Convite para a confer\xEAncia",
+  joinAndFollow: "Participar e seguir",
+  joinNoFollow: "Participar sem seguir",
+  doNotJoin: "N\xE3o participar",
+  hostFallback: "anfitri\xE3o",
+  inviteLeadWithTitle: "{{title}} \u2014 participar e seguir {{host}}?",
+  inviteLeadNoTitle: "Participar na confer\xEAncia e seguir {{host}}?",
+  joinAndFollowHost: "Participar e seguir {{host}}",
+  takeoverTitle: "Assumir o controlo?",
+  takeoverBody: "O anfitri\xE3o e todos os participantes ser\xE3o notificados de que est\xE1 a assumir o controlo. Passar\xE1 a liderar as atualiza\xE7\xF5es de cena desta confer\xEAncia.",
+  cancel: "Cancelar",
+  takeOver: "Assumir o controlo",
+  conferencing: "Confer\xEAncia",
+  subscribeHubFirst: "Subscreva primeiro o hub",
+  stopFollowing: "Parar de seguir",
+  resumeFollowing: "Retomar o seguimento"
+};
+var ko2 = {
+  dialogTitle: "\uD654\uC0C1\uD68C\uC758",
+  close: "\uB2EB\uAE30",
+  closeAria: "\uB2EB\uAE30",
+  createSection: "\uD68C\uC758 \uB9CC\uB4E4\uAE30",
+  conferenceTitle: "\uD68C\uC758 \uC81C\uBAA9",
+  selectConferenceTitle: "\uC81C\uBAA9 \uC120\uD0DD",
+  otherTitle: "\uAE30\uD0C0\u2026",
+  customTitle: "\uC0AC\uC6A9\uC790 \uC9C0\uC815 \uC81C\uBAA9",
+  customTitlePlaceholder: "\uD68C\uC758 \uC81C\uBAA9 \uC785\uB825",
+  users: "\uC0AC\uC6A9\uC790",
+  loadingUsers: "\uC0AC\uC6A9\uC790 \uBD88\uB7EC\uC624\uB294 \uC911\u2026",
+  noUsers: "\uC0AC\uC6A9 \uAC00\uB2A5\uD55C \uC0AC\uC6A9\uC790 \uC5C6\uC74C",
+  createConference: "\uD68C\uC758 \uB9CC\uB4E4\uAE30",
+  creating: "\uB9CC\uB4DC\uB294 \uC911\u2026",
+  joinSection: "\uD68C\uC758 \uCC38\uAC00",
+  activeConferences: "\uC9C4\uD589 \uC911\uC778 \uD68C\uC758",
+  noConferences: "\uC0AC\uC6A9 \uAC00\uB2A5\uD55C \uD68C\uC758 \uC5C6\uC74C",
+  selectConference: "\uD68C\uC758 \uC120\uD0DD",
+  untitled: "\uC81C\uBAA9 \uC5C6\uC74C",
+  joinConference: "\uD68C\uC758 \uCC38\uAC00",
+  joining: "\uCC38\uAC00 \uC911\u2026",
+  manageSection: "\uD68C\uC758 \uAD00\uB9AC",
+  titleLabel: "\uC81C\uBAA9:",
+  na: "\uD574\uB2F9 \uC5C6\uC74C",
+  participants: "\uCC38\uAC00\uC790",
+  noPlaces: "\uC7A5\uC18C \uC5C6\uC74C",
+  leaveConference: "\uD68C\uC758 \uB098\uAC00\uAE30",
+  endConference: "\uD68C\uC758 \uC885\uB8CC",
+  ending: "\uC885\uB8CC \uC911\u2026",
+  leaving: "\uB098\uAC00\uB294 \uC911\u2026",
+  conferenceEnded: "\uD68C\uC758\uAC00 \uC885\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.",
+  leftConference: "\uD68C\uC758\uC5D0\uC11C \uB098\uAC14\uC2B5\uB2C8\uB2E4.",
+  connectHubFirst: "\uBA3C\uC800 Cast \uD5C8\uBE0C\uC5D0 \uC5F0\uACB0\uD558\uC138\uC694.",
+  topicRequiredHost: "\uD68C\uC758\uB97C \uC8FC\uCD5C\uD558\uB824\uBA74 Cast \uD1A0\uD53D\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.",
+  topicRequiredJoin: "\uD68C\uC758\uC5D0 \uCC38\uAC00\uD558\uB824\uBA74 Cast \uD1A0\uD53D\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.",
+  titleRequired: "\uD68C\uC758 \uC81C\uBAA9\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.",
+  selectAttendee: "\uCC38\uAC00\uC790\uB97C \uD55C \uBA85 \uC774\uC0C1 \uC120\uD0DD\uD558\uC138\uC694.",
+  selectConferenceToJoin: "\uCC38\uAC00\uD560 \uD68C\uC758\uB97C \uC120\uD0DD\uD558\uC138\uC694.",
+  failedCreate: "\uD68C\uC758\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
+  failedJoin: "\uD68C\uC758\uC5D0 \uCC38\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
+  failedUpdate: "\uD68C\uC758\uB97C \uC5C5\uB370\uC774\uD2B8\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
+  inviteTitle: "\uD68C\uC758 \uCD08\uB300",
+  joinAndFollow: "\uCC38\uAC00\uD558\uACE0 \uB530\uB77C\uAC00\uAE30",
+  joinNoFollow: "\uCC38\uAC00\uD558\uB418 \uB530\uB77C\uAC00\uC9C0 \uC54A\uAE30",
+  doNotJoin: "\uCC38\uAC00\uD558\uC9C0 \uC54A\uAE30",
+  hostFallback: "\uD638\uC2A4\uD2B8",
+  inviteLeadWithTitle: "{{title}} \u2014 \uCC38\uAC00\uD558\uACE0 {{host}}\uB97C \uB530\uB77C\uAC08\uAE4C\uC694?",
+  inviteLeadNoTitle: "\uD68C\uC758\uC5D0 \uCC38\uAC00\uD558\uACE0 {{host}}\uB97C \uB530\uB77C\uAC08\uAE4C\uC694?",
+  joinAndFollowHost: "{{host}}\uB97C \uB530\uB77C\uAC00\uBA70 \uCC38\uAC00",
+  takeoverTitle: "\uC8FC\uB3C4\uAD8C\uC744 \uAC00\uC838\uC62C\uAE4C\uC694?",
+  takeoverBody: "\uD638\uC2A4\uD2B8\uC640 \uBAA8\uB4E0 \uCC38\uAC00\uC790\uC5D0\uAC8C \uC8FC\uB3C4\uAD8C\uC744 \uAC00\uC838\uAC04\uB2E4\uB294 \uC54C\uB9BC\uC774 \uAC11\uB2C8\uB2E4. \uC774 \uD68C\uC758\uC758 \uC7A5\uBA74 \uC5C5\uB370\uC774\uD2B8\uB97C \uC774\uB04C\uAC8C \uB429\uB2C8\uB2E4.",
+  cancel: "\uCDE8\uC18C",
+  takeOver: "\uC8FC\uB3C4\uAD8C \uAC00\uC838\uC624\uAE30",
+  conferencing: "\uD654\uC0C1\uD68C\uC758",
+  subscribeHubFirst: "\uBA3C\uC800 \uD5C8\uBE0C\uC5D0 \uAD6C\uB3C5\uD558\uC138\uC694",
+  stopFollowing: "\uB530\uB77C\uAC00\uAE30 \uC911\uC9C0",
+  resumeFollowing: "\uB530\uB77C\uAC00\uAE30 \uC7AC\uAC1C"
+};
+var pl = {
+  dialogTitle: "Konferencja",
+  close: "Zamknij",
+  closeAria: "Zamknij",
+  createSection: "Utw\xF3rz konferencj\u0119",
+  conferenceTitle: "Tytu\u0142 konferencji",
+  selectConferenceTitle: "Wybierz tytu\u0142",
+  otherTitle: "Inny\u2026",
+  customTitle: "Tytu\u0142 niestandardowy",
+  customTitlePlaceholder: "Wpisz tytu\u0142 konferencji",
+  users: "U\u017Cytkownicy",
+  loadingUsers: "\u0141adowanie u\u017Cytkownik\xF3w\u2026",
+  noUsers: "Brak dost\u0119pnych u\u017Cytkownik\xF3w",
+  createConference: "Utw\xF3rz konferencj\u0119",
+  creating: "Tworzenie\u2026",
+  joinSection: "Do\u0142\u0105cz do konferencji",
+  activeConferences: "Aktywne konferencje",
+  noConferences: "Brak dost\u0119pnych konferencji",
+  selectConference: "Wybierz konferencj\u0119",
+  untitled: "Bez tytu\u0142u",
+  joinConference: "Do\u0142\u0105cz do konferencji",
+  joining: "Do\u0142\u0105czanie\u2026",
+  manageSection: "Zarz\u0105dzaj konferencj\u0105",
+  titleLabel: "Tytu\u0142:",
+  na: "nd.",
+  participants: "Uczestnicy",
+  noPlaces: "Brak miejsc",
+  leaveConference: "Opu\u015B\u0107 konferencj\u0119",
+  endConference: "Zako\u0144cz konferencj\u0119",
+  ending: "Ko\u0144czenie\u2026",
+  leaving: "Opuszczanie\u2026",
+  conferenceEnded: "Konferencja zako\u0144czona.",
+  leftConference: "Opuszczono konferencj\u0119.",
+  connectHubFirst: "Najpierw po\u0142\u0105cz si\u0119 z hubem Cast.",
+  topicRequiredHost: "Do prowadzenia konferencji wymagany jest topic Cast.",
+  topicRequiredJoin: "Do do\u0142\u0105czenia do konferencji wymagany jest topic Cast.",
+  titleRequired: "Tytu\u0142 konferencji jest wymagany.",
+  selectAttendee: "Wybierz co najmniej jednego uczestnika.",
+  selectConferenceToJoin: "Wybierz konferencj\u0119, do kt\xF3rej chcesz do\u0142\u0105czy\u0107.",
+  failedCreate: "Nie uda\u0142o si\u0119 utworzy\u0107 konferencji.",
+  failedJoin: "Nie uda\u0142o si\u0119 do\u0142\u0105czy\u0107 do konferencji.",
+  failedUpdate: "Nie uda\u0142o si\u0119 zaktualizowa\u0107 konferencji.",
+  inviteTitle: "Zaproszenie na konferencj\u0119",
+  joinAndFollow: "Do\u0142\u0105cz i \u015Bled\u017A",
+  joinNoFollow: "Do\u0142\u0105cz, ale nie \u015Bled\u017A",
+  doNotJoin: "Nie do\u0142\u0105czaj",
+  hostFallback: "host",
+  inviteLeadWithTitle: "{{title}} \u2014 do\u0142\u0105czy\u0107 i \u015Bledzi\u0107 {{host}}?",
+  inviteLeadNoTitle: "Do\u0142\u0105czy\u0107 do konferencji i \u015Bledzi\u0107 {{host}}?",
+  joinAndFollowHost: "Do\u0142\u0105cz i \u015Bled\u017A {{host}}",
+  takeoverTitle: "Przej\u0105\u0107 prowadzenie?",
+  takeoverBody: "Host i wszyscy uczestnicy zostan\u0105 powiadomieni, \u017Ce przejmujesz prowadzenie. B\u0119dziesz kierowa\u0107 aktualizacjami sceny tej konferencji.",
+  cancel: "Anuluj",
+  takeOver: "Przejmij",
+  conferencing: "Konferencja",
+  subscribeHubFirst: "Najpierw zasubskrybuj hub",
+  stopFollowing: "Przesta\u0144 \u015Bledzi\u0107",
+  resumeFollowing: "Wzn\xF3w \u015Bledzenie"
+};
+var uk = {
+  dialogTitle: "\u041A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044F",
+  close: "\u0417\u0430\u043A\u0440\u0438\u0442\u0438",
+  closeAria: "\u0417\u0430\u043A\u0440\u0438\u0442\u0438",
+  createSection: "\u0421\u0442\u0432\u043E\u0440\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
+  conferenceTitle: "\u041D\u0430\u0437\u0432\u0430 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  selectConferenceTitle: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043D\u0430\u0437\u0432\u0443",
+  otherTitle: "\u0406\u043D\u0448\u0435\u2026",
+  customTitle: "\u0412\u043B\u0430\u0441\u043D\u0430 \u043D\u0430\u0437\u0432\u0430",
+  customTitlePlaceholder: "\u0412\u0432\u0435\u0434\u0456\u0442\u044C \u043D\u0430\u0437\u0432\u0443 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  users: "\u041A\u043E\u0440\u0438\u0441\u0442\u0443\u0432\u0430\u0447\u0456",
+  loadingUsers: "\u0417\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0435\u043D\u043D\u044F \u043A\u043E\u0440\u0438\u0441\u0442\u0443\u0432\u0430\u0447\u0456\u0432\u2026",
+  noUsers: "\u041D\u0435\u043C\u0430\u0454 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0445 \u043A\u043E\u0440\u0438\u0441\u0442\u0443\u0432\u0430\u0447\u0456\u0432",
+  createConference: "\u0421\u0442\u0432\u043E\u0440\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
+  creating: "\u0421\u0442\u0432\u043E\u0440\u0435\u043D\u043D\u044F\u2026",
+  joinSection: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  activeConferences: "\u0410\u043A\u0442\u0438\u0432\u043D\u0456 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  noConferences: "\u041D\u0435\u043C\u0430\u0454 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0445 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0439",
+  selectConference: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
+  untitled: "\u0411\u0435\u0437 \u043D\u0430\u0437\u0432\u0438",
+  joinConference: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  joining: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u043D\u043D\u044F\u2026",
+  manageSection: "\u041A\u0435\u0440\u0443\u0432\u0430\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0454\u044E",
+  titleLabel: "\u041D\u0430\u0437\u0432\u0430:",
+  na: "\u043D/\u0434",
+  participants: "\u0423\u0447\u0430\u0441\u043D\u0438\u043A\u0438",
+  noPlaces: "\u041D\u0435\u043C\u0430\u0454 \u043C\u0456\u0441\u0446\u044C",
+  leaveConference: "\u0412\u0438\u0439\u0442\u0438 \u0437 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  endConference: "\u0417\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
+  ending: "\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043D\u044F\u2026",
+  leaving: "\u0412\u0438\u0445\u0456\u0434\u2026",
+  conferenceEnded: "\u041A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E.",
+  leftConference: "\u0412\u0438 \u0432\u0438\u0439\u0448\u043B\u0438 \u0437 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
+  connectHubFirst: "\u0421\u043F\u043E\u0447\u0430\u0442\u043A\u0443 \u043F\u0456\u0434\u043A\u043B\u044E\u0447\u0456\u0442\u044C\u0441\u044F \u0434\u043E Cast-\u0445\u0430\u0431\u0443.",
+  topicRequiredHost: "\u0414\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0434\u0435\u043D\u043D\u044F \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457 \u043F\u043E\u0442\u0440\u0456\u0431\u0435\u043D Cast topic.",
+  topicRequiredJoin: "\u0429\u043E\u0431 \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457, \u043F\u043E\u0442\u0440\u0456\u0431\u0435\u043D Cast topic.",
+  titleRequired: "\u041F\u043E\u0442\u0440\u0456\u0431\u043D\u0430 \u043D\u0430\u0437\u0432\u0430 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
+  selectAttendee: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043F\u0440\u0438\u043D\u0430\u0439\u043C\u043D\u0456 \u043E\u0434\u043D\u043E\u0433\u043E \u0443\u0447\u0430\u0441\u043D\u0438\u043A\u0430.",
+  selectConferenceToJoin: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E, \u0434\u043E \u044F\u043A\u043E\u0457 \u0445\u043E\u0447\u0435\u0442\u0435 \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F.",
+  failedCreate: "\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u0441\u0442\u0432\u043E\u0440\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E.",
+  failedJoin: "\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
+  failedUpdate: "\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u043E\u043D\u043E\u0432\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E.",
+  inviteTitle: "\u0417\u0430\u043F\u0440\u043E\u0448\u0435\u043D\u043D\u044F \u043D\u0430 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
+  joinAndFollow: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438",
+  joinNoFollow: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F, \u0430\u043B\u0435 \u043D\u0435 \u0441\u0442\u0435\u0436\u0438\u0442\u0438",
+  doNotJoin: "\u041D\u0435 \u043F\u0440\u0438\u0454\u0434\u043D\u0443\u0432\u0430\u0442\u0438\u0441\u044F",
+  hostFallback: "\u0432\u0435\u0434\u0443\u0447\u0438\u0439",
+  inviteLeadWithTitle: "{{title}} \u2014 \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438 \u0437\u0430 {{host}}?",
+  inviteLeadNoTitle: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457 \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438 \u0437\u0430 {{host}}?",
+  joinAndFollowHost: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438 \u0437\u0430 {{host}}",
+  takeoverTitle: "\u041F\u0435\u0440\u0435\u0445\u043E\u043F\u0438\u0442\u0438 \u043A\u0435\u0440\u0443\u0432\u0430\u043D\u043D\u044F?",
+  takeoverBody: "\u0412\u0435\u0434\u0443\u0447\u043E\u0433\u043E \u0442\u0430 \u0432\u0441\u0456\u0445 \u0443\u0447\u0430\u0441\u043D\u0438\u043A\u0456\u0432 \u0431\u0443\u0434\u0435 \u043F\u043E\u0432\u0456\u0434\u043E\u043C\u043B\u0435\u043D\u043E, \u0449\u043E \u0432\u0438 \u043F\u0435\u0440\u0435\u0445\u043E\u043F\u043B\u044E\u0454\u0442\u0435 \u043A\u0435\u0440\u0443\u0432\u0430\u043D\u043D\u044F. \u0412\u0438 \u043A\u0435\u0440\u0443\u0432\u0430\u0442\u0438\u043C\u0435\u0442\u0435 \u043E\u043D\u043E\u0432\u043B\u0435\u043D\u043D\u044F\u043C\u0438 \u0441\u0446\u0435\u043D\u0438 \u0446\u0456\u0454\u0457 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
+  cancel: "\u0421\u043A\u0430\u0441\u0443\u0432\u0430\u0442\u0438",
+  takeOver: "\u041F\u0435\u0440\u0435\u0445\u043E\u043F\u0438\u0442\u0438",
+  conferencing: "\u041A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044F",
+  subscribeHubFirst: "\u0421\u043F\u043E\u0447\u0430\u0442\u043A\u0443 \u043F\u0456\u0434\u043F\u0438\u0448\u0456\u0442\u044C\u0441\u044F \u043D\u0430 \u0445\u0430\u0431",
+  stopFollowing: "\u041F\u0440\u0438\u043F\u0438\u043D\u0438\u0442\u0438 \u0441\u0442\u0435\u0436\u0435\u043D\u043D\u044F",
+  resumeFollowing: "\u0412\u0456\u0434\u043D\u043E\u0432\u0438\u0442\u0438 \u0441\u0442\u0435\u0436\u0435\u043D\u043D\u044F"
+};
+var cs = {
+  dialogTitle: "Konference",
+  close: "Zav\u0159\xEDt",
+  closeAria: "Zav\u0159\xEDt",
+  createSection: "Vytvo\u0159it konferenci",
+  conferenceTitle: "N\xE1zev konference",
+  selectConferenceTitle: "Vyberte n\xE1zev",
+  otherTitle: "Jin\xFD\u2026",
+  customTitle: "Vlastn\xED n\xE1zev",
+  customTitlePlaceholder: "Zadejte n\xE1zev konference",
+  users: "U\u017Eivatel\xE9",
+  loadingUsers: "Na\u010D\xEDt\xE1n\xED u\u017Eivatel\u016F\u2026",
+  noUsers: "\u017D\xE1dn\xED dostupn\xED u\u017Eivatel\xE9",
+  createConference: "Vytvo\u0159it konferenci",
+  creating: "Vytv\xE1\u0159en\xED\u2026",
+  joinSection: "P\u0159ipojit se ke konferenci",
+  activeConferences: "Aktivn\xED konference",
+  noConferences: "\u017D\xE1dn\xE9 dostupn\xE9 konference",
+  selectConference: "Vyberte konferenci",
+  untitled: "Bez n\xE1zvu",
+  joinConference: "P\u0159ipojit se ke konferenci",
+  joining: "P\u0159ipojov\xE1n\xED\u2026",
+  manageSection: "Spravovat konferenci",
+  titleLabel: "N\xE1zev:",
+  na: "n/a",
+  participants: "\xDA\u010Dastn\xEDci",
+  noPlaces: "\u017D\xE1dn\xE1 m\xEDsta",
+  leaveConference: "Opustit konferenci",
+  endConference: "Ukon\u010Dit konferenci",
+  ending: "Ukon\u010Dov\xE1n\xED\u2026",
+  leaving: "Opou\u0161t\u011Bn\xED\u2026",
+  conferenceEnded: "Konference ukon\u010Dena.",
+  leftConference: "Opustili jste konferenci.",
+  connectHubFirst: "Nejprve se p\u0159ipojte k Cast hubu.",
+  topicRequiredHost: "Pro po\u0159\xE1d\xE1n\xED konference je vy\u017Eadov\xE1n Cast topic.",
+  topicRequiredJoin: "Pro p\u0159ipojen\xED ke konferenci je vy\u017Eadov\xE1n Cast topic.",
+  titleRequired: "N\xE1zev konference je povinn\xFD.",
+  selectAttendee: "Vyberte alespo\u0148 jednoho \xFA\u010Dastn\xEDka.",
+  selectConferenceToJoin: "Vyberte konferenci, ke kter\xE9 se chcete p\u0159ipojit.",
+  failedCreate: "Vytvo\u0159en\xED konference se nezda\u0159ilo.",
+  failedJoin: "P\u0159ipojen\xED ke konferenci se nezda\u0159ilo.",
+  failedUpdate: "Aktualizace konference se nezda\u0159ila.",
+  inviteTitle: "Pozv\xE1nka na konferenci",
+  joinAndFollow: "P\u0159ipojit se a sledovat",
+  joinNoFollow: "P\u0159ipojit se, ale nesledovat",
+  doNotJoin: "Nep\u0159ipojovat se",
+  hostFallback: "hostitel",
+  inviteLeadWithTitle: "{{title}} \u2014 p\u0159ipojit se a sledovat {{host}}?",
+  inviteLeadNoTitle: "P\u0159ipojit se ke konferenci a sledovat {{host}}?",
+  joinAndFollowHost: "P\u0159ipojit se a sledovat {{host}}",
+  takeoverTitle: "P\u0159evz\xEDt veden\xED?",
+  takeoverBody: "Hostitel a v\u0161ichni \xFA\u010Dastn\xEDci budou upozorn\u011Bni, \u017Ee p\u0159eb\xEDr\xE1te veden\xED. Budete \u0159\xEDdit aktualizace sc\xE9ny t\xE9to konference.",
+  cancel: "Zru\u0161it",
+  takeOver: "P\u0159evz\xEDt",
+  conferencing: "Konference",
+  subscribeHubFirst: "Nejprve se p\u0159ihlaste k hubu",
+  stopFollowing: "P\u0159estat sledovat",
+  resumeFollowing: "Obnovit sledov\xE1n\xED"
+};
+var nl = {
+  dialogTitle: "Conferentie",
+  close: "Sluiten",
+  closeAria: "Sluiten",
+  createSection: "Een conferentie maken",
+  conferenceTitle: "Conferentietitel",
+  selectConferenceTitle: "Selecteer een titel",
+  otherTitle: "Anders\u2026",
+  customTitle: "Aangepaste titel",
+  customTitlePlaceholder: "Voer de conferentietitel in",
+  users: "Gebruikers",
+  loadingUsers: "Gebruikers laden\u2026",
+  noUsers: "Geen gebruikers beschikbaar",
+  createConference: "Conferentie maken",
+  creating: "Bezig met maken\u2026",
+  joinSection: "Deelnemen aan een conferentie",
+  activeConferences: "Actieve conferenties",
+  noConferences: "Geen conferenties beschikbaar",
+  selectConference: "Selecteer een conferentie",
+  untitled: "Zonder titel",
+  joinConference: "Deelnemen aan conferentie",
+  joining: "Bezig met deelnemen\u2026",
+  manageSection: "Conferentie beheren",
+  titleLabel: "Titel:",
+  na: "n.v.t.",
+  participants: "Deelnemers",
+  noPlaces: "Geen plaatsen",
+  leaveConference: "Conferentie verlaten",
+  endConference: "Conferentie be\xEBindigen",
+  ending: "Be\xEBindigen\u2026",
+  leaving: "Verlaten\u2026",
+  conferenceEnded: "Conferentie be\xEBindigd.",
+  leftConference: "U hebt de conferentie verlaten.",
+  connectHubFirst: "Maak eerst verbinding met de Cast-hub.",
+  topicRequiredHost: "Een Cast-topic is vereist om een conferentie te hosten.",
+  topicRequiredJoin: "Een Cast-topic is vereist om aan een conferentie deel te nemen.",
+  titleRequired: "Conferentietitel is verplicht.",
+  selectAttendee: "Selecteer minstens \xE9\xE9n deelnemer.",
+  selectConferenceToJoin: "Selecteer een conferentie om deel te nemen.",
+  failedCreate: "Conferentie maken mislukt.",
+  failedJoin: "Deelnemen aan conferentie mislukt.",
+  failedUpdate: "Conferentie bijwerken mislukt.",
+  inviteTitle: "Conferentie-uitnodiging",
+  joinAndFollow: "Deelnemen en volgen",
+  joinNoFollow: "Deelnemen maar niet volgen",
+  doNotJoin: "Niet deelnemen",
+  hostFallback: "host",
+  inviteLeadWithTitle: "{{title}} \u2014 deelnemen en {{host}} volgen?",
+  inviteLeadNoTitle: "Deelnemen aan de conferentie en {{host}} volgen?",
+  joinAndFollowHost: "Deelnemen en {{host}} volgen",
+  takeoverTitle: "Overname?",
+  takeoverBody: "De host en alle deelnemers worden ge\xEFnformeerd dat u de leiding overneemt. U leidt dan de sc\xE8ne-updates voor deze conferentie.",
+  cancel: "Annuleren",
+  takeOver: "Overnemen",
+  conferencing: "Conferentie",
+  subscribeHubFirst: "Abonneer u eerst op de hub",
+  stopFollowing: "Stoppen met volgen",
+  resumeFollowing: "Volgen hervatten"
+};
+var el = {
+  dialogTitle: "\u0394\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  close: "\u039A\u03BB\u03B5\u03AF\u03C3\u03B9\u03BC\u03BF",
+  closeAria: "\u039A\u03BB\u03B5\u03AF\u03C3\u03B9\u03BC\u03BF",
+  createSection: "\u0394\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  conferenceTitle: "\u03A4\u03AF\u03C4\u03BB\u03BF\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  selectConferenceTitle: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03C4\u03AF\u03C4\u03BB\u03BF",
+  otherTitle: "\u0386\u03BB\u03BB\u03BF\u2026",
+  customTitle: "\u03A0\u03C1\u03BF\u03C3\u03B1\u03C1\u03BC\u03BF\u03C3\u03BC\u03AD\u03BD\u03BF\u03C2 \u03C4\u03AF\u03C4\u03BB\u03BF\u03C2",
+  customTitlePlaceholder: "\u0395\u03B9\u03C3\u03B1\u03B3\u03AC\u03B3\u03B5\u03C4\u03B5 \u03C4\u03BF\u03BD \u03C4\u03AF\u03C4\u03BB\u03BF \u03C4\u03B7\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  users: "\u03A7\u03C1\u03AE\u03C3\u03C4\u03B5\u03C2",
+  loadingUsers: "\u03A6\u03CC\u03C1\u03C4\u03C9\u03C3\u03B7 \u03C7\u03C1\u03B7\u03C3\u03C4\u03CE\u03BD\u2026",
+  noUsers: "\u0394\u03B5\u03BD \u03C5\u03C0\u03AC\u03C1\u03C7\u03BF\u03C5\u03BD \u03B4\u03B9\u03B1\u03B8\u03AD\u03C3\u03B9\u03BC\u03BF\u03B9 \u03C7\u03C1\u03AE\u03C3\u03C4\u03B5\u03C2",
+  createConference: "\u0394\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  creating: "\u0394\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1\u2026",
+  joinSection: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  activeConferences: "\u0395\u03BD\u03B5\u03C1\u03B3\u03AD\u03C2 \u03B4\u03B9\u03B1\u03C3\u03BA\u03AD\u03C8\u03B5\u03B9\u03C2",
+  noConferences: "\u0394\u03B5\u03BD \u03C5\u03C0\u03AC\u03C1\u03C7\u03BF\u03C5\u03BD \u03B4\u03B9\u03B1\u03B8\u03AD\u03C3\u03B9\u03BC\u03B5\u03C2 \u03B4\u03B9\u03B1\u03C3\u03BA\u03AD\u03C8\u03B5\u03B9\u03C2",
+  selectConference: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  untitled: "\u03A7\u03C9\u03C1\u03AF\u03C2 \u03C4\u03AF\u03C4\u03BB\u03BF",
+  joinConference: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  joining: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE\u2026",
+  manageSection: "\u0394\u03B9\u03B1\u03C7\u03B5\u03AF\u03C1\u03B9\u03C3\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  titleLabel: "\u03A4\u03AF\u03C4\u03BB\u03BF\u03C2:",
+  na: "\u0394/\u03A5",
+  participants: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03AD\u03C7\u03BF\u03BD\u03C4\u03B5\u03C2",
+  noPlaces: "\u03A7\u03C9\u03C1\u03AF\u03C2 \u03B8\u03AD\u03C3\u03B5\u03B9\u03C2",
+  leaveConference: "\u0391\u03C0\u03BF\u03C7\u03CE\u03C1\u03B7\u03C3\u03B7 \u03B1\u03C0\u03CC \u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  endConference: "\u03A4\u03B5\u03C1\u03BC\u03B1\u03C4\u03B9\u03C3\u03BC\u03CC\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  ending: "\u03A4\u03B5\u03C1\u03BC\u03B1\u03C4\u03B9\u03C3\u03BC\u03CC\u03C2\u2026",
+  leaving: "\u0391\u03C0\u03BF\u03C7\u03CE\u03C1\u03B7\u03C3\u03B7\u2026",
+  conferenceEnded: "\u0397 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7 \u03C4\u03B5\u03C1\u03BC\u03B1\u03C4\u03AF\u03C3\u03C4\u03B7\u03BA\u03B5.",
+  leftConference: "\u0391\u03C0\u03BF\u03C7\u03C9\u03C1\u03AE\u03C3\u03B1\u03C4\u03B5 \u03B1\u03C0\u03CC \u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7.",
+  connectHubFirst: "\u03A3\u03C5\u03BD\u03B4\u03B5\u03B8\u03B5\u03AF\u03C4\u03B5 \u03C0\u03C1\u03CE\u03C4\u03B1 \u03C3\u03C4\u03BF Cast hub.",
+  topicRequiredHost: "\u0391\u03C0\u03B1\u03B9\u03C4\u03B5\u03AF\u03C4\u03B1\u03B9 Cast topic \u03B3\u03B9\u03B1 \u03C6\u03B9\u03BB\u03BF\u03BE\u03B5\u03BD\u03AF\u03B1 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
+  topicRequiredJoin: "\u0391\u03C0\u03B1\u03B9\u03C4\u03B5\u03AF\u03C4\u03B1\u03B9 Cast topic \u03B3\u03B9\u03B1 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7.",
+  titleRequired: "\u0391\u03C0\u03B1\u03B9\u03C4\u03B5\u03AF\u03C4\u03B1\u03B9 \u03C4\u03AF\u03C4\u03BB\u03BF\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
+  selectAttendee: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03C4\u03BF\u03C5\u03BB\u03AC\u03C7\u03B9\u03C3\u03C4\u03BF\u03BD \u03AD\u03BD\u03B1\u03BD \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03AD\u03C7\u03BF\u03BD\u03C4\u03B1.",
+  selectConferenceToJoin: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7 \u03B3\u03B9\u03B1 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE.",
+  failedCreate: "\u0391\u03C0\u03BF\u03C4\u03C5\u03C7\u03AF\u03B1 \u03B4\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
+  failedJoin: "\u0391\u03C0\u03BF\u03C4\u03C5\u03C7\u03AF\u03B1 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE\u03C2 \u03C3\u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7.",
+  failedUpdate: "\u0391\u03C0\u03BF\u03C4\u03C5\u03C7\u03AF\u03B1 \u03B5\u03BD\u03B7\u03BC\u03AD\u03C1\u03C9\u03C3\u03B7\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
+  inviteTitle: "\u03A0\u03C1\u03CC\u03C3\u03BA\u03BB\u03B7\u03C3\u03B7 \u03C3\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  joinAndFollow: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7",
+  joinNoFollow: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C7\u03C9\u03C1\u03AF\u03C2 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7",
+  doNotJoin: "\u038C\u03C7\u03B9 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE",
+  hostFallback: "\u03BF\u03B9\u03BA\u03BF\u03B4\u03B5\u03C3\u03C0\u03CC\u03C4\u03B7\u03C2",
+  inviteLeadWithTitle: "{{title}} \u2014 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7 \u03C4\u03BF\u03C5 {{host}};",
+  inviteLeadNoTitle: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7 \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7 \u03C4\u03BF\u03C5 {{host}};",
+  joinAndFollowHost: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7 \u03C4\u03BF\u03C5 {{host}}",
+  takeoverTitle: "\u0391\u03BD\u03AC\u03BB\u03B7\u03C8\u03B7 \u03B5\u03BB\u03AD\u03B3\u03C7\u03BF\u03C5;",
+  takeoverBody: "\u039F \u03BF\u03B9\u03BA\u03BF\u03B4\u03B5\u03C3\u03C0\u03CC\u03C4\u03B7\u03C2 \u03BA\u03B1\u03B9 \u03CC\u03BB\u03BF\u03B9 \u03BF\u03B9 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03AD\u03C7\u03BF\u03BD\u03C4\u03B5\u03C2 \u03B8\u03B1 \u03B5\u03B9\u03B4\u03BF\u03C0\u03BF\u03B9\u03B7\u03B8\u03BF\u03CD\u03BD \u03CC\u03C4\u03B9 \u03B1\u03BD\u03B1\u03BB\u03B1\u03BC\u03B2\u03AC\u03BD\u03B5\u03C4\u03B5 \u03C4\u03BF\u03BD \u03AD\u03BB\u03B5\u03B3\u03C7\u03BF. \u0398\u03B1 \u03BF\u03B4\u03B7\u03B3\u03B5\u03AF\u03C4\u03B5 \u03C4\u03B9\u03C2 \u03B5\u03BD\u03B7\u03BC\u03B5\u03C1\u03CE\u03C3\u03B5\u03B9\u03C2 \u03C3\u03BA\u03B7\u03BD\u03AE\u03C2 \u03B1\u03C5\u03C4\u03AE\u03C2 \u03C4\u03B7\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
+  cancel: "\u0391\u03BA\u03CD\u03C1\u03C9\u03C3\u03B7",
+  takeOver: "\u0391\u03BD\u03AC\u03BB\u03B7\u03C8\u03B7",
+  conferencing: "\u0394\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  subscribeHubFirst: "\u0395\u03B3\u03B3\u03C1\u03B1\u03C6\u03B5\u03AF\u03C4\u03B5 \u03C0\u03C1\u03CE\u03C4\u03B1 \u03C3\u03C4\u03BF hub",
+  stopFollowing: "\u0394\u03B9\u03B1\u03BA\u03BF\u03C0\u03AE \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7\u03C2",
+  resumeFollowing: "\u0395\u03C0\u03B1\u03BD\u03AC\u03BB\u03B7\u03C8\u03B7 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7\u03C2"
+};
+var lv = {
+  dialogTitle: "Konference",
+  close: "Aizv\u0113rt",
+  closeAria: "Aizv\u0113rt",
+  createSection: "Izveidot konferenci",
+  conferenceTitle: "Konferences nosaukums",
+  selectConferenceTitle: "Atlas\u012Bt nosaukumu",
+  otherTitle: "Cits\u2026",
+  customTitle: "Piel\u0101gots nosaukums",
+  customTitlePlaceholder: "Ievadiet konferences nosaukumu",
+  users: "Lietot\u0101ji",
+  loadingUsers: "Iel\u0101d\u0113 lietot\u0101jus\u2026",
+  noUsers: "Nav pieejamu lietot\u0101ju",
+  createConference: "Izveidot konferenci",
+  creating: "Izveido\u2026",
+  joinSection: "Pievienoties konferencei",
+  activeConferences: "Akt\u012Bv\u0101s konferences",
+  noConferences: "Nav pieejamu konferen\u010Du",
+  selectConference: "Atlas\u012Bt konferenci",
+  untitled: "Bez nosaukuma",
+  joinConference: "Pievienoties konferencei",
+  joining: "Pievienojas\u2026",
+  manageSection: "P\u0101rvald\u012Bt konferenci",
+  titleLabel: "Nosaukums:",
+  na: "n/a",
+  participants: "Dal\u012Bbnieki",
+  noPlaces: "Nav vietu",
+  leaveConference: "Atst\u0101t konferenci",
+  endConference: "Beigt konferenci",
+  ending: "Beidz\u2026",
+  leaving: "Atst\u0101j\u2026",
+  conferenceEnded: "Konference beigusies.",
+  leftConference: "J\u016Bs atst\u0101j\u0101t konferenci.",
+  connectHubFirst: "Vispirms piesl\u0113dzieties Cast hub.",
+  topicRequiredHost: "Lai r\u012Bkotu konferenci, nepiecie\u0161ams Cast topic.",
+  topicRequiredJoin: "Lai pievienotos konferencei, nepiecie\u0161ams Cast topic.",
+  titleRequired: "Nepiecie\u0161ams konferences nosaukums.",
+  selectAttendee: "Atlasiet vismaz vienu dal\u012Bbnieku.",
+  selectConferenceToJoin: "Atlasiet konferenci, kurai pievienoties.",
+  failedCreate: "Neizdev\u0101s izveidot konferenci.",
+  failedJoin: "Neizdev\u0101s pievienoties konferencei.",
+  failedUpdate: "Neizdev\u0101s atjaunin\u0101t konferenci.",
+  inviteTitle: "Uzaicin\u0101jums uz konferenci",
+  joinAndFollow: "Pievienoties un sekot",
+  joinNoFollow: "Pievienoties, bet nesekot",
+  doNotJoin: "Nepievienoties",
+  hostFallback: "vad\u012Bt\u0101js",
+  inviteLeadWithTitle: "{{title}} \u2014 pievienoties un sekot {{host}}?",
+  inviteLeadNoTitle: "Pievienoties konferencei un sekot {{host}}?",
+  joinAndFollowHost: "Pievienoties un sekot {{host}}",
+  takeoverTitle: "P\u0101r\u0146emt vad\u012Bbu?",
+  takeoverBody: "Vad\u012Bt\u0101js un visi dal\u012Bbnieki tiks inform\u0113ti, ka j\u016Bs p\u0101r\u0146emat vad\u012Bbu. J\u016Bs vad\u012Bsiet \u0161\u012Bs konferences ainas atjaunin\u0101jumus.",
+  cancel: "Atcelt",
+  takeOver: "P\u0101r\u0146emt",
+  conferencing: "Konference",
+  subscribeHubFirst: "Vispirms abon\u0113jiet hub",
+  stopFollowing: "P\u0101rtraukt seko\u0161anu",
+  resumeFollowing: "Ats\u0101kt seko\u0161anu"
+};
+var hu = {
+  dialogTitle: "Konferencia",
+  close: "Bez\xE1r\xE1s",
+  closeAria: "Bez\xE1r\xE1s",
+  createSection: "Konferencia l\xE9trehoz\xE1sa",
+  conferenceTitle: "Konferencia c\xEDme",
+  selectConferenceTitle: "C\xEDm kiv\xE1laszt\xE1sa",
+  otherTitle: "Egy\xE9b\u2026",
+  customTitle: "Egy\xE9ni c\xEDm",
+  customTitlePlaceholder: "Adja meg a konferencia c\xEDm\xE9t",
+  users: "Felhaszn\xE1l\xF3k",
+  loadingUsers: "Felhaszn\xE1l\xF3k bet\xF6lt\xE9se\u2026",
+  noUsers: "Nincs el\xE9rhet\u0151 felhaszn\xE1l\xF3",
+  createConference: "Konferencia l\xE9trehoz\xE1sa",
+  creating: "L\xE9trehoz\xE1s\u2026",
+  joinSection: "Csatlakoz\xE1s konferenci\xE1hoz",
+  activeConferences: "Akt\xEDv konferenci\xE1k",
+  noConferences: "Nincs el\xE9rhet\u0151 konferencia",
+  selectConference: "Konferencia kiv\xE1laszt\xE1sa",
+  untitled: "N\xE9vtelen",
+  joinConference: "Csatlakoz\xE1s a konferenci\xE1hoz",
+  joining: "Csatlakoz\xE1s\u2026",
+  manageSection: "Konferencia kezel\xE9se",
+  titleLabel: "C\xEDm:",
+  na: "n/a",
+  participants: "R\xE9sztvev\u0151k",
+  noPlaces: "Nincs hely",
+  leaveConference: "Kil\xE9p\xE9s a konferenci\xE1b\xF3l",
+  endConference: "Konferencia befejez\xE9se",
+  ending: "Befejez\xE9s\u2026",
+  leaving: "Kil\xE9p\xE9s\u2026",
+  conferenceEnded: "A konferencia v\xE9get \xE9rt.",
+  leftConference: "Kil\xE9pett a konferenci\xE1b\xF3l.",
+  connectHubFirst: "El\u0151sz\xF6r csatlakozzon a Cast hubhoz.",
+  topicRequiredHost: "Konferencia ind\xEDt\xE1s\xE1hoz Cast topic sz\xFCks\xE9ges.",
+  topicRequiredJoin: "Konferenci\xE1hoz csatlakoz\xE1shoz Cast topic sz\xFCks\xE9ges.",
+  titleRequired: "A konferencia c\xEDme k\xF6telez\u0151.",
+  selectAttendee: "V\xE1lasszon legal\xE1bb egy r\xE9sztvev\u0151t.",
+  selectConferenceToJoin: "V\xE1lasszon konferenci\xE1t a csatlakoz\xE1shoz.",
+  failedCreate: "Nem siker\xFClt l\xE9trehozni a konferenci\xE1t.",
+  failedJoin: "Nem siker\xFClt csatlakozni a konferenci\xE1hoz.",
+  failedUpdate: "Nem siker\xFClt friss\xEDteni a konferenci\xE1t.",
+  inviteTitle: "Konferenciamegh\xEDv\xF3",
+  joinAndFollow: "Csatlakoz\xE1s \xE9s k\xF6vet\xE9s",
+  joinNoFollow: "Csatlakoz\xE1s k\xF6vet\xE9s n\xE9lk\xFCl",
+  doNotJoin: "Nem csatlakozom",
+  hostFallback: "h\xE1zigazda",
+  inviteLeadWithTitle: "{{title}} \u2014 csatlakoz\xE1s \xE9s {{host}} k\xF6vet\xE9se?",
+  inviteLeadNoTitle: "Csatlakoz\xE1s a konferenci\xE1hoz \xE9s {{host}} k\xF6vet\xE9se?",
+  joinAndFollowHost: "Csatlakoz\xE1s \xE9s {{host}} k\xF6vet\xE9se",
+  takeoverTitle: "\xC1tv\xE9tel?",
+  takeoverBody: "A h\xE1zigazda \xE9s minden r\xE9sztvev\u0151 \xE9rtes\xEDt\xE9st kap, hogy \xD6n \xE1tveszi a vezet\xE9st. \xD6n ir\xE1ny\xEDtja majd a konferencia jelenetfriss\xEDt\xE9seit.",
+  cancel: "M\xE9gse",
+  takeOver: "\xC1tv\xE9tel",
+  conferencing: "Konferencia",
+  subscribeHubFirst: "El\u0151sz\xF6r iratkozzon fel a hubra",
+  stopFollowing: "K\xF6vet\xE9s le\xE1ll\xEDt\xE1sa",
+  resumeFollowing: "K\xF6vet\xE9s folytat\xE1sa"
+};
+var lt2 = {
+  dialogTitle: "Konferencija",
+  close: "U\u017Edaryti",
+  closeAria: "U\u017Edaryti",
+  createSection: "Sukurti konferencij\u0105",
+  conferenceTitle: "Konferencijos pavadinimas",
+  selectConferenceTitle: "Pasirinkite pavadinim\u0105",
+  otherTitle: "Kita\u2026",
+  customTitle: "Pasirinktinis pavadinimas",
+  customTitlePlaceholder: "\u012Eveskite konferencijos pavadinim\u0105",
+  users: "Naudotojai",
+  loadingUsers: "\u012Ekeliami naudotojai\u2026",
+  noUsers: "N\u0117ra galim\u0173 naudotoj\u0173",
+  createConference: "Sukurti konferencij\u0105",
+  creating: "Kuriama\u2026",
+  joinSection: "Prisijungti prie konferencijos",
+  activeConferences: "Aktyvios konferencijos",
+  noConferences: "N\u0117ra galim\u0173 konferencij\u0173",
+  selectConference: "Pasirinkite konferencij\u0105",
+  untitled: "Be pavadinimo",
+  joinConference: "Prisijungti prie konferencijos",
+  joining: "Jungiamasi\u2026",
+  manageSection: "Tvarkyti konferencij\u0105",
+  titleLabel: "Pavadinimas:",
+  na: "n/d",
+  participants: "Dalyviai",
+  noPlaces: "N\u0117ra viet\u0173",
+  leaveConference: "I\u0161eiti i\u0161 konferencijos",
+  endConference: "Baigti konferencij\u0105",
+  ending: "Baigiama\u2026",
+  leaving: "I\u0161einama\u2026",
+  conferenceEnded: "Konferencija baigta.",
+  leftConference: "I\u0161\u0117jote i\u0161 konferencijos.",
+  connectHubFirst: "Pirmiausia prisijunkite prie Cast hub.",
+  topicRequiredHost: "Konferencijai vesti reikalingas Cast topic.",
+  topicRequiredJoin: "Norint prisijungti prie konferencijos, reikalingas Cast topic.",
+  titleRequired: "Reikalingas konferencijos pavadinimas.",
+  selectAttendee: "Pasirinkite bent vien\u0105 dalyv\u012F.",
+  selectConferenceToJoin: "Pasirinkite konferencij\u0105, prie kurios jungtis.",
+  failedCreate: "Nepavyko sukurti konferencijos.",
+  failedJoin: "Nepavyko prisijungti prie konferencijos.",
+  failedUpdate: "Nepavyko atnaujinti konferencijos.",
+  inviteTitle: "Kvietimas \u012F konferencij\u0105",
+  joinAndFollow: "Prisijungti ir sekti",
+  joinNoFollow: "Prisijungti, bet nesekti",
+  doNotJoin: "Neprisijungti",
+  hostFallback: "ved\u0117jas",
+  inviteLeadWithTitle: "{{title}} \u2014 prisijungti ir sekti {{host}}?",
+  inviteLeadNoTitle: "Prisijungti prie konferencijos ir sekti {{host}}?",
+  joinAndFollowHost: "Prisijungti ir sekti {{host}}",
+  takeoverTitle: "Perimti valdym\u0105?",
+  takeoverBody: "Ved\u0117jas ir visi dalyviai bus informuoti, kad perimate valdym\u0105. V\u0117site \u0161ios konferencijos scenos atnaujinimus.",
+  cancel: "At\u0161aukti",
+  takeOver: "Perimti",
+  conferencing: "Konferencija",
+  subscribeHubFirst: "Pirmiausia u\u017Esiprenumeruokite hub",
+  stopFollowing: "Nustoti sekti",
+  resumeFollowing: "T\u0119sti sekim\u0105"
+};
+var ro2 = {
+  dialogTitle: "Conferin\u021B\u0103",
+  close: "\xCEnchide",
+  closeAria: "\xCEnchide",
+  createSection: "Creeaz\u0103 o conferin\u021B\u0103",
+  conferenceTitle: "Titlul conferin\u021Bei",
+  selectConferenceTitle: "Selecteaz\u0103 un titlu",
+  otherTitle: "Altul\u2026",
+  customTitle: "Titlu personalizat",
+  customTitlePlaceholder: "Introduce\u021Bi titlul conferin\u021Bei",
+  users: "Utilizatori",
+  loadingUsers: "Se \xEEncarc\u0103 utilizatorii\u2026",
+  noUsers: "Nu exist\u0103 utilizatori disponibili",
+  createConference: "Creeaz\u0103 conferin\u021Ba",
+  creating: "Se creeaz\u0103\u2026",
+  joinSection: "Particip\u0103 la o conferin\u021B\u0103",
+  activeConferences: "Conferin\u021Be active",
+  noConferences: "Nu exist\u0103 conferin\u021Be disponibile",
+  selectConference: "Selecteaz\u0103 o conferin\u021B\u0103",
+  untitled: "F\u0103r\u0103 titlu",
+  joinConference: "Particip\u0103 la conferin\u021B\u0103",
+  joining: "Se particip\u0103\u2026",
+  manageSection: "Gestioneaz\u0103 conferin\u021Ba",
+  titleLabel: "Titlu:",
+  na: "N/A",
+  participants: "Participan\u021Bi",
+  noPlaces: "F\u0103r\u0103 locuri",
+  leaveConference: "P\u0103r\u0103se\u0219te conferin\u021Ba",
+  endConference: "\xCEncheie conferin\u021Ba",
+  ending: "Se \xEEncheie\u2026",
+  leaving: "Se p\u0103r\u0103se\u0219te\u2026",
+  conferenceEnded: "Conferin\u021Ba s-a \xEEncheiat.",
+  leftConference: "A\u021Bi p\u0103r\u0103sit conferin\u021Ba.",
+  connectHubFirst: "Conecta\u021Bi-v\u0103 mai \xEEnt\xE2i la hub-ul Cast.",
+  topicRequiredHost: "Este necesar un topic Cast pentru a g\u0103zdui o conferin\u021B\u0103.",
+  topicRequiredJoin: "Este necesar un topic Cast pentru a participa la o conferin\u021B\u0103.",
+  titleRequired: "Titlul conferin\u021Bei este obligatoriu.",
+  selectAttendee: "Selecta\u021Bi cel pu\u021Bin un participant.",
+  selectConferenceToJoin: "Selecta\u021Bi o conferin\u021B\u0103 la care s\u0103 participa\u021Bi.",
+  failedCreate: "Crearea conferin\u021Bei a e\u0219uat.",
+  failedJoin: "Participarea la conferin\u021B\u0103 a e\u0219uat.",
+  failedUpdate: "Actualizarea conferin\u021Bei a e\u0219uat.",
+  inviteTitle: "Invita\u021Bie la conferin\u021B\u0103",
+  joinAndFollow: "Particip\u0103 \u0219i urmeaz\u0103",
+  joinNoFollow: "Particip\u0103, dar nu urma",
+  doNotJoin: "Nu participa",
+  hostFallback: "gazd\u0103",
+  inviteLeadWithTitle: "{{title}} \u2014 participa\u021Bi \u0219i urma\u021Bi pe {{host}}?",
+  inviteLeadNoTitle: "Participa\u021Bi la conferin\u021B\u0103 \u0219i urma\u021Bi pe {{host}}?",
+  joinAndFollowHost: "Particip\u0103 \u0219i urmeaz\u0103 pe {{host}}",
+  takeoverTitle: "Preia controlul?",
+  takeoverBody: "Gazda \u0219i to\u021Bi participan\u021Bii vor fi anun\u021Ba\u021Bi c\u0103 prelua\u021Bi controlul. Ve\u021Bi conduce actualiz\u0103rile de scen\u0103 ale acestei conferin\u021Be.",
+  cancel: "Anuleaz\u0103",
+  takeOver: "Preia",
+  conferencing: "Conferin\u021B\u0103",
+  subscribeHubFirst: "Abona\u021Bi-v\u0103 mai \xEEnt\xE2i la hub",
+  stopFollowing: "Opre\u0219te urm\u0103rirea",
+  resumeFollowing: "Reia urm\u0103rirea"
+};
+var no2 = {
+  dialogTitle: "Konferanse",
+  close: "Lukk",
+  closeAria: "Lukk",
+  createSection: "Opprett en konferanse",
+  conferenceTitle: "Konferansetittel",
+  selectConferenceTitle: "Velg en tittel",
+  otherTitle: "Annet\u2026",
+  customTitle: "Egendefinert tittel",
+  customTitlePlaceholder: "Skriv inn konferansetittel",
+  users: "Brukere",
+  loadingUsers: "Laster brukere\u2026",
+  noUsers: "Ingen brukere tilgjengelig",
+  createConference: "Opprett konferanse",
+  creating: "Oppretter\u2026",
+  joinSection: "Bli med i en konferanse",
+  activeConferences: "Aktive konferanser",
+  noConferences: "Ingen konferanser tilgjengelig",
+  selectConference: "Velg en konferanse",
+  untitled: "Uten tittel",
+  joinConference: "Bli med i konferansen",
+  joining: "Blir med\u2026",
+  manageSection: "Administrer konferanse",
+  titleLabel: "Tittel:",
+  na: "i/t",
+  participants: "Deltakere",
+  noPlaces: "Ingen steder",
+  leaveConference: "Forlat konferansen",
+  endConference: "Avslutt konferansen",
+  ending: "Avslutter\u2026",
+  leaving: "Forlater\u2026",
+  conferenceEnded: "Konferansen er avsluttet.",
+  leftConference: "Du forlot konferansen.",
+  connectHubFirst: "Koble til Cast-huben f\xF8rst.",
+  topicRequiredHost: "Cast-topic kreves for \xE5 v\xE6re vert for en konferanse.",
+  topicRequiredJoin: "Cast-topic kreves for \xE5 bli med i en konferanse.",
+  titleRequired: "Konferansetittel er p\xE5krevd.",
+  selectAttendee: "Velg minst \xE9n deltaker.",
+  selectConferenceToJoin: "Velg en konferanse \xE5 bli med i.",
+  failedCreate: "Kunne ikke opprette konferansen.",
+  failedJoin: "Kunne ikke bli med i konferansen.",
+  failedUpdate: "Kunne ikke oppdatere konferansen.",
+  inviteTitle: "Konferanseinvitasjon",
+  joinAndFollow: "Bli med og f\xF8lg",
+  joinNoFollow: "Bli med, men ikke f\xF8lg",
+  doNotJoin: "Ikke bli med",
+  hostFallback: "vert",
+  inviteLeadWithTitle: "{{title}} \u2014 bli med og f\xF8lge {{host}}?",
+  inviteLeadNoTitle: "Bli med i konferansen og f\xF8lge {{host}}?",
+  joinAndFollowHost: "Bli med og f\xF8lg {{host}}",
+  takeoverTitle: "Ta over?",
+  takeoverBody: "Verten og alle deltakere blir varslet om at du tar over. Du vil lede sceneoppdateringene for denne konferansen.",
+  cancel: "Avbryt",
+  takeOver: "Ta over",
+  conferencing: "Konferanse",
+  subscribeHubFirst: "Abonner p\xE5 huben f\xF8rst",
+  stopFollowing: "Stopp \xE5 f\xF8lge",
+  resumeFollowing: "Fortsett \xE5 f\xF8lge"
+};
+var CONFERENCE_BY_LOCALE = {
+  en: en2,
+  fr: fr2,
+  es: es2,
+  ca,
+  de: de2,
+  it: it2,
+  pt: pt2,
+  ko: ko2,
+  pl,
+  uk,
+  cs,
+  nl,
+  el,
+  lv,
+  hu,
+  lt: lt2,
+  ro: ro2,
+  no: no2
+};
+function conferenceStringsFor(locale) {
+  const code2 = locale || resolveStoredLocale();
+  return { ...CONFERENCE_BY_LOCALE[code2] };
+}
+
+// ../i18n/header.ts
+var en3 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Open SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Open DICOM SR reporting client",
+  remoteAi: "Remote AI",
+  remoteAiTitle: "Remote AI \u2014 inference servers",
+  loadStudy: "Load study",
+  loadStudyTitle: "Load study",
+  sessionInfo: "Session info"
+};
+var de3 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "SlicerWorklist \xF6ffnen",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "DICOM-SR-Reporting-Client \xF6ffnen",
+  remoteAi: "Remote-KI",
+  remoteAiTitle: "Remote-KI \u2014 Inferenzserver",
+  loadStudy: "Studie laden",
+  loadStudyTitle: "Studie laden",
+  sessionInfo: "Sitzungsinfo"
+};
+var fr3 = {
+  worklistLabel: "Liste de travail :",
+  reportingLabel: "Reporting :",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Ouvrir SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Ouvrir le client de reporting DICOM SR",
+  remoteAi: "IA distante",
+  remoteAiTitle: "IA distante \u2014 serveurs d\u2019inf\xE9rence",
+  loadStudy: "Charger une \xE9tude",
+  loadStudyTitle: "Charger une \xE9tude",
+  sessionInfo: "Info session"
+};
+var es3 = {
+  worklistLabel: "Lista de trabajo:",
+  reportingLabel: "Informes:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Abrir SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Abrir el cliente de reporting DICOM SR",
+  remoteAi: "IA remota",
+  remoteAiTitle: "IA remota \u2014 servidores de inferencia",
+  loadStudy: "Cargar estudio",
+  loadStudyTitle: "Cargar estudio",
+  sessionInfo: "Info de sesi\xF3n"
+};
+var ca2 = {
+  worklistLabel: "Llista de treball:",
+  reportingLabel: "Informes:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Obrir SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Obrir el client de reporting DICOM SR",
+  remoteAi: "IA remota",
+  remoteAiTitle: "IA remota \u2014 servidors d\u2019infer\xE8ncia",
+  loadStudy: "Carregar estudi",
+  loadStudyTitle: "Carregar estudi",
+  sessionInfo: "Info de sessi\xF3"
+};
+var it3 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Apri SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Apri il client di reporting DICOM SR",
+  remoteAi: "IA remota",
+  remoteAiTitle: "IA remota \u2014 server di inferenza",
+  loadStudy: "Carica studio",
+  loadStudyTitle: "Carica studio",
+  sessionInfo: "Info sessione"
+};
+var pt3 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Abrir SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Abrir o cliente de reporting DICOM SR",
+  remoteAi: "IA remota",
+  remoteAiTitle: "IA remota \u2014 servidores de infer\xEAncia",
+  loadStudy: "Carregar estudo",
+  loadStudyTitle: "Carregar estudo",
+  sessionInfo: "Info da sess\xE3o"
+};
+var ko3 = {
+  worklistLabel: "\uC6CC\uD06C\uB9AC\uC2A4\uD2B8:",
+  reportingLabel: "\uB9AC\uD3EC\uD305:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "SlicerWorklist \uC5F4\uAE30",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "DICOM SR \uB9AC\uD3EC\uD305 \uD074\uB77C\uC774\uC5B8\uD2B8 \uC5F4\uAE30",
+  remoteAi: "\uC6D0\uACA9 AI",
+  remoteAiTitle: "\uC6D0\uACA9 AI \u2014 \uCD94\uB860 \uC11C\uBC84",
+  loadStudy: "\uAC80\uC0AC \uBD88\uB7EC\uC624\uAE30",
+  loadStudyTitle: "\uAC80\uC0AC \uBD88\uB7EC\uC624\uAE30",
+  sessionInfo: "\uC138\uC158 \uC815\uBCF4"
+};
+var pl2 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Otw\xF3rz SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Otw\xF3rz klienta reportingowego DICOM SR",
+  remoteAi: "Zdalne AI",
+  remoteAiTitle: "Zdalne AI \u2014 serwery wnioskowania",
+  loadStudy: "Wczytaj badanie",
+  loadStudyTitle: "Wczytaj badanie",
+  sessionInfo: "Info o sesji"
+};
+var uk2 = {
+  worklistLabel: "\u0420\u043E\u0431\u043E\u0447\u0438\u0439 \u0441\u043F\u0438\u0441\u043E\u043A:",
+  reportingLabel: "\u0417\u0432\u0456\u0442\u0443\u0432\u0430\u043D\u043D\u044F:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "\u0412\u0456\u0434\u043A\u0440\u0438\u0442\u0438 SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "\u0412\u0456\u0434\u043A\u0440\u0438\u0442\u0438 \u043A\u043B\u0456\u0454\u043D\u0442 \u0437\u0432\u0456\u0442\u0443\u0432\u0430\u043D\u043D\u044F DICOM SR",
+  remoteAi: "\u0412\u0456\u0434\u0434\u0430\u043B\u0435\u043D\u0438\u0439 \u0428\u0406",
+  remoteAiTitle: "\u0412\u0456\u0434\u0434\u0430\u043B\u0435\u043D\u0438\u0439 \u0428\u0406 \u2014 \u0441\u0435\u0440\u0432\u0435\u0440\u0438 \u0432\u0438\u0441\u043D\u043E\u0432\u043A\u0443",
+  loadStudy: "\u0417\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0438\u0442\u0438 \u0434\u043E\u0441\u043B\u0456\u0434\u0436\u0435\u043D\u043D\u044F",
+  loadStudyTitle: "\u0417\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0438\u0442\u0438 \u0434\u043E\u0441\u043B\u0456\u0434\u0436\u0435\u043D\u043D\u044F",
+  sessionInfo: "\u0406\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0456\u044F \u043F\u0440\u043E \u0441\u0435\u0430\u043D\u0441"
+};
+var cs2 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Otev\u0159\xEDt SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Otev\u0159\xEDt reporting klienta DICOM SR",
+  remoteAi: "Vzd\xE1len\xE1 AI",
+  remoteAiTitle: "Vzd\xE1len\xE1 AI \u2014 inferen\u010Dn\xED servery",
+  loadStudy: "Na\u010D\xEDst studii",
+  loadStudyTitle: "Na\u010D\xEDst studii",
+  sessionInfo: "Info o relaci"
+};
+var nl2 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "SlicerWorklist openen",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "DICOM SR-reportingclient openen",
+  remoteAi: "Externe AI",
+  remoteAiTitle: "Externe AI \u2014 inferentieservers",
+  loadStudy: "Studie laden",
+  loadStudyTitle: "Studie laden",
+  sessionInfo: "Sessie-info"
+};
+var el2 = {
+  worklistLabel: "\u039B\u03AF\u03C3\u03C4\u03B1 \u03B5\u03C1\u03B3\u03B1\u03C3\u03AF\u03B1\u03C2:",
+  reportingLabel: "\u0391\u03BD\u03B1\u03C6\u03BF\u03C1\u03AD\u03C2:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "\u0386\u03BD\u03BF\u03B9\u03B3\u03BC\u03B1 SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "\u0386\u03BD\u03BF\u03B9\u03B3\u03BC\u03B1 \u03C0\u03B5\u03BB\u03AC\u03C4\u03B7 \u03B1\u03BD\u03B1\u03C6\u03BF\u03C1\u03CE\u03BD DICOM SR",
+  remoteAi: "\u0391\u03C0\u03BF\u03BC\u03B1\u03BA\u03C1\u03C5\u03C3\u03BC\u03AD\u03BD\u03B7 \u03A4\u039D",
+  remoteAiTitle: "\u0391\u03C0\u03BF\u03BC\u03B1\u03BA\u03C1\u03C5\u03C3\u03BC\u03AD\u03BD\u03B7 \u03A4\u039D \u2014 \u03B4\u03B9\u03B1\u03BA\u03BF\u03BC\u03B9\u03C3\u03C4\u03AD\u03C2 \u03C3\u03C5\u03BC\u03C0\u03B5\u03C1\u03B1\u03C3\u03BC\u03BF\u03CD",
+  loadStudy: "\u03A6\u03CC\u03C1\u03C4\u03C9\u03C3\u03B7 \u03BC\u03B5\u03BB\u03AD\u03C4\u03B7\u03C2",
+  loadStudyTitle: "\u03A6\u03CC\u03C1\u03C4\u03C9\u03C3\u03B7 \u03BC\u03B5\u03BB\u03AD\u03C4\u03B7\u03C2",
+  sessionInfo: "\u03A0\u03BB\u03B7\u03C1\u03BF\u03C6\u03BF\u03C1\u03AF\u03B5\u03C2 \u03C3\u03C5\u03BD\u03B5\u03B4\u03C1\u03AF\u03B1\u03C2"
+};
+var lv2 = {
+  worklistLabel: "Darba saraksts:",
+  reportingLabel: "Zi\u0146o\u0161ana:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Atv\u0113rt SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Atv\u0113rt DICOM SR zi\u0146o\u0161anas klientu",
+  remoteAi: "Att\u0101lais MI",
+  remoteAiTitle: "Att\u0101lais MI \u2014 secin\u0101\u0161anas serveri",
+  loadStudy: "Iel\u0101d\u0113t p\u0113t\u012Bjumu",
+  loadStudyTitle: "Iel\u0101d\u0113t p\u0113t\u012Bjumu",
+  sessionInfo: "Sesijas info"
+};
+var hu2 = {
+  worklistLabel: "Munkalista:",
+  reportingLabel: "Jelent\xE9s:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "SlicerWorklist megnyit\xE1sa",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "DICOM SR jelent\xE9skliens megnyit\xE1sa",
+  remoteAi: "T\xE1voli MI",
+  remoteAiTitle: "T\xE1voli MI \u2014 k\xF6vetkeztet\u0151 kiszolg\xE1l\xF3k",
+  loadStudy: "Vizsg\xE1lat bet\xF6lt\xE9se",
+  loadStudyTitle: "Vizsg\xE1lat bet\xF6lt\xE9se",
+  sessionInfo: "Munkamenet-inf\xF3"
+};
+var lt3 = {
+  worklistLabel: "Darb\u0173 s\u0105ra\u0161as:",
+  reportingLabel: "Ataskaitos:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Atidaryti SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Atidaryti DICOM SR ataskait\u0173 klient\u0105",
+  remoteAi: "Nuotolinis DI",
+  remoteAiTitle: "Nuotolinis DI \u2014 i\u0161vad\u0173 serveriai",
+  loadStudy: "\u012Ekelti tyrim\u0105",
+  loadStudyTitle: "\u012Ekelti tyrim\u0105",
+  sessionInfo: "Sesijos info"
+};
+var ro3 = {
+  worklistLabel: "List\u0103 de lucru:",
+  reportingLabel: "Raportare:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Deschide SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Deschide clientul de raportare DICOM SR",
+  remoteAi: "IA la distan\u021B\u0103",
+  remoteAiTitle: "IA la distan\u021B\u0103 \u2014 servere de inferen\u021B\u0103",
+  loadStudy: "\xCEncarc\u0103 studiul",
+  loadStudyTitle: "\xCEncarc\u0103 studiul",
+  sessionInfo: "Info sesiune"
+};
+var noNb = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "\xC5pne SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "\xC5pne DICOM SR-rapporteringsklient",
+  remoteAi: "Ekstern AI",
+  remoteAiTitle: "Ekstern AI \u2014 inferensservere",
+  loadStudy: "Last studie",
+  loadStudyTitle: "Last studie",
+  sessionInfo: "\xD8ktinfo"
+};
+var HEADER_BY_LOCALE = {
+  en: en3,
+  fr: fr3,
+  es: es3,
+  ca: ca2,
+  de: de3,
+  it: it3,
+  pt: pt3,
+  ko: ko3,
+  pl: pl2,
+  uk: uk2,
+  cs: cs2,
+  nl: nl2,
+  el: el2,
+  lv: lv2,
+  hu: hu2,
+  lt: lt3,
+  ro: ro3,
+  no: noNb
+};
+function headerChromeFor(locale) {
+  const code2 = locale || resolveStoredLocale();
+  return { ...HEADER_BY_LOCALE[code2] };
+}
+function applyHeaderChrome(root = document, locale) {
+  const h = headerChromeFor(locale);
+  root.querySelectorAll("[data-i18n-header]").forEach((el3) => {
+    const key = el3.getAttribute("data-i18n-header");
+    if (!key || !(key in h)) return;
+    el3.textContent = h[key];
+  });
+  root.querySelectorAll("[data-i18n-header-title]").forEach((el3) => {
+    const key = el3.getAttribute(
+      "data-i18n-header-title"
+    );
+    if (!key || !(key in h)) return;
+    el3.title = h[key];
+  });
+  root.querySelectorAll("[data-i18n-header-aria]").forEach((el3) => {
+    const key = el3.getAttribute(
+      "data-i18n-header-aria"
+    );
+    if (!key || !(key in h)) return;
+    el3.setAttribute("aria-label", h[key]);
+  });
 }
 
 // render/demos/ira/totalseg-tasks.ts
@@ -17262,6 +22158,948 @@ var TOTAL_SEG_TASK_OPTIONS = TOTAL_SEG_TASKS.map((t) => ({
   title: taskOptionLabel(t)
 }));
 
+// render/demos/ira/mhub-models.ts
+var MHUB_MODELS = Object.freeze([
+  {
+    "name": "bamf_nnunet_ct_kidney",
+    "label": "BAMF CT Kidney Seg (nnU-Net)",
+    "description": "An nnU-Net based model to segment kidney from CT scans",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Kidney"
+    ],
+    "segments": [
+      "KIDNEY",
+      "KIDNEY+NEOPLASM_MALIGNANT_PRIMARY",
+      "KIDNEY+CYST"
+    ],
+    "websiteUrl": "https://mhub.ai/models/bamf_nnunet_ct_kidney",
+    "githubUrl": "https://github.com/bamf-health/aimi-kidney-ct",
+    "cite": "Murugesan, Gowtham Krishnan, Diana McCrumb, Mariam Aboian, Tej Verma, Rahul Soni, Fatima Memon, and Jeff Van Oss. The AIMI Initiative: AI-Generated Annotations for Imaging Data Commons Collections. arXiv preprint arXiv:2310.14897 (2023).",
+    "citeUrl": "https://arxiv.org/abs/2310.14897"
+  },
+  {
+    "name": "bamf_nnunet_ct_liver",
+    "label": "BAMF CT Liver Seg (nnU-Net)",
+    "description": "An nnU-Net based model to segment liver from CT scans",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Liver"
+    ],
+    "segments": [
+      "LIVER"
+    ],
+    "websiteUrl": "https://mhub.ai/models/bamf_nnunet_ct_liver",
+    "githubUrl": "https://github.com/bamf-health/aimi-liver-ct",
+    "cite": "Murugesan, Gowtham Krishnan, Diana McCrumb, Mariam Aboian, Tej Verma, Rahul Soni, Fatima Memon, and Jeff Van Oss. The AIMI Initiative: AI-Generated Annotations for Imaging Data Commons Collections. arXiv preprint arXiv:2310.14897 (2023).",
+    "citeUrl": "https://arxiv.org/abs/2310.14897"
+  },
+  {
+    "name": "bamf_nnunet_mr_liver",
+    "label": "BAMF MR Liver Seg (nnU-Net)",
+    "description": "An nnU-Net based model to segment liver from T1 weighted MRI scans",
+    "modalities": [
+      "MR"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Liver"
+    ],
+    "segments": [
+      "LIVER"
+    ],
+    "websiteUrl": "https://mhub.ai/models/bamf_nnunet_mr_liver",
+    "githubUrl": "https://github.com/bamf-health/aimi-liver-mr",
+    "cite": "Murugesan, Gowtham Krishnan, Diana McCrumb, Mariam Aboian, Tej Verma, Rahul Soni, Fatima Memon, and Jeff Van Oss. The AIMI Initiative: AI-Generated Annotations for Imaging Data Commons Collections. arXiv preprint arXiv:2310.14897 (2023).",
+    "citeUrl": "https://arxiv.org/abs/2310.14897"
+  },
+  {
+    "name": "bamf_nnunet_mr_prostate",
+    "label": "BAMF MR Prostate Seg (nnU-Net)",
+    "description": "bamf_nnunet_mr_prostate model is a semantic segmentation model where an NNUnet model is finetuned for MR images",
+    "modalities": [
+      "MR"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Prostate"
+    ],
+    "segments": [
+      "PROSTATE"
+    ],
+    "websiteUrl": "https://mhub.ai/models/bamf_nnunet_mr_prostate",
+    "githubUrl": "https://github.com/bamf-health/aimi-prostate-mr",
+    "cite": "Murugesan, Gowtham Krishnan, Diana McCrumb, Mariam Aboian, Tej Verma, Rahul Soni, Fatima Memon, and Jeff Van Oss. The AIMI Initiative: AI-Generated Annotations for Imaging Data Commons Collections. arXiv preprint arXiv:2310.14897 (2023).",
+    "citeUrl": "https://arxiv.org/abs/2310.14897"
+  },
+  {
+    "name": "bamf_pet_ct_breast_tumor",
+    "label": "BAMF PET CT Breast Seg (nnU-Net)",
+    "description": "This model used to detect FDG-avid lesions in breast from FDG PET/CT scans",
+    "modalities": [
+      "CT",
+      "PT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Breast"
+    ],
+    "segments": [
+      "BREAST+FDG_AVID_TUMOR"
+    ],
+    "websiteUrl": "https://mhub.ai/models/bamf_pet_ct_breast_tumor",
+    "githubUrl": "https://github.com/bamf-health/aimi-breast-pet-ct",
+    "cite": "Murugesan, Gowtham Krishnan, Diana McCrumb, Mariam Aboian, Tej Verma, Rahul Soni, Fatima Memon, and Jeff Van Oss. The AIMI Initiative: AI-Generated Annotations for Imaging Data Commons Collections. arXiv preprint arXiv:2310.14897 (2023).",
+    "citeUrl": "https://arxiv.org/abs/2310.14897"
+  },
+  {
+    "name": "casust",
+    "label": "CaSuSt",
+    "description": "A deep learning model for cardiac sub-structure delineation on planning CT scans. The model delineates the heart contours and seven cardiac substructures based on individually trained binary models.",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Chest"
+    ],
+    "segments": [
+      "HEART",
+      "LEFT_VENTRICLE",
+      "RIGHT_VENTRICLE",
+      "LEFT_ATRIUM",
+      "RIGHT_ATRIUM",
+      "CORONARY_ARTERY_LAD",
+      "CORONARY_ARTERY_CFLX",
+      "CORONARY_ARTERY_RIGHT"
+    ],
+    "websiteUrl": "https://mhub.ai/models/casust",
+    "githubUrl": "https://github.com/LennyN95/CaSuSt",
+    "cite": "N\xFCrnberg, L, Bontempi, D, De Ruysscher, D, et al. Deep learning segmentation of heart substructures in radiotherapy treatment planning. Physica Medica: European journal of medical physics, 2022",
+    "citeUrl": "https://cris.maastrichtuniversity.nl/en/publications/deep-learning-segmentation-of-heart-substructures-in-radiotherapy"
+  },
+  {
+    "name": "gc_node21_baseline",
+    "label": "Chest Radiograph Nodule Locator (NODE21 Baseline)",
+    "description": "This model detects the location of nodules in Chest radiographs, and generates bounding boxes around these nodules.",
+    "modalities": [
+      "CR"
+    ],
+    "category": "Prediction",
+    "bodyParts": [
+      "Chest"
+    ],
+    "segments": [],
+    "websiteUrl": "https://mhub.ai/models/gc_node21_baseline",
+    "githubUrl": "https://github.com/node21challenge/node21_detection_baseline",
+    "cite": "E. Sogancioglu et al., Nodule detection and generation on chest X-rays: NODE21 Challenge, in IEEE Transactions on Medical Imaging, doi: 10.1109/TMI.2024.3382042.",
+    "citeUrl": "https://doi.org/10.1109/TMI.2024.3382042"
+  },
+  {
+    "name": "nnunet_liver",
+    "label": "CT Liver Seg (nnU-Net)",
+    "description": "nnU-Net's liver segmentation model is an AI-based pipeline for the automated segmentation of the liver and liver cancer in portal venous phase CT scans.",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Abdomen"
+    ],
+    "segments": [
+      "LIVER",
+      "LIVER+NEOPLASM_MALIGNANT_PRIMARY"
+    ],
+    "websiteUrl": "https://mhub.ai/models/nnunet_liver",
+    "githubUrl": "https://github.com/MIC-DKFZ/nnUNet/tree/nnunetv1",
+    "cite": "Isensee, F., Jaeger, P. F., Kohl, S. A., Petersen, J., & Maier-Hein, K. H. (2020). nnU-Net: a self-configuring method for deep learning-based biomedical image segmentation. Nature Methods, 1-9.",
+    "citeUrl": "https://www.nature.com/articles/s41592-020-01008-z"
+  },
+  {
+    "name": "gc_grt123_lung_cancer",
+    "label": "CT Lung cancer risk prediction",
+    "description": "This algorithm analyzes non-contrast CT scans of the thorax and predicts the lung cancer risk. The model consists of two modules. The first one is a 3D region proposal network for nodule detection, which outputs all suspicious nodules for a subject. The second one selects the top five nodules based on the detection confidence, evaluates their cancer probabilities and combines them with a leaky noisy-or gate to obtain the probability of lung cancer for the subject. This model was the winner of the Data Science Bowl 2017 competition hosted on Kaggle.",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Prediction",
+    "bodyParts": [
+      "Chest"
+    ],
+    "segments": [],
+    "websiteUrl": "https://mhub.ai/models/gc_grt123_lung_cancer",
+    "githubUrl": "https://github.com/DIAGNijmegen/bodyct-dsb2017-grt123",
+    "cite": "F. Liao, M. Liang, Z. Li, X. Hu and S. Song, 'Evaluate the Malignancy of Pulmonary Nodules Using the 3D Deep Leaky Noisy-or Network', in IEEE Transactions on Neural Networks and Learning Systems, vol. 30, no. 11, pp. 3484-3495, Nov. 2019, doi: 10.1109/TNNLS.2019.2892409.",
+    "citeUrl": "https://doi.org/10.1109/TNNLS.2019.2892409"
+  },
+  {
+    "name": "bamf_pet_ct_lung_tumor",
+    "label": "FDG PET/CT Lung and Lung Tumor Annotation",
+    "description": "An nnU-Net based model to segment Lung and FDG-avid lesions in the lung from FDG PET/CT scans",
+    "modalities": [
+      "CT",
+      "PT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Lung"
+    ],
+    "segments": [
+      "LUNG",
+      "LUNG+FDG_AVID_TUMOR"
+    ],
+    "websiteUrl": "https://mhub.ai/models/bamf_pet_ct_lung_tumor",
+    "githubUrl": "https://github.com/bamf-health/aimi-lung-pet-ct",
+    "cite": "Murugesan, Gowtham Krishnan, Diana McCrumb, Mariam Aboian, Tej Verma, Rahul Soni, Fatima Memon, and Jeff Van Oss. The AIMI Initiative: AI-Generated Annotations for Imaging Data Commons Collections. arXiv preprint arXiv:2310.14897 (2023).",
+    "citeUrl": "https://arxiv.org/abs/2310.14897"
+  },
+  {
+    "name": "fmcib_radiomics",
+    "label": "Foundation Model for Cancer Imaging Biomarkers",
+    "description": "A foundation model for cancer imaging biomarker discovery trained through self-supervised learning using a dataset of 11,467 radiographic lesions. The model features can be used as a data-driven substitute for classical radiomic features",
+    "modalities": [
+      "CT",
+      "SEG"
+    ],
+    "category": "Prediction",
+    "bodyParts": [
+      "WHOLEBODY"
+    ],
+    "segments": [],
+    "websiteUrl": "https://mhub.ai/models/fmcib_radiomics",
+    "githubUrl": "https://github.com/AIM-Harvard/foundation-cancer-image-biomarker",
+    "cite": "Pai, S., Bontempi, D., Hadzic, I. et al. Foundation model for cancer imaging biomarkers. Nat Mach Intell (2024). https://doi.org/10.1038/s42256-024-00807-9",
+    "citeUrl": "https://doi.org/10.1038/s42256-024-00807-9"
+  },
+  {
+    "name": "lungmask",
+    "label": "LungMask",
+    "description": "LungMask is an AI-based pipeline for the automated lungs and pulmonary lobes segmentation in CT (robust to the presence of severe pathologies).",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Chest"
+    ],
+    "segments": [
+      "RIGHT_LUNG",
+      "LEFT_LUNG",
+      "LEFT_UPPER_LUNG_LOBE",
+      "LEFT_LOWER_LUNG_LOBE",
+      "RIGHT_UPPER_LUNG_LOBE",
+      "RIGHT_MIDDLE_LUNG_LOBE",
+      "RIGHT_LOWER_LUNG_LOBE"
+    ],
+    "websiteUrl": "https://mhub.ai/models/lungmask",
+    "githubUrl": "https://github.com/JoHof/lungmask",
+    "cite": "Hofmanninger, J., Prayer, F., Pan, J. et al. Automatic lung segmentation in routine imaging is primarily a data diversity problem, not a methodology problem. Eur Radiol Exp 4, 50 (2020). https://doi.org/10.1186/s41747-020-00173-2",
+    "citeUrl": "https://doi.org/10.1186/s41747-020-00173-2"
+  },
+  {
+    "name": "mrsegmentator",
+    "label": "MRSegmentator",
+    "description": "MRSegmentator is an AI-based pipeline for the segmentation of 40 anatomical structures in MR images (with and without contrast).",
+    "modalities": [
+      "MRI|CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "WHOLEBODY"
+    ],
+    "segments": [
+      "SPLEEN",
+      "RIGHT_KIDNEY",
+      "LEFT_KIDNEY",
+      "GALLBLADDER",
+      "LIVER",
+      "STOMACH",
+      "PANCREAS",
+      "RIGHT_ADRENAL_GLAND",
+      "LEFT_ADRENAL_GLAND",
+      "LEFT_LUNG",
+      "RIGHT_LUNG",
+      "HEART",
+      "AORTA",
+      "INFERIOR_VENA_CAVA",
+      "PORTAL_AND_SPLENIC_VEIN",
+      "LEFT_ILIAC_ARTERY",
+      "RIGHT_ILIAC_ARTERY",
+      "ESOPHAGUS",
+      "SMALL_INTESTINE",
+      "DUODENUM",
+      "COLON",
+      "URINARY_BLADDER",
+      "SPINE",
+      "SACRUM",
+      "LEFT_HIP",
+      "RIGHT_HIP",
+      "LEFT_FEMUR",
+      "RIGHT_FEMUR",
+      "LEFT_AUTOCHTHONOUS_BACK_MUSCLE",
+      "RIGHT_AUTOCHTHONOUS_BACK_MUSCLE",
+      "LEFT_ILIOPSOAS",
+      "RIGHT_ILIOPSOAS",
+      "LEFT_GLUTEUS_MAXIMUS",
+      "RIGHT_GLUTEUS_MAXIMUS",
+      "LEFT_GLUTEUS_MEDIUS",
+      "RIGHT_GLUTEUS_MEDIUS",
+      "LEFT_GLUTEUS_MINIMUS",
+      "RIGHT_GLUTEUS_MINIMUS"
+    ],
+    "websiteUrl": "https://mhub.ai/models/mrsegmentator",
+    "githubUrl": "https://github.com/hhaentze/MRSegmentator",
+    "cite": "Hartmut H\xE4ntze, Lina Xu, Felix J. Dorfner, Leonhard Donle, Daniel Truhn, Hugo Aerts, Mathias Prokop, Bram van Ginneken, Alessa Hering, Lisa C. Adams, and Keno K. Bressem. MRSegmentator: Robust multi-modality segmentation of 40 classes in MRI and CT sequences. arXiv, 2024.",
+    "citeUrl": "https://arxiv.org/pdf/2405.06463"
+  },
+  {
+    "name": "nnunet_pancreas",
+    "label": "Pancreas Seg (nnU-Net)",
+    "description": "nnU-Net's pancreas segmentation model is an AI-based pipeline for the automated segmentation of the pancreas and pancreatic cancer in portal venous phase CT scans.",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Abdomen"
+    ],
+    "segments": [
+      "PANCREAS",
+      "PANCREAS+NEOPLASM_MALIGNANT_PRIMARY"
+    ],
+    "websiteUrl": "https://mhub.ai/models/nnunet_pancreas",
+    "githubUrl": "https://github.com/MIC-DKFZ/nnUNet/tree/nnunetv1",
+    "cite": "Isensee, F., Jaeger, P. F., Kohl, S. A., Petersen, J., & Maier-Hein, K. H. (2020). nnU-Net: a self-configuring method for deep learning-based biomedical image segmentation. Nature Methods, 1-9.",
+    "citeUrl": "https://www.nature.com/articles/s41592-020-01008-z"
+  },
+  {
+    "name": "gc_nnunet_pancreas",
+    "label": "Pancreatic Ductal Adenocarcinoma Detection in CT",
+    "description": "This algorithm produces a tumor likelihood heatmap for the presence of pancreatic ductal adenocarcinoma (PDAC) in an input venous-phase contrast-enhanced computed tomography scan (CECT). Additionally, the algorithm provides the segmentation of multiple surrounding anatomical structures such as the pancreatic duct, common bile duct, veins and arteries. The heatmap and segmentations are resampled to the same spatial resolution and physical dimensions as the input CECT image for easier visualisation.",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Prediction",
+    "bodyParts": [
+      "Abdomen"
+    ],
+    "segments": [
+      "VEIN",
+      "ARTERY",
+      "PANCREAS",
+      "PANCREATIC_DUCT",
+      "BILE_DUCT"
+    ],
+    "websiteUrl": "https://mhub.ai/models/gc_nnunet_pancreas",
+    "githubUrl": "https://github.com/DIAGNijmegen/CE-CT_PDAC_AutomaticDetection_nnUnet",
+    "cite": "Alves N, Schuurmans M, Litjens G, Bosma JS, Hermans J, Huisman H. Fully Automatic Deep Learning Framework for Pancreatic Ductal Adenocarcinoma Detection on Computed Tomography. Cancers (Basel). 2022 Jan 13;14(2):376. doi: 10.3390/cancers14020376. PMID: 35053538; PMCID: PMC8774174.",
+    "citeUrl": "https://doi.org/10.3390/cancers14020376"
+  },
+  {
+    "name": "gc_picai_baseline",
+    "label": "PI-CAI challenge baseline",
+    "description": "This algorithm predicts a detection map for the likelihood of clinically significant prostate cancer (csPCa) using biparametric MRI (bpMRI). The algorithm ensembles 5-fold cross-validation models that were trained on the PI-CAI: Public Training and Development Dataset v2.0. The detection map is at the same spatial resolution and physical dimensions as the input axial T2-weighted image. This model algorithm was used as a baseline for the PI-CAI challenge hosted on Grand Challenge.",
+    "modalities": [
+      "MR"
+    ],
+    "category": "Prediction",
+    "bodyParts": [
+      "Prostate"
+    ],
+    "segments": [],
+    "websiteUrl": "https://mhub.ai/models/gc_picai_baseline",
+    "githubUrl": "https://github.com/DIAGNijmegen/picai_nnunet_semi_supervised_gc_algorithm",
+    "cite": 'J. S. Bosma, A. Saha, M. Hosseinzadeh, I. Slootweg, M. de Rooij, and H. Huisman, "Semisupervised Learning with Report-guided Pseudo Labels for Deep Learning\u2013based Prostate Cancer Detection Using Biparametric MRI", Radiology: Artificial Intelligence, 230031, 2023. DOI: 10.1148/ryai.230031',
+    "citeUrl": "https://doi.org/10.1148/ryai.230031"
+  },
+  {
+    "name": "platipy",
+    "label": "Platipy",
+    "description": "Platipy's cardiac substructures segmentation model is a hybrid pipeline (AI- and atlas-based) for the automated segmentation of 16 cardiac substructures in CT scans (with and without contrast).",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Chest"
+    ],
+    "segments": [
+      "HEART",
+      "AORTA",
+      "LEFT_ATRIUM",
+      "LEFT_VENTRICLE",
+      "RIGHT_ATRIUM",
+      "RIGHT_VENTRICLE",
+      "CORONARY_ARTERY_LAD",
+      "CORONARY_ARTERY_CFLX",
+      "CORONARY_ARTERY_RIGHT",
+      "PULMONARY_ARTERY",
+      "SINOTRIAL_NODE",
+      "TRICUSPID_VALVE",
+      "PULMONARY_VALVE",
+      "MITRAL_VALVE",
+      "SUPERIOR_VENA_CAVA",
+      "AORTIC_VALVE",
+      "ATRIOVENTRICULAR_NODE"
+    ],
+    "websiteUrl": "https://mhub.ai/models/platipy",
+    "githubUrl": "https://github.com/pyplati/platipy",
+    "cite": "Finnegan, R.N., Chin, V., Chlap, P. et al. Open-source, fully-automated hybrid cardiac substructure segmentation: development and optimisation. Phys Eng Sci Med 46, 377\u2013393 (2023).",
+    "citeUrl": "https://link.springer.com/article/10.1007/s13246-023-01231-w"
+  },
+  {
+    "name": "nnunet_prostate_zonal_task05",
+    "label": "Prostate Transitional and Peripheral Zone Seg (nnU-Net)",
+    "description": "nnU-Net's zonal prostate segmentation model is a multi-modality input AI-based pipeline for the automated segmentation of the peripheral and transition zone of the prostate on MRI scans.",
+    "modalities": [
+      "MR"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Prostate"
+    ],
+    "segments": [
+      "PROSTATE_PERIPHERAL_ZONE",
+      "PROSTATE_TRANSITION_ZONE"
+    ],
+    "websiteUrl": "https://mhub.ai/models/nnunet_prostate_zonal_task05",
+    "githubUrl": "https://github.com/MIC-DKFZ/nnUNet/tree/nnunetv1",
+    "cite": "Isensee, F., Jaeger, P. F., Kohl, S. A., Petersen, J., & Maier-Hein, K. H. (2020). nnU-Net: a self-configuring method for deep learning-based biomedical image segmentation. Nature Methods, 1-9.",
+    "citeUrl": "https://www.nature.com/articles/s41592-020-01008-z"
+  },
+  {
+    "name": "monai_prostate158",
+    "label": "Prostate Transitional and Peripheral Zone Seg (Prostate158)",
+    "description": "Prostate158 is a zonal prostate segmentation model, a multi-modality input AI-based pipeline for the automated segmentation of the peripheral and central gland of the prostate on MRI T2 axial scans.",
+    "modalities": [
+      "MR"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Prostate"
+    ],
+    "segments": [
+      "PROSTATE_TRANSITION_ZONE",
+      "PROSTATE_PERIPHERAL_ZONE"
+    ],
+    "websiteUrl": "https://mhub.ai/models/monai_prostate158",
+    "githubUrl": "https://github.com/Project-MONAI/model-zoo/tree/dev/models/prostate_mri_anatomy",
+    "cite": "Lisa C. Adams and Marcus R. Makowski and G\xFCnther Engel and Maximilian Rattunde and Felix Busch and Patrick Asbach and Stefan M. Niehues and Shankeeth Vinayahalingam and Bram {van Ginneken} and Geert Litjens and Keno K. Bressem, Prostate158 - An expert-annotated 3T MRI dataset and algorithm for prostate cancer detection",
+    "citeUrl": "https://doi.org/10.1016/j.compbiomed.2022.105817"
+  },
+  {
+    "name": "gc_lunglobes",
+    "label": "Pulmonary Lobes Seg (RTSU-Net)",
+    "description": "RTSU-Net is an AI-based pipeline for the automated pulmonary lobes segmentation in CT (robust to the presence of severe pathologies).",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Chest"
+    ],
+    "segments": [
+      "LEFT_UPPER_LUNG_LOBE",
+      "LEFT_LOWER_LUNG_LOBE",
+      "RIGHT_UPPER_LUNG_LOBE",
+      "RIGHT_MIDDLE_LUNG_LOBE",
+      "RIGHT_LOWER_LUNG_LOBE"
+    ],
+    "websiteUrl": "https://mhub.ai/models/gc_lunglobes",
+    "githubUrl": "https://github.com/DIAGNijmegen/bodyct-pulmonary-lobe-segmentation",
+    "cite": "W. Xie, C. Jacobs, J. -P. Charbonnier and B. van Ginneken, 'Relational Modeling for Robust and Efficient Pulmonary Lobe Segmentation in CT Scans,' in IEEE Transactions on Medical Imaging, vol. 39, no. 8, pp. 2664-2675, Aug. 2020, doi: 10.1109/TMI.2020.2995108.",
+    "citeUrl": "https://doi.org/10.1109/TMI.2020.2995108"
+  },
+  {
+    "name": "pyradiomics",
+    "label": "PyRadiomics",
+    "description": "Run PyRadiomics directly on DICOM files with MHub.",
+    "modalities": [
+      "CT",
+      "SEG"
+    ],
+    "category": "Prediction",
+    "bodyParts": [
+      "WHOLEBODY"
+    ],
+    "segments": [],
+    "websiteUrl": "https://mhub.ai/models/pyradiomics",
+    "githubUrl": "https://github.com/AIM-Harvard/pyradiomics",
+    "cite": "van Griethuysen JJM, Fedorov A, Parmar C, Hosny A, Aucoin N, Narayan V, Beets-Tan RGH, Fillion-Robin JC, Pieper S, Aerts HJWL. Computational Radiomics System to Decode the Radiographic Phenotype. Cancer Res. 2017 Nov 1;77(21):e104-e107. doi: 10.1158/0008-5472.CAN-17-0339. PMID: 29092951; PMCID: PMC5672828.",
+    "citeUrl": "https://doi.org/10.1158/0008-5472.CAN-17-0339"
+  },
+  {
+    "name": "gc_autopet_fpr",
+    "label": "Second place in AutoPET challenge: False Positive Reduction Network",
+    "description": "This algorithm segments tumor lesions in whole-body FDG-PET/CT. To prevent over-segmenting tumor regions due to high-uptake organs or inflammations, the model uses a false positive reduction network. First a self-supervised pre-trained global segmentation module coarsely delineates the candidate tumor regions using a self-supervised pre-trained encoder. The candidate tumor regions are then refined by removing false positives via a local refinement module.",
+    "modalities": [
+      "PT",
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "WHOLEBODY"
+    ],
+    "segments": [
+      "BACKGROUND",
+      "NEOPLASM_MALIGNANT_PRIMARY"
+    ],
+    "websiteUrl": "https://mhub.ai/models/gc_autopet_fpr",
+    "githubUrl": "https://github.com/YigePeng/AutoPET_False_Positive_Reduction",
+    "cite": "Y. Peng, J. Kim, D. Feng and L. Bi, 'Automatic Tumor Segmentation via False Positive Reduction Network for Whole-Body Multi-Modal PET/CT Images', In arXiv:2209.07705, doi: 10.48550/arXiv:2209.07705.",
+    "citeUrl": "https://arxiv.org/abs/2209.07705"
+  },
+  {
+    "name": "msk_smit_lung_gtv",
+    "label": "SMIT Self-supervised Lung GTV Segmentation",
+    "description": "A Lung GTV segmentation model, fine-tuned from a foundation model pretrained with 10K CT scans",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Chest"
+    ],
+    "segments": [
+      "LUNG+NEOPLASM_MALIGNANT_PRIMARY"
+    ],
+    "websiteUrl": "https://mhub.ai/models/msk_smit_lung_gtv",
+    "githubUrl": "https://github.com/The-Veeraraghavan-Lab/CTRobust_Transformers.git",
+    "cite": "Jiang, Jue, and Harini Veeraraghavan. Self-supervised pretraining in the wild imparts image acquisition robustness to medical image transformers: an application to lung cancer segmentation. Proceedings of machine learning research 250 (2024): 708.",
+    "citeUrl": "https://openreview.net/pdf?id=G9Te2IevNm"
+  },
+  {
+    "name": "gc_spider_baseline",
+    "label": "Spine Seg (SPIDER Baseline)",
+    "description": "This model segments three anatomical structures in lumbar spine MRI: vertebrae, intervertebral discs (IVDs), and spinal canal. Each vertebrae and IVD is labeled according to standard naming convention.",
+    "modalities": [
+      "MR"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Spine"
+    ],
+    "segments": [
+      "VERTEBRAE_L5",
+      "VERTEBRAE_L4",
+      "VERTEBRAE_L3",
+      "VERTEBRAE_L2",
+      "VERTEBRAE_L1",
+      "VERTEBRAE_T12",
+      "VERTEBRAE_T11",
+      "VERTEBRAE_T10",
+      "VERTEBRAE_T9",
+      "VERTEBRAE_T8",
+      "VERTEBRAE_T7",
+      "VERTEBRAE_T6",
+      "VERTEBRAE_T5",
+      "VERTEBRAE_T4",
+      "VERTEBRAE_T3",
+      "VERTEBRAE_T2",
+      "VERTEBRAE_T1",
+      "VERTEBRAE_C7",
+      "VERTEBRAE_C6",
+      "VERTEBRAE_C5",
+      "VERTEBRAE_C4",
+      "VERTEBRAE_C3",
+      "VERTEBRAE_C2",
+      "VERTEBRAE_C1",
+      "VERTEBRAE_DISK_L5S1",
+      "VERTEBRAE_DISK_L4L5",
+      "VERTEBRAE_DISK_L3L4",
+      "VERTEBRAE_DISK_L2L3",
+      "VERTEBRAE_DISK_L1L2",
+      "VERTEBRAE_DISK_T12L1",
+      "VERTEBRAE_DISK_T11T12",
+      "VERTEBRAE_DISK_T10T11",
+      "VERTEBRAE_DISK_T9T10",
+      "VERTEBRAE_DISK_T8T9",
+      "VERTEBRAE_DISK_T7T8",
+      "VERTEBRAE_DISK_T6T7",
+      "VERTEBRAE_DISK_T5T6",
+      "VERTEBRAE_DISK_T4T5",
+      "VERTEBRAE_DISK_T3T4",
+      "VERTEBRAE_DISK_T2T3",
+      "VERTEBRAE_DISK_T1T2",
+      "VERTEBRAE_DISK_C7T1",
+      "VERTEBRAE_DISK_C6C7",
+      "VERTEBRAE_DISK_C5C6",
+      "VERTEBRAE_DISK_C4C5",
+      "VERTEBRAE_DISK_C3C4",
+      "VERTEBRAE_DISK_C2C3",
+      "SPINAL_CANAL"
+    ],
+    "websiteUrl": "https://mhub.ai/models/gc_spider_baseline",
+    "githubUrl": "https://github.com/DIAGNijmegen/SPIDER-Baseline-IIS",
+    "cite": "van der Graaf, J.W., van Hooff, M.L., Buckens, C.F.M. et al. Lumbar spine segmentation in MR images: a dataset and a public benchmark. Sci Data 11, 264 (2024). doi: 10.1038/s41597-024-03090-w",
+    "citeUrl": "https://doi.org/10.1038/s41597-024-03090-w"
+  },
+  {
+    "name": "gc_stoic_baseline",
+    "label": "STOIC2021 baseline",
+    "description": "This model predicts the probability and severity of COVID-19 in lung-CT scans. Severe COVID-19 is defined as patient intubation or death within one month from the acquisition of the CT scan.",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Prediction",
+    "bodyParts": [
+      "Chest"
+    ],
+    "segments": [],
+    "websiteUrl": "https://mhub.ai/models/gc_stoic_baseline",
+    "githubUrl": "https://github.com/luukboulogne/stoic2021-baseline",
+    "cite": "Luuk H. Boulogne, Julian Lorenz, Daniel Kienzle, Robin Schon, Katja Ludwig, Rainer Lienhart, Simon Jegou, Guang Li, Cong Chen, Qi Wang, Derik Shi, Mayug Maniparambil, Dominik Muller, Silvan Mertes, Niklas Schroter, Fabio Hellmann, Miriam Elia, Ine Dirks, Matias Nicolas Bossa, Abel Diaz Berenguer, Tanmoy Mukherjee, Jef Vandemeulebroucke, Hichem Sahli, Nikos Deligiannis, Panagiotis Gonidakis, Ngoc Dung Huynh, Imran Razzak, Reda Bouadjenek, Mario Verdicchio, Pasquale Borrelli, Marco Aiello, James A. Meakin, Alexander Lemm, Christoph Russ, Razvan Ionasec, Nikos Paragios, Bram van Ginneken, Marie-Pierre Revel Dubois, The STOIC2021 COVID-19 AI challenge: applying reusable training methodologies to private data, arXiv:2306.10484, 2023, https://arxiv.org/abs/2306.10484v2",
+    "citeUrl": "https://arxiv.org/abs/2306.10484v2"
+  },
+  {
+    "name": "nnunet_segthor",
+    "label": "Thoracic OAR (nnU-Net)",
+    "description": "nnU-Net's thoracic OAR segmentation model is an AI-based pipeline for the automated segmentation of the heart, the aorta, the esophagus and the trachea in CT scans (with and without contrast).",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Chest"
+    ],
+    "segments": [
+      "ESOPHAGUS",
+      "HEART",
+      "TRACHEA",
+      "AORTA"
+    ],
+    "websiteUrl": "https://mhub.ai/models/nnunet_segthor",
+    "githubUrl": "https://github.com/MIC-DKFZ/nnUNet/tree/nnunetv1",
+    "cite": "Isensee, F., Jaeger, P. F., Kohl, S. A., Petersen, J., & Maier-Hein, K. H. (2020). nnU-Net: a self-configuring method for deep learning-based biomedical image segmentation. Nature Methods, 1-9.",
+    "citeUrl": "https://www.nature.com/articles/s41592-020-01008-z"
+  },
+  {
+    "name": "gc_tiger_lb2",
+    "label": "TIGER challenge winner: Team VUNO",
+    "description": "This algorithm predicts the percentage of stromal area covered by tumour infiltrating lymphocytes (TIL) on H&E-stained whole-slide images of breast cancer histopathology. This algorithm first segments invasive tumor and tumor-associated stroma and subsequently detects lymphocytes and plasma cells, which are finally combined to estimate the relevant regions for TIL estimation. This model algorithm was the challenge winner of the TIGER challenge hosted on Grand Challenge.",
+    "modalities": [
+      "SM"
+    ],
+    "category": "Prediction",
+    "bodyParts": [
+      "Breast"
+    ],
+    "segments": [],
+    "websiteUrl": "https://mhub.ai/models/gc_tiger_lb2",
+    "githubUrl": "https://github.com/vuno/tiger_challenge",
+    "citeUrl": "https://github.com/vuno/tiger_challenge/blob/720f8dfca4624792c8e57915c4222efec5a0c2d4/figure/method_description.pdf"
+  },
+  {
+    "name": "gc_wsi_bgseg",
+    "label": "Tissue-Background segmentation in histopathological whole-slide images",
+    "description": "This algorithm segments the background and tissue in histopathological whole-slide images.",
+    "modalities": [
+      "SM"
+    ],
+    "category": "Prediction",
+    "bodyParts": [
+      "WHOLEBODY"
+    ],
+    "segments": [],
+    "websiteUrl": "https://mhub.ai/models/gc_wsi_bgseg",
+    "githubUrl": "https://github.com/DIAGNijmegen/pathology-tissue-background-segmentation-processor",
+    "cite": "B\xE1ndi P, Balkenhol M, van Ginneken B, van der Laak J, Litjens G. 2019. Resolution-agnostic tissue segmentation in whole-slide histopathology images with convolutional neural networks. PeerJ 7:e8242",
+    "citeUrl": "https://peerj.com/articles/8242/"
+  },
+  {
+    "name": "totalsegmentator",
+    "label": "TotalSegmentator",
+    "description": "TotalSegmentator is an AI-based pipeline for the segmentation of 104 anatomical structures in CT images (with and without contrast).",
+    "modalities": [
+      "CT"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "WHOLEBODY"
+    ],
+    "segments": [
+      "SPLEEN",
+      "RIGHT_KIDNEY",
+      "LEFT_KIDNEY",
+      "GALLBLADDER",
+      "LIVER",
+      "STOMACH",
+      "AORTA",
+      "INFERIOR_VENA_CAVA",
+      "PORTAL_AND_SPLENIC_VEIN",
+      "PANCREAS",
+      "RIGHT_ADRENAL_GLAND",
+      "LEFT_ADRENAL_GLAND",
+      "LEFT_UPPER_LUNG_LOBE",
+      "LEFT_LOWER_LUNG_LOBE",
+      "RIGHT_UPPER_LUNG_LOBE",
+      "RIGHT_MIDDLE_LUNG_LOBE",
+      "RIGHT_LOWER_LUNG_LOBE",
+      "VERTEBRAE_L5",
+      "VERTEBRAE_L4",
+      "VERTEBRAE_L3",
+      "VERTEBRAE_L2",
+      "VERTEBRAE_L1",
+      "VERTEBRAE_T12",
+      "VERTEBRAE_T11",
+      "VERTEBRAE_T10",
+      "VERTEBRAE_T9",
+      "VERTEBRAE_T8",
+      "VERTEBRAE_T7",
+      "VERTEBRAE_T6",
+      "VERTEBRAE_T5",
+      "VERTEBRAE_T4",
+      "VERTEBRAE_T3",
+      "VERTEBRAE_T2",
+      "VERTEBRAE_T1",
+      "VERTEBRAE_C7",
+      "VERTEBRAE_C6",
+      "VERTEBRAE_C5",
+      "VERTEBRAE_C4",
+      "VERTEBRAE_C3",
+      "VERTEBRAE_C2",
+      "VERTEBRAE_C1",
+      "ESOPHAGUS",
+      "TRACHEA",
+      "MYOCARDIUM",
+      "LEFT_ATRIUM",
+      "LEFT_VENTRICLE",
+      "RIGHT_ATRIUM",
+      "RIGHT_VENTRICLE",
+      "PULMONARY_ARTERY",
+      "BRAIN",
+      "LEFT_ILIAC_ARTERY",
+      "RIGHT_ILIAC_ARTERY",
+      "LEFT_ILIAC_VEIN",
+      "RIGHT_ILIAC_VEIN",
+      "SMALL_INTESTINE",
+      "DUODENUM",
+      "COLON",
+      "LEFT_RIB_1",
+      "LEFT_RIB_2",
+      "LEFT_RIB_3",
+      "LEFT_RIB_4",
+      "LEFT_RIB_5",
+      "LEFT_RIB_6",
+      "LEFT_RIB_7",
+      "LEFT_RIB_8",
+      "LEFT_RIB_9",
+      "LEFT_RIB_10",
+      "LEFT_RIB_11",
+      "LEFT_RIB_12",
+      "RIGHT_RIB_1",
+      "RIGHT_RIB_2",
+      "RIGHT_RIB_3",
+      "RIGHT_RIB_4",
+      "RIGHT_RIB_5",
+      "RIGHT_RIB_6",
+      "RIGHT_RIB_7",
+      "RIGHT_RIB_8",
+      "RIGHT_RIB_9",
+      "RIGHT_RIB_10",
+      "RIGHT_RIB_11",
+      "RIGHT_RIB_12",
+      "LEFT_HUMERUS",
+      "RIGHT_HUMERUS",
+      "LEFT_SCAPULA",
+      "RIGHT_SCAPULA",
+      "LEFT_CLAVICLE",
+      "RIGHT_CLAVICLE",
+      "LEFT_FEMUR",
+      "RIGHT_FEMUR",
+      "LEFT_HIP",
+      "RIGHT_HIP",
+      "SACRUM",
+      "FACE",
+      "LEFT_GLUTEUS_MAXIMUS",
+      "RIGHT_GLUTEUS_MAXIMUS",
+      "LEFT_GLUTEUS_MEDIUS",
+      "RIGHT_GLUTEUS_MEDIUS",
+      "LEFT_GLUTEUS_MINIMUS",
+      "RIGHT_GLUTEUS_MINIMUS",
+      "LEFT_AUTOCHTHONOUS_BACK_MUSCLE",
+      "RIGHT_AUTOCHTHONOUS_BACK_MUSCLE",
+      "LEFT_ILIOPSOAS",
+      "RIGHT_ILIOPSOAS",
+      "URINARY_BLADDER"
+    ],
+    "websiteUrl": "https://mhub.ai/models/totalsegmentator",
+    "githubUrl": "https://github.com/wasserth/TotalSegmentator",
+    "cite": "Jakob Wasserthal, Hanns-Christian Breit, Manfred T. Meyer, Maurice Pradella, Daniel Hinck, Alexander W. Sauter, Tobias Heye, Daniel T. Boll, Joshy Cyriac, Shan Yang, Michael Bach, and Martin Segeroth (2023). TotalSegmentator: Robust Segmentation of 104 Anatomic Structures in CT Images. Radiology Artificial Intelligence, 5:5",
+    "citeUrl": "https://pubs.rsna.org/doi/10.1148/ryai.230024"
+  },
+  {
+    "name": "nnunet_prostate_task24",
+    "label": "Whole Prostate Seg (nnU-Net)",
+    "description": "nnU-Net's whole prostate segmentation model is a single-modality (i.e. T2) input AI-based pipeline for the automated segmentation of the whole prostate on MRI scans.",
+    "modalities": [
+      "MR"
+    ],
+    "category": "Segmentation",
+    "bodyParts": [
+      "Prostate"
+    ],
+    "segments": [
+      "PROSTATE"
+    ],
+    "websiteUrl": "https://mhub.ai/models/nnunet_prostate_task24",
+    "githubUrl": "https://github.com/MIC-DKFZ/nnUNet/tree/nnunetv1",
+    "cite": "Isensee, F., Jaeger, P. F., Kohl, S. A., Petersen, J., & Maier-Hein, K. H. (2020). nnU-Net: a self-configuring method for deep learning-based biomedical image segmentation. Nature Methods, 1-9.",
+    "citeUrl": "https://www.nature.com/articles/s41592-020-01008-z"
+  }
+]);
+function modalityTokens(entry) {
+  return String(entry || "").split("|").map((t) => t.trim().toUpperCase()).filter(Boolean).map((t) => t === "MRI" ? "MR" : t === "PET" ? "PT" : t);
+}
+function modelMatchesModality(model, modality) {
+  const want = modality.trim().toUpperCase();
+  if (!want) return true;
+  const normalizedWant = want === "MRI" ? "MR" : want === "PET" ? "PT" : want;
+  return model.modalities.some((m) => modalityTokens(m).includes(normalizedWant));
+}
+function listMhubModelsForModality(modality) {
+  const raw = String(modality || "").trim();
+  if (!raw) return [...MHUB_MODELS];
+  return MHUB_MODELS.filter((m) => modelMatchesModality(m, raw));
+}
+function canonBodyPartKey(raw) {
+  return String(raw || "").trim().toUpperCase().replace(/[\s_-]+/g, "");
+}
+function listMhubBodyPartsForModels(models) {
+  const parts = /* @__PURE__ */ new Set();
+  for (const model of models) {
+    for (const bp of model.bodyParts || []) {
+      const t = String(bp || "").trim();
+      if (t) parts.add(t);
+    }
+  }
+  return [...parts].sort((a, b) => {
+    if (a === "WHOLEBODY") return 1;
+    if (b === "WHOLEBODY") return -1;
+    return a.localeCompare(b);
+  });
+}
+function listMhubModelsForBodyPart(models, bodyPart) {
+  const want = String(bodyPart || "").trim();
+  if (!want) return [...models];
+  const wantKey = canonBodyPartKey(want);
+  return models.filter(
+    (m) => (m.bodyParts || []).some((bp) => canonBodyPartKey(bp) === wantKey)
+  );
+}
+function normalizeMhubAnatomyTerms(query) {
+  return String(query || "").trim().split(/[\s,;+/]+/).map((t) => t.trim().toUpperCase().replace(/[\s-]+/g, "_")).filter(Boolean);
+}
+function findMhubModelsForAnatomy(query, models = MHUB_MODELS) {
+  const terms = normalizeMhubAnatomyTerms(query);
+  if (!terms.length) return [...models];
+  const scored = [];
+  for (const model of models) {
+    const segments = (model.segments || []).map((s) => String(s).toUpperCase());
+    if (!segments.length) continue;
+    let hits = 0;
+    for (const seg of segments) {
+      if (terms.some((t) => seg.includes(t))) hits += 1;
+    }
+    if (hits > 0) scored.push({ model, hits });
+  }
+  scored.sort((a, b) => b.hits - a.hits || a.model.label.localeCompare(b.model.label));
+  return scored.map((s) => s.model);
+}
+var BODY_PART_HINTS = [
+  { key: "KIDNEY", label: "Kidney", patterns: [/\bkidn(?:ey|eys)?\b/i, /\brenal\b/i] },
+  { key: "LIVER", label: "Liver", patterns: [/\bliver\b/i, /\bhepatic\b/i] },
+  { key: "LUNG", label: "Lung", patterns: [/\blung(?:s)?\b/i, /\bpulmon/i] },
+  { key: "CHEST", label: "Chest", patterns: [/\bchest\b/i, /\bthorax\b/i, /\bthoracic\b/i] },
+  { key: "ABDOMEN", label: "Abdomen", patterns: [/\babdomen\b/i, /\babdominal\b/i] },
+  { key: "PROSTATE", label: "Prostate", patterns: [/\bprostate\b/i] },
+  { key: "BREAST", label: "Breast", patterns: [/\bbreast\b/i, /\bmammo/i] },
+  { key: "SPINE", label: "Spine", patterns: [/\bspine\b/i, /\bspinal\b/i, /\bvertebra/i] },
+  { key: "WHOLEBODY", label: "WHOLEBODY", patterns: [/\bwhole\s*body\b/i, /\bwb\b/i] }
+];
+function inferMhubBodyPartFromText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  for (const hint of BODY_PART_HINTS) {
+    if (hint.patterns.some((re2) => re2.test(raw))) return hint.label;
+  }
+  return "";
+}
+function mhubContextHintsFromImagingStudy(context) {
+  let modality = "";
+  let description = "";
+  if (!Array.isArray(context)) {
+    return { modality, description, bodyPart: "" };
+  }
+  const normalizeMod = (raw) => {
+    let m = String(raw || "").trim().toUpperCase();
+    if (m === "MRI") m = "MR";
+    if (m === "PET") m = "PT";
+    if (m === "CT" || m === "CTAC") return "CT";
+    if (m === "MR" || m === "PT" || m === "NM") return m === "NM" ? "PT" : m;
+    return "";
+  };
+  const modalityFromCoding = (value) => {
+    if (!value) return "";
+    if (typeof value === "string") return normalizeMod(value);
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const hit = modalityFromCoding(entry);
+        if (hit) return hit;
+      }
+      return "";
+    }
+    if (typeof value === "object") {
+      const obj = value;
+      if (obj.coding != null) return modalityFromCoding(obj.coding);
+      if (obj.code != null) return normalizeMod(String(obj.code));
+      if (obj.text != null) return normalizeMod(String(obj.text));
+    }
+    return "";
+  };
+  for (const item of context) {
+    if (!item || typeof item !== "object") continue;
+    const key = String(item.key || "");
+    const resource = item.resource;
+    if (!resource || typeof resource !== "object") continue;
+    const res = resource;
+    if (!description && res.description != null) {
+      description = String(res.description).trim();
+    }
+    if (!modality && res.modality != null) {
+      modality = modalityFromCoding(res.modality);
+    }
+    if (!modality && Array.isArray(res.series)) {
+      for (const series of res.series) {
+        if (!series || typeof series !== "object") continue;
+        modality = modalityFromCoding(
+          series.modality
+        );
+        if (modality) break;
+      }
+    }
+    if (!modality && (key === "files" || Array.isArray(res.files))) {
+      const files = Array.isArray(res.files) ? res.files : [];
+      for (const file of files) {
+        if (!file || typeof file !== "object") continue;
+        const row = file;
+        const role = String(row.role || "").trim().toLowerCase();
+        if (role && role !== "volume") continue;
+        modality = normalizeMod(String(row.label || ""));
+        if (modality) break;
+      }
+    }
+  }
+  const bodyPart = inferMhubBodyPartFromText(description);
+  return { modality, description, bodyPart };
+}
+
 // render/demos/ira/totalseg-modality.ts
 function codingModality(value) {
   if (!value) return "";
@@ -17289,7 +23127,17 @@ function normalizeTotalSegModality(raw) {
   if (m === "PT" || m === "PET" || m === "NM") return "other";
   return "other";
 }
+function normalizeImagingModality(raw) {
+  const m = raw.trim().toUpperCase();
+  if (!m) return "";
+  if (m === "CT" || m === "CTAC") return "CT";
+  if (m === "MR" || m === "MRI") return "MR";
+  if (m === "PT" || m === "PET" || m === "NM") return "PT";
+  return "other";
+}
 function modalityFromContext(context) {
+  const hints = mhubContextHintsFromImagingStudy(context);
+  if (hints.modality) return hints.modality;
   for (const item of context) {
     if (!item || typeof item !== "object") continue;
     const resource = item.resource;
@@ -17328,6 +23176,31 @@ function modalityFromLiveScene() {
   }
   return "";
 }
+function rawOpenStudyModality() {
+  const ctx = getIraImagingStudyOpenContext();
+  const fromCtx = modalityFromContext(ctx);
+  if (fromCtx) return { raw: fromCtx, source: "ImagingStudy context" };
+  const fromUrl = modalityFromUrl();
+  if (fromUrl) return { raw: fromUrl, source: "URL modality" };
+  const fromScene = modalityFromLiveScene();
+  if (fromScene) return { raw: fromScene, source: "scene volume name" };
+  return { raw: "", source: "none" };
+}
+function resolveOpenStudyImagingModality() {
+  const { raw, source } = rawOpenStudyModality();
+  const normalized = normalizeImagingModality(raw);
+  if (normalized === "CT" || normalized === "MR" || normalized === "PT") {
+    return { modality: normalized, source };
+  }
+  if (normalized === "other") {
+    return {
+      modality: null,
+      source,
+      reason: `Open study modality ${raw} is not CT, MR, or PT`
+    };
+  }
+  return { modality: null, source: "none", reason: "Unknown study modality" };
+}
 function resolveOpenStudyTotalSegModality() {
   const ctx = getIraImagingStudyOpenContext();
   const fromCtx = normalizeTotalSegModality(modalityFromContext(ctx));
@@ -17364,11 +23237,21 @@ function resolveOpenStudyTotalSegModality() {
 }
 
 // render/demos/ira/ira-inference.ts
-var INFERENCE_SERVERS = [...x];
+var INFERENCE_SERVERS = [...z];
 var MAX_INFERENCE_DICOM_FILES = 300;
 var selectedId = null;
 var rows = [];
 var installed = false;
+var mhubSelectedModels = /* @__PURE__ */ new Set();
+var mhubFilteredModels = [];
+var mhubModalityLabel = "\u2014";
+var mhubModalityNote = "";
+var mhubBodyPart = "";
+var mhubBodyPartBound = false;
+var mhubFindQuery = "";
+var mhubFindBound = false;
+var mhubBodyPartUserSet = false;
+var mhubAutoBodyPart = "";
 var floatPos = null;
 function $(id) {
   return document.getElementById(id);
@@ -17480,7 +23363,7 @@ function toggleInferenceDialogMinimized() {
 }
 function volumeFilesFromOpenStudy() {
   const ctx = getIraImagingStudyOpenContext();
-  const files = q(ctx);
+  const files = K(ctx);
   const out = [];
   for (const f of files) {
     const role = String(f.role || "").toLowerCase();
@@ -17590,11 +23473,11 @@ var totalSegUnsupportedReason = "";
 function fillSelect(select, options, selected) {
   select.replaceChildren();
   for (const opt of options) {
-    const el = document.createElement("option");
-    el.value = opt.value;
-    el.textContent = opt.label;
-    if (opt.value === selected) el.selected = true;
-    select.append(el);
+    const el3 = document.createElement("option");
+    el3.value = opt.value;
+    el3.textContent = opt.label;
+    if (opt.value === selected) el3.selected = true;
+    select.append(el3);
   }
   if (!select.value && options[0]) select.value = options[0].value;
 }
@@ -17748,6 +23631,187 @@ function syncTotalSegOptionsVisibility() {
     refreshTotalSegModalityUi({ resetSelection: false });
   }
 }
+function readSelectedMhubModels() {
+  return mhubFilteredModels.map((m) => m.name).filter((name) => mhubSelectedModels.has(name));
+}
+function ensureMhubBodyPartBinding() {
+  if (mhubBodyPartBound) return;
+  const select = $("iraMhubBodyPart");
+  if (!select) return;
+  mhubBodyPartBound = true;
+  select.addEventListener("change", () => {
+    mhubBodyPart = String(select.value || "").trim();
+    mhubBodyPartUserSet = true;
+    refreshMhubModelList();
+    updateDetail();
+  });
+}
+function ensureMhubFindBinding() {
+  if (mhubFindBound) return;
+  const find = $("iraMhubFind");
+  if (!find) return;
+  mhubFindBound = true;
+  find.addEventListener("input", () => {
+    mhubFindQuery = String(find.value || "").trim();
+    refreshMhubModelList();
+    updateDetail();
+  });
+}
+function refreshMhubModelList() {
+  const list = $("iraMhubModelList");
+  const modalityEl = $("iraMhubModality");
+  const bodyPartSel = $("iraMhubBodyPart");
+  const noteEl = $("iraMhubContextNote");
+  const findEl = $("iraMhubFind");
+  if (!list) return;
+  ensureMhubBodyPartBinding();
+  ensureMhubFindBinding();
+  const resolved = resolveOpenStudyImagingModality();
+  const modality = resolved.modality;
+  const hints = mhubContextHintsFromImagingStudy(getIraImagingStudyOpenContext());
+  mhubAutoBodyPart = hints.bodyPart;
+  const modalityModels = listMhubModelsForModality(modality);
+  if (modality) {
+    mhubModalityLabel = modality;
+    mhubModalityNote = "";
+  } else {
+    mhubModalityLabel = "unknown";
+    mhubModalityNote = resolved.reason || "Unknown modality \u2014 showing all MHub models.";
+  }
+  if (modalityEl) modalityEl.textContent = mhubModalityLabel;
+  const bodyParts = listMhubBodyPartsForModels(modalityModels);
+  if (bodyPartSel) {
+    const prev = mhubBodyPart || String(bodyPartSel.value || "").trim();
+    bodyPartSel.replaceChildren();
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.textContent = "All body parts";
+    bodyPartSel.append(allOpt);
+    for (const bp of bodyParts) {
+      const opt = document.createElement("option");
+      opt.value = bp;
+      opt.textContent = bp === "WHOLEBODY" ? "Whole body" : bp;
+      bodyPartSel.append(opt);
+    }
+    let keep = prev && bodyParts.some((bp) => bp === prev) ? prev : "";
+    if (!mhubBodyPartUserSet && !keep && mhubAutoBodyPart && bodyParts.some((bp) => bp === mhubAutoBodyPart)) {
+      keep = mhubAutoBodyPart;
+    }
+    mhubBodyPart = keep;
+    bodyPartSel.value = keep;
+    bodyPartSel.disabled = bodyParts.length === 0;
+  }
+  if (findEl && findEl.value !== mhubFindQuery) {
+    if (!mhubFindQuery) findEl.value = "";
+  }
+  let filtered = listMhubModelsForBodyPart(modalityModels, mhubBodyPart);
+  if (mhubFindQuery) {
+    filtered = findMhubModelsForAnatomy(mhubFindQuery, filtered);
+  }
+  mhubFilteredModels = filtered;
+  if (noteEl) {
+    const bits = [];
+    if (modality) bits.push(modality);
+    if (mhubBodyPart) {
+      bits.push(
+        mhubBodyPart === "WHOLEBODY" ? "Whole body" : mhubBodyPart
+      );
+    }
+    if (mhubFindQuery) bits.push(`anatomy \u201C${mhubFindQuery}\u201D`);
+    const fromCtx = !mhubBodyPartUserSet && mhubBodyPart && mhubBodyPart === mhubAutoBodyPart;
+    if (bits.length) {
+      noteEl.hidden = false;
+      noteEl.textContent = fromCtx ? `Filtered for ${bits.join(" \xB7 ")} (from open study).` : `Filtered for ${bits.join(" \xB7 ")}.`;
+    } else {
+      noteEl.hidden = true;
+      noteEl.textContent = "";
+    }
+  }
+  const allowed = new Set(mhubFilteredModels.map((m) => m.name));
+  for (const name of [...mhubSelectedModels]) {
+    if (!allowed.has(name)) mhubSelectedModels.delete(name);
+  }
+  list.replaceChildren();
+  if (!modalityModels.length) {
+    const empty = document.createElement("p");
+    empty.className = "ira-mhub-empty";
+    empty.textContent = modality ? `No MHub models support ${modality} for the open study.` : "No MHub models in catalog.";
+    list.append(empty);
+    return;
+  }
+  if (!mhubFilteredModels.length) {
+    const empty = document.createElement("p");
+    empty.className = "ira-mhub-empty";
+    empty.textContent = mhubFindQuery ? `No MHub models match anatomy \u201C${mhubFindQuery}\u201D.` : mhubBodyPart ? `No MHub models for body part \u201C${mhubBodyPart}\u201D.` : "No MHub models match the current filters.";
+    list.append(empty);
+    return;
+  }
+  for (const model of mhubFilteredModels) {
+    const row = document.createElement("label");
+    row.className = "ira-mhub-model";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = model.name;
+    cb.checked = mhubSelectedModels.has(model.name);
+    cb.addEventListener("change", () => {
+      if (cb.checked) mhubSelectedModels.add(model.name);
+      else mhubSelectedModels.delete(model.name);
+      updateDetail();
+    });
+    const body = document.createElement("span");
+    body.className = "ira-mhub-model-body";
+    const label = document.createElement("span");
+    label.className = "ira-mhub-model-label";
+    label.textContent = model.label;
+    body.append(label);
+    const desc = String(model.description || "").trim();
+    if (desc) {
+      const d = document.createElement("span");
+      d.className = "ira-mhub-model-desc";
+      d.textContent = desc;
+      body.append(d);
+    }
+    const links = document.createElement("span");
+    links.className = "ira-mhub-model-links";
+    links.addEventListener("click", (ev) => ev.stopPropagation());
+    links.addEventListener("mousedown", (ev) => ev.stopPropagation());
+    const appendLink = (href, text, title) => {
+      const a = document.createElement("a");
+      a.className = "ira-mhub-model-link";
+      a.href = href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = text;
+      if (title) a.title = title;
+      links.append(a);
+    };
+    const github = String(model.githubUrl || "").trim();
+    if (github) appendLink(github, "GitHub");
+    const website = String(model.websiteUrl || "").trim();
+    if (website) appendLink(website, "Website");
+    const cite = String(model.cite || "").trim();
+    const citeUrl = String(model.citeUrl || "").trim();
+    if (citeUrl) {
+      appendLink(citeUrl, "Cite", cite || void 0);
+    } else if (cite) {
+      const citeEl = document.createElement("span");
+      citeEl.className = "ira-mhub-model-cite";
+      citeEl.textContent = "Cite";
+      citeEl.title = cite;
+      links.append(citeEl);
+    }
+    if (links.childNodes.length) body.append(links);
+    row.append(cb, body);
+    list.append(row);
+  }
+}
+function syncMhubOptionsVisibility() {
+  const panel = $("iraMhubOptions");
+  if (!panel) return;
+  const show = selectedId === "mhub";
+  panel.hidden = !show;
+  if (show) refreshMhubModelList();
+}
 function readTotalSegOptions() {
   const select = $("iraTotalSegTask");
   const fallback = totalSegModality ? defaultTaskId(totalSegModality) : "total";
@@ -17809,19 +23873,20 @@ function updateDetail() {
     runBtn.disabled = true;
     if (note) note.textContent = "";
     syncTotalSegOptionsVisibility();
+    syncMhubOptionsVisibility();
     return;
   }
   const opLines = [];
   if (row.probe?.error) opLines.push(`Probe error: ${row.probe.error}`);
   if (row.probe?.items?.length) {
-    for (const it2 of row.probe.items) {
-      const k2 = String(it2.key ?? "").trim();
-      const v2 = String(it2.value ?? "").trim();
-      if (k2 && v2 && k2 !== "availability") opLines.push(`${k2}: ${v2}`);
+    for (const it4 of row.probe.items) {
+      const k = String(it4.key ?? "").trim();
+      const v = String(it4.value ?? "").trim();
+      if (k && v && k !== "availability") opLines.push(`${k}: ${v}`);
     }
   }
   detail.className = "ira-inference-detail ira-inference-detail-card";
-  detail.innerHTML = ki(row.def) + (opLines.length ? `<pre class="ira-inference-op-notes">${opLines.map(
+  detail.innerHTML = qo(row.def) + (opLines.length ? `<pre class="ira-inference-op-notes">${opLines.map(
     (l) => l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   ).join("\n")}</pre>` : "");
   const info = getIraCastSessionInfo();
@@ -17831,6 +23896,7 @@ function updateDetail() {
   const needsNifti = row.def.hubEvent === "nifti-send";
   const hasNifti = files.some(looksLikeNiftiVolumeFile);
   syncTotalSegOptionsVisibility();
+  syncMhubOptionsVisibility();
   let disableReason = "";
   if (!connected) disableReason = "Connect to Cast (open from the worklist) to run inference.";
   else if (!online) disableReason = "Server is offline \u2014 refresh status or start the resource server.";
@@ -17839,6 +23905,12 @@ function updateDetail() {
     disableReason = "This server expects NIfTI; the open study only has DICOM/prefix URLs. Use Lung Screening or Total Segmentator, or send NIfTI.";
   } else if (row.def.id === "totalseg" && !totalSegModality) {
     disableReason = totalSegUnsupportedReason || "TotalSegmentator requires a CT or MR study.";
+  } else if (row.def.id === "mhub") {
+    if (!mhubFilteredModels.length) {
+      disableReason = mhubModalityNote || "No applicable MHub models for this study.";
+    } else if (!readSelectedMhubModels().length) {
+      disableReason = "Select at least one MHub model.";
+    }
   }
   runBtn.disabled = Boolean(disableReason);
   if (note) {
@@ -17846,6 +23918,9 @@ function updateDetail() {
       note.textContent = disableReason;
     } else if (row.def.id === "totalseg") {
       note.textContent = totalSegAssumed ? "Assuming CT \u2014 open an MR study for MR tasks." : "";
+    } else if (row.def.id === "mhub") {
+      const ready = `Ready to run ${readSelectedMhubModels().length} model(s) on the open study.`;
+      note.textContent = mhubModalityNote ? `${mhubModalityNote} ${ready}` : ready;
     } else {
       note.textContent = "Ready to run on the open study.";
     }
@@ -17908,7 +23983,7 @@ async function probeAll() {
   updateDetail();
   appendLog("Probing inference servers\u2026");
   try {
-    const results = await Oi(client2, {
+    const results = await Zo(client2, {
       subscriberName: info.subscriberName,
       subscriberProductName: "SLICERLIVE-IRA",
       subscriberActor: "ID",
@@ -17957,11 +24032,13 @@ async function runSelected() {
     const files = await expandVolumeFilesForSend(rawFiles);
     const hubEvent = hubEventForInferenceJob(row.def.hubEvent, files);
     appendLog(`Publishing ${files.length} file(s) as ${hubEvent}\u2026`);
-    const contextExtras = row.def.id === "totalseg" ? readTotalSegOptions() : void 0;
-    if (contextExtras) {
+    const contextExtras = row.def.id === "totalseg" ? readTotalSegOptions() : row.def.id === "mhub" ? { models: readSelectedMhubModels() } : void 0;
+    if (contextExtras && "task" in contextExtras) {
       appendLog(
         `TotalSeg options: task=${contextExtras.task}, fast=${contextExtras.fast}`
       );
+    } else if (contextExtras && "models" in contextExtras) {
+      appendLog(`MHub models: ${contextExtras.models.join(", ")}`);
     }
     const result = await publishInferenceJob({
       product: row.def.product,
@@ -17986,6 +24063,16 @@ function openMedicalInferenceDialog() {
   }
   rows = INFERENCE_SERVERS.map((def) => ({ def, probe: null, probing: false }));
   selectedId = null;
+  mhubSelectedModels.clear();
+  mhubFilteredModels = [];
+  mhubModalityLabel = "\u2014";
+  mhubModalityNote = "";
+  mhubBodyPart = "";
+  mhubFindQuery = "";
+  mhubBodyPartUserSet = false;
+  mhubAutoBodyPart = "";
+  const find = $("iraMhubFind");
+  if (find) find.value = "";
   const log = $("iraInferenceLog");
   if (log) log.textContent = "";
   installInferenceWindowDrag();
@@ -18163,13 +24250,16 @@ async function unzipFileToFiles(file) {
 
 // render/demos/ira/ira-header.ts
 var ID_ACTOR2 = "ID";
+function iraConferenceStrings() {
+  return conferenceStringsFor(resolveStoredLocale());
+}
 var THEME_KEY = "pw46.ira.theme";
 var THEME_SLICERLIVE = "slicerlive";
 var THEME_OHIF = "ohif";
 function getStoredTheme() {
   try {
-    const v2 = localStorage.getItem(THEME_KEY)?.trim();
-    if (v2 === THEME_OHIF || v2 === THEME_SLICERLIVE) return v2;
+    const v = localStorage.getItem(THEME_KEY)?.trim();
+    if (v === THEME_OHIF || v === THEME_SLICERLIVE) return v;
   } catch {
   }
   return THEME_SLICERLIVE;
@@ -18194,11 +24284,11 @@ function fillSessionDl(dl) {
     ["Status", info.connectionDetail]
   ];
   dl.replaceChildren();
-  for (const [k2, v2] of rows2) {
+  for (const [k, v] of rows2) {
     const dt2 = document.createElement("dt");
-    dt2.textContent = k2;
+    dt2.textContent = k;
     const dd = document.createElement("dd");
-    dd.textContent = v2;
+    dd.textContent = v;
     dl.append(dt2, dd);
   }
 }
@@ -18224,10 +24314,10 @@ function openSceneView() {
 var localStudyPick = null;
 var onMountLocalSeries;
 function setLoadLocalStatus(msg, show = true) {
-  const el = document.getElementById("iraLoadLocalStatus");
-  if (!el) return;
-  el.textContent = msg;
-  el.hidden = !show || !msg;
+  const el3 = document.getElementById("iraLoadLocalStatus");
+  if (!el3) return;
+  el3.textContent = msg;
+  el3.hidden = !show || !msg;
 }
 function clearLoadLocalSeries() {
   const host = document.getElementById("iraLoadLocalSeries");
@@ -18442,89 +24532,81 @@ function installLoadLocalStudyUi() {
     });
   });
 }
-function iraChipStatus(place) {
-  if (place.isSelf && place.isLeading) return "Host";
-  if (place.isSelf) return "You";
-  if (place.isFollowing) return "Following";
-  return String(place.statusLabel || "").trim();
+async function requestIraConferenceTakeover() {
+  const info = getIraCastSessionInfo();
+  const view = info.conference;
+  if (!view || info.connection !== "connected" || !info.topic) return;
+  if (view.selfRole === "leading" || info.conferenceFollowHost) return;
+  const ok = await Xr({
+    strings: iraConferenceStrings()
+  });
+  if (!ok) return;
+  try {
+    await jr(
+      info.hubEndpoint,
+      view.hostTopic,
+      info.topic,
+      info.userName || void 0
+    );
+  } catch (err) {
+    console.error("[ira] take over failed", err);
+    Qr(
+      err instanceof Error ? err.message : "Failed to take over"
+    );
+  }
 }
 function renderConferenceChips(view) {
-  const host = document.getElementById("iraConferenceChips");
-  if (!host) return;
-  host.replaceChildren();
-  if (!view?.places?.length) {
-    host.hidden = true;
+  const statusControl = document.getElementById("iraCastStatusBtn");
+  const statusLabelEl = document.getElementById("iraCastStatus");
+  if (!(statusControl instanceof HTMLElement)) {
     return;
   }
-  host.hidden = false;
-  for (const place of view.places) {
-    const chip = document.createElement("span");
-    chip.className = "ira-conference-chip";
-    if (place.isSelf) chip.classList.add("ira-conference-chip-self");
-    if (place.isLeading) chip.classList.add("ira-conference-chip-leading");
-    if (place.isFollowing) chip.classList.add("ira-conference-chip-following");
-    const name = document.createElement("span");
-    name.className = "ira-conference-chip-name";
-    name.textContent = place.label;
-    const tip = [place.label, place.statusLabel, place.placeId].map((s) => String(s || "").trim()).filter(Boolean).join(" \u2014 ");
-    name.title = tip;
-    chip.title = tip;
-    chip.append(name);
-    const short = iraChipStatus(place);
-    if (short) {
-      const status2 = document.createElement("span");
-      status2.className = "ira-conference-chip-status";
-      status2.textContent = short;
-      chip.append(status2);
-    }
-    host.append(chip);
-  }
-}
-function refreshLeaveConferenceButton(view) {
-  const btn = document.getElementById(
-    "iraLeaveConferenceBtn"
-  );
-  if (!btn) return;
   const info = getIraCastSessionInfo();
-  const active = Boolean(view?.places?.length);
-  const connected = info.connection === "connected";
-  if (!active) {
-    btn.hidden = true;
-    btn.disabled = true;
-    btn.textContent = "Leave conference";
-    btn.title = "Leave conference";
-    btn.setAttribute("aria-label", "Leave conference");
-    return;
-  }
-  const hostAction = view?.selfRole === "leading";
-  const label = hostAction ? "End conference" : "Leave conference";
-  btn.hidden = false;
-  btn.disabled = !connected;
-  btn.textContent = label;
-  btn.title = label;
-  btn.setAttribute("aria-label", label);
+  zr({
+    view,
+    statusControl,
+    statusLabelEl,
+    classPrefix: "ira-conference",
+    selfStatusMode: "short",
+    followHost: Boolean(info.conferenceFollowHost)
+  });
 }
-function refreshStartConferenceButton(view) {
-  const btn = document.getElementById(
-    "iraStartConferenceBtn"
-  );
-  if (!btn) return;
-  const active = Boolean(view);
-  const connected = getIraCastSessionInfo().connection === "connected";
-  btn.hidden = active;
-  btn.disabled = active || !connected;
-  btn.title = connected ? "Start a conference" : "Connect to Cast hub to start a conference";
+function refreshConferenceHeaderActions(view) {
+  const info = getIraCastSessionInfo();
+  Vr({
+    view,
+    followHost: Boolean(info.conferenceFollowHost),
+    connected: info.connection === "connected",
+    strings: iraConferenceStrings(),
+    startBtn: document.getElementById(
+      "iraStartConferenceBtn"
+    ),
+    endBtn: document.getElementById(
+      "iraLeaveConferenceBtn"
+    ),
+    stopFollowBtn: document.getElementById(
+      "iraStopFollowingBtn"
+    ),
+    resumeFollowBtn: document.getElementById(
+      "iraResumeFollowingBtn"
+    ),
+    takeOverBtn: document.getElementById(
+      "iraTakeOverBtn"
+    )
+  });
 }
 function refreshRadio() {
   const statusEl = document.getElementById("iraCastStatus");
   if (statusEl) applyIraCastRadioVisual(statusEl);
   const view = getIraCastSessionInfo().conference;
   renderConferenceChips(view);
-  refreshStartConferenceButton(view);
-  refreshLeaveConferenceButton(view);
+  refreshConferenceHeaderActions(view);
 }
 function installIraHeader(opts = {}) {
   onMountLocalSeries = opts.onMountLocalSeries;
+  const locale = resolveStoredLocale();
+  document.documentElement.lang = locale;
+  applyHeaderChrome(document, locale);
   applyTheme(getStoredTheme());
   refreshRadio();
   setIraCastStatusListener(() => refreshRadio());
@@ -18538,12 +24620,13 @@ function installIraHeader(opts = {}) {
   installMedicalInferenceUi();
   installLoadLocalStudyUi();
   if (!castBtn) return;
-  let openConferenceDialog = () => {
+  let openConferenceDialog = (_anchor) => {
     console.warn("[ira] conference dialog not available");
   };
   try {
-    const conferenceDialog = ar({
+    const conferenceDialog = Zr({
       classPrefix: "cast-conference",
+      strings: iraConferenceStrings(),
       getSession: () => {
         const info = getIraCastSessionInfo();
         return {
@@ -18556,15 +24639,19 @@ function installIraHeader(opts = {}) {
       },
       onConferenceChange: (view) => {
         setIraConferenceView(view);
+      },
+      onFollowChange: (followHost) => {
+        setIraConferenceFollowHost(followHost);
       }
     });
-    openConferenceDialog = () => conferenceDialog.open();
+    openConferenceDialog = (anchor) => conferenceDialog.open(anchor ?? null);
   } catch (err) {
     console.error("[ira] conference dialog init failed", err);
   }
   try {
-    const inviteController = ur({
+    const inviteController = Kr({
       classPrefix: "cast-conference-invite",
+      strings: iraConferenceStrings(),
       getSession: () => {
         const info = getIraCastSessionInfo();
         return {
@@ -18575,7 +24662,7 @@ function installIraHeader(opts = {}) {
           connected: info.connection === "connected"
         };
       },
-      shouldShow: () => cr({
+      shouldShow: () => Yr({
         selfActors: [ID_ACTOR2]
       }),
       onConferenceChange: (view) => {
@@ -18587,6 +24674,10 @@ function installIraHeader(opts = {}) {
         if (followHost && hostTopic) {
           void requestIraStatusFromHostWorklist(hostTopic);
         }
+      },
+      onLeadChange: (info) => {
+        const label = String(info?.leaderLabel || info?.leaderUserName || "").trim() || "Someone";
+        Qr(`${label} took over`);
       }
     });
     setIraConferenceHubHandler(
@@ -18597,6 +24688,17 @@ function installIraHeader(opts = {}) {
   }
   castBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
+    const info = getIraCastSessionInfo();
+    const view = info.conference;
+    if (view?.places?.length) {
+      Gr({
+        anchor: castBtn,
+        view,
+        followHost: Boolean(info.conferenceFollowHost),
+        classPrefix: "ira-conference"
+      });
+      return;
+    }
     if (sessionDl) fillSessionDl(sessionDl);
     if (sessionModal) sessionModal.hidden = false;
   });
@@ -18615,11 +24717,16 @@ function installIraHeader(opts = {}) {
   document.getElementById("iraStartConferenceBtn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
     if (getIraCastSessionInfo().conference) return;
-    openConferenceDialog();
+    const btn = ev.currentTarget instanceof HTMLElement ? ev.currentTarget : null;
+    openConferenceDialog(btn);
   });
   document.getElementById("iraMedicalInferenceBtn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
     openMedicalInferenceDialog();
+  });
+  document.getElementById("iraWorklistBtn")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openIraWorklistClient();
   });
   document.getElementById("iraReportingBtn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
@@ -18633,12 +24740,12 @@ function installIraHeader(opts = {}) {
     const leaveBtn = document.getElementById(
       "iraLeaveConferenceBtn"
     );
-    const hostAction = view.selfRole === "leading";
+    const hostAction = Boolean(view.isConferenceOwner);
     if (leaveBtn) {
       leaveBtn.disabled = true;
       leaveBtn.textContent = hostAction ? "Ending\u2026" : "Leaving\u2026";
     }
-    void Ze(
+    void pt(
       info.hubEndpoint,
       view.hostTopic,
       hostAction ? void 0 : info.topic
@@ -18650,8 +24757,25 @@ function installIraHeader(opts = {}) {
       refreshRadio();
     });
   });
-  document.querySelectorAll("[data-ira-close-modal]").forEach((el) => {
-    el.addEventListener("click", () => {
+  document.getElementById("iraStopFollowingBtn")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    setIraConferenceFollowHost(false);
+    refreshRadio();
+  });
+  document.getElementById("iraResumeFollowingBtn")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const info = getIraCastSessionInfo();
+    if (!info.conference || info.conferenceFollowHost) return;
+    if (info.conference.selfRole === "leading") return;
+    setIraConferenceFollowHost(true);
+    refreshRadio();
+  });
+  document.getElementById("iraTakeOverBtn")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    void requestIraConferenceTakeover();
+  });
+  document.querySelectorAll("[data-ira-close-modal]").forEach((el3) => {
+    el3.addEventListener("click", () => {
       if (sessionModal) sessionModal.hidden = true;
       if (sceneViewModal) sceneViewModal.hidden = true;
       if (aboutModal) aboutModal.hidden = true;
@@ -18688,7 +24812,7 @@ function isSegFile(f) {
   return role === "seg" || label === "seg" || name.includes("seg");
 }
 function sourceFromIdcOpenContext(context) {
-  const plan = gr(context);
+  const plan = ci(context);
   if (!plan || plan.mode !== "idc") {
     return null;
   }
@@ -18739,15 +24863,15 @@ function studyParamsFromIdcSource(source) {
 }
 
 // render/demos/ira/ira-browser.ts
-var P = new URLSearchParams(location.search);
+var P2 = new URLSearchParams(location.search);
 var applyCastNiftiSeg = null;
 var applyCastDicomSeg = null;
 var castNiftiMountId = 0;
-var IDC_INDEX_BASE = globalThis.__IDC_INDEX_BASE || P.get("indexBase") || "https://js2.jetstream-cloud.org:8001/swift/v1/idc-index/";
+var IDC_INDEX_BASE = globalThis.__IDC_INDEX_BASE || P2.get("indexBase") || "https://js2.jetstream-cloud.org:8001/swift/v1/idc-index/";
 var GROUPS_URL = new URL("idc-rad-groups.json", IDC_INDEX_BASE).href;
 var PARQUET_URL = new URL("idc-rad-slim.parquet", IDC_INDEX_BASE).href;
 var HYPARQUET_ESM = "https://cdn.jsdelivr.net/npm/hyparquet@1.28.2/+esm";
-var splitList = (v2) => (v2 ?? "").split(",").map((x2) => x2.trim()).filter(Boolean);
+var splitList = (v) => (v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 var _dirCache = null;
 async function loadGroupDir(onStatus2) {
   if (_dirCache) return _dirCache;
@@ -18812,26 +24936,26 @@ async function readStudyRows(studyUID, onStatus2) {
   }
 }
 async function resolveSource(onStatus2) {
-  const series = P.get("series");
+  const series = P2.get("series");
   if (series) {
     return {
       c: series,
-      cb: P.get("bucket") || "idc-open-data",
-      s: P.get("seg") || void 0,
-      sb: P.get("segBucket") || "idc-open-data",
-      m: (P.get("modality") || "CT").toUpperCase(),
-      col: P.get("collection") || "IDC",
+      cb: P2.get("bucket") || "idc-open-data",
+      s: P2.get("seg") || void 0,
+      sb: P2.get("segBucket") || "idc-open-data",
+      m: (P2.get("modality") || "CT").toUpperCase(),
+      col: P2.get("collection") || "IDC",
       st: "",
-      sd: `${P.get("patient") || "IDC"} \xB7 ${series.slice(0, 8)}\u2026`,
+      sd: `${P2.get("patient") || "IDC"} \xB7 ${series.slice(0, 8)}\u2026`,
       lic: "NCI Imaging Data Commons"
     };
   }
-  const studyUIDs = [...splitList(P.get("StudyInstanceUIDs")), ...splitList(P.get("studyUID"))];
+  const studyUIDs = [...splitList(P2.get("StudyInstanceUIDs")), ...splitList(P2.get("studyUID"))];
   if (studyUIDs.length) {
     const want = [
-      ...splitList(P.get("SeriesInstanceUIDs")),
-      ...splitList(P.get("initialSeriesInstanceUID")),
-      ...splitList(P.get("seriesUID"))
+      ...splitList(P2.get("SeriesInstanceUIDs")),
+      ...splitList(P2.get("initialSeriesInstanceUID")),
+      ...splitList(P2.get("seriesUID"))
     ];
     return await resolveFromIndex(studyUIDs[0], want, onStatus2);
   }
@@ -18871,10 +24995,10 @@ async function resolveFromIndex(studyUID, wantSeries, onStatus2) {
   return src;
 }
 var status = (msg, err = false) => {
-  const el = document.getElementById("status");
-  if (el) {
-    el.textContent = msg;
-    el.style.color = err ? "#ff6b74" : "#9fb3d0";
+  const el3 = document.getElementById("status");
+  if (el3) {
+    el3.textContent = msg;
+    el3.style.color = err ? "#ff6b74" : "#9fb3d0";
   }
 };
 var cvEl = (id) => document.getElementById(id);
@@ -19000,10 +25124,10 @@ async function main() {
     await applyCastDicomSeg(event);
   });
   const clearViewportDisplay = () => {
-    for (const el of document.querySelectorAll(
+    for (const el3 of document.querySelectorAll(
       ".ann, .ira-overlay, #ira-strip, #ira-cine-box, #sl-badge, #sl-popup, #sl-help"
     )) {
-      el.remove();
+      el3.remove();
     }
     resetIraToolbarShell();
     for (const p of PLANES) {
@@ -19060,9 +25184,9 @@ async function main() {
     globalThis.addEventListener("resize", resizeEmpty);
     const ros = [];
     for (const n of names) {
-      const ro = new ResizeObserver(() => resizeEmpty());
-      ro.observe(cv[n]);
-      ros.push(ro);
+      const ro4 = new ResizeObserver(() => resizeEmpty());
+      ro4.observe(cv[n]);
+      ros.push(ro4);
     }
     attachViewGrid(document.getElementById("grid"), [...names], resizeEmpty);
     attachDoubleClick(cv.threeD, () => {
@@ -19070,7 +25194,7 @@ async function main() {
     resizeEmpty();
     emptyCleanup = () => {
       globalThis.removeEventListener("resize", resizeEmpty);
-      for (const ro of ros) ro.disconnect();
+      for (const ro4 of ros) ro4.disconnect();
       emptyCleanup = null;
     };
     status("No study loaded");
@@ -19147,7 +25271,7 @@ async function main() {
   const setLoad = (m) => {
     status(m);
   };
-  const sceneUrl = (P.get("scene") || "").trim();
+  const sceneUrl = (P2.get("scene") || "").trim();
   if (sceneUrl === EMBEDDED_SCENE_PARAM) {
     const embedded = takeEmbeddedSceneFromStorage();
     if (!embedded) {
@@ -19179,6 +25303,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   let sceneRedrawRaf = 0;
   let pendingLodUpgrade = null;
   let pendingIdcSeg;
+  let sceneSegDone = null;
   let idcStreamVol = null;
   let idcCtAssembled = false;
   let scHold = null;
@@ -19273,6 +25398,18 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       sd: `${sv.name} \xB7 LiveScene`,
       lic: "LiveScene"
     };
+    sceneSegDone = loadSceneSegLabelmap(sceneSource, ct2.dims, ct2.ijkToRAS, { signal }).then(
+      (res) => {
+        if (signal?.aborted) return;
+        if (!res.ok) {
+          if (!/no vtkMRMLSegmentationNode/.test(res.error)) {
+            console.warn("[ira] LiveScene segmentation:", res.error);
+          }
+          return;
+        }
+        pendingIdcSeg = res.seg;
+      }
+    );
   } else {
     setIraLiveScene(null);
     source = input;
@@ -19367,6 +25504,11 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   const sc = buildSegrouletteScene(gpu, srgb, ct2, seg, {
     volumeField: sceneLodField
   });
+  let chromeApi = null;
+  let applyColorizeGroupDefaults = () => {
+  };
+  let reinstallChrome = () => {
+  };
   scHold = sc;
   const thisCastMountId = ++castNiftiMountId;
   if (sceneVr) sc.setVolumePreset(sceneVr);
@@ -19377,9 +25519,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     const buf = ct2.vol;
     const vstride = Math.max(1, Math.floor(buf.length / 2e6));
     for (let i = 0; i < buf.length; i += vstride) {
-      const v2 = buf[i];
-      if (v2 < vmin) vmin = v2;
-      if (v2 > vmax) vmax = v2;
+      const v = buf[i];
+      if (v < vmin) vmin = v;
+      if (v > vmax) vmax = v;
     }
   };
   sampleRange();
@@ -19452,33 +25594,33 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     a[2] * b[0] - a[0] * b[2],
     a[0] * b[1] - a[1] * b[0]
   ];
-  const norm32 = (v2) => {
-    const L = Math.hypot(v2[0], v2[1], v2[2]) || 1;
-    return [v2[0] / L, v2[1] / L, v2[2] / L];
+  const norm32 = (v) => {
+    const L = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / L, v[1] / L, v[2] / L];
   };
-  const rotAxis = (v2, k2, ang) => {
+  const rotAxis = (v, k, ang) => {
     const c = Math.cos(ang), s = Math.sin(ang);
-    const d = dot32(k2, v2);
-    const x2 = cross3(k2, v2);
+    const d = dot32(k, v);
+    const x = cross3(k, v);
     return [
-      v2[0] * c + x2[0] * s + k2[0] * d * (1 - c),
-      v2[1] * c + x2[1] * s + k2[1] * d * (1 - c),
-      v2[2] * c + x2[2] * s + k2[2] * d * (1 - c)
+      v[0] * c + x[0] * s + k[0] * d * (1 - c),
+      v[1] * c + x[1] * s + k[1] * d * (1 - c),
+      v[2] * c + x[2] * s + k[2] * d * (1 - c)
     ];
   };
   const tiltBasis = (b, dPitch, dYaw) => {
-    let u = b.uDir, v2 = b.vDir, n = b.nDir;
+    let u = b.uDir, v = b.vDir, n = b.nDir;
     n = rotAxis(n, u, dPitch);
-    v2 = rotAxis(v2, u, dPitch);
-    n = rotAxis(n, v2, dYaw);
-    u = rotAxis(u, v2, dYaw);
+    v = rotAxis(v, u, dPitch);
+    n = rotAxis(n, v, dYaw);
+    u = rotAxis(u, v, dYaw);
     n = norm32(n);
     u = norm32([u[0] - n[0] * dot32(u, n), u[1] - n[1] * dot32(u, n), u[2] - n[2] * dot32(u, n)]);
-    v2 = cross3(u, n);
-    return { uDir: u, vDir: v2, nDir: n };
+    v = cross3(u, n);
+    return { uDir: u, vDir: v, nDir: n };
   };
   const extentAlong = (d) => {
-    let lo = Infinity, hi2 = -Infinity;
+    let lo2 = Infinity, hi2 = -Infinity;
     for (let i = 0; i < 8; i++) {
       const c = [
         i & 1 ? sc.rasHi[0] : sc.rasLo[0],
@@ -19486,10 +25628,10 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         i & 4 ? sc.rasHi[2] : sc.rasLo[2]
       ];
       const t = dot32(c, d);
-      if (t < lo) lo = t;
+      if (t < lo2) lo2 = t;
       if (t > hi2) hi2 = t;
     }
-    return { lo, hi: hi2 };
+    return { lo: lo2, hi: hi2 };
   };
   const obliqueCenterRAS = () => {
     const b = sc.slice.basisOf("oblique");
@@ -19519,12 +25661,12 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   const obliquePlaneOpts = () => {
     const b = sc.slice.basisOf("oblique");
     const origin = obliqueCenterRAS();
-    let hu = 0, hv = 0;
+    let hu3 = 0, hv = 0;
     for (const sx of [sc.rasLo[0], sc.rasHi[0]]) {
       for (const sy of [sc.rasLo[1], sc.rasHi[1]]) {
         for (const sz of [sc.rasLo[2], sc.rasHi[2]]) {
           const r = [sx - origin[0], sy - origin[1], sz - origin[2]];
-          hu = Math.max(hu, Math.abs(dot32(r, b.uDir)));
+          hu3 = Math.max(hu3, Math.abs(dot32(r, b.uDir)));
           hv = Math.max(hv, Math.abs(dot32(r, b.vDir)));
         }
       }
@@ -19536,7 +25678,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       normal: b.nDir,
       uAxis: b.uDir,
       vAxis: b.vDir,
-      halfExtU: hu,
+      halfExtU: hu3,
       halfExtV: hv,
       clim: [wl.lev - halfWin, wl.lev + halfWin],
       halfThick: Math.max(0.25, sliceIx.spacing("oblique") / 2),
@@ -19655,9 +25797,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       const pad = 6;
       const out = [];
       for (const sel of ["#sl-badge", ".lab.threeD"]) {
-        const el = document.querySelector(sel);
-        if (!el) continue;
-        const r = el.getBoundingClientRect();
+        const el3 = document.querySelector(sel);
+        if (!el3) continue;
+        const r = el3.getBoundingClientRect();
         const x0 = Math.max(r.left, cr2.left);
         const y0 = Math.max(r.top, cr2.top);
         const x1 = Math.min(r.right, cr2.right);
@@ -19686,6 +25828,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     vrPreset = name;
   };
   let applyingRemoteSceneUpdate = false;
+  let maximizedCell = null;
+  let viewGrid = null;
   let hostScenePublishRaf = 0;
   let hostScenePublishPending = null;
   let hostScenePublishPrev = null;
@@ -19734,6 +25878,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       volumeName: source.sd || ct2.modality || "Volume",
       volumeOpacity: sc.volumeOpacity(),
       volumeShift: sc.volumeShift(),
+      volumeShiftRange: Math.max(200, (vmax - vmin) / 2),
       volumePreset: vrPreset,
       cropEnabled: roiEnabled,
       roiVisible,
@@ -19753,7 +25898,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         viewUp: [camera.viewUp[0], camera.viewUp[1], camera.viewUp[2]],
         viewAngle: camera.viewAngle
       },
-      slices: collectSliceFrames()
+      slices: collectSliceFrames(),
+      maximizedCell
     });
     setIraLiveScene(doc);
     scheduleHostScenePublish(doc, prev);
@@ -19789,6 +25935,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         volumeName: source.sd || ct2.modality || "Volume",
         volumeOpacity: sc.volumeOpacity(),
         volumeShift: sc.volumeShift(),
+        volumeShiftRange: Math.max(200, (vmax - vmin) / 2),
         volumePreset: vrPreset,
         cropEnabled: roiEnabled,
         roiVisible,
@@ -19808,7 +25955,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
           viewUp: [camera.viewUp[0], camera.viewUp[1], camera.viewUp[2]],
           viewAngle: camera.viewAngle
         },
-        slices: collectSliceFrames()
+        slices: collectSliceFrames(),
+        maximizedCell
       });
       const { doc, result } = applySceneUpdateOps(base, rest);
       setIraLiveScene(doc);
@@ -19866,7 +26014,15 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
           sc.slice.setMirrorFrame(p, intent.centerRAS, fov[0], fov[1]);
         }
       }
+      if (result.maximizedCell !== void 0) {
+        maximizedCell = result.maximizedCell;
+        viewGrid?.setMax(result.maximizedCell);
+      }
       drawAll();
+      if (ira) {
+        for (const p of PLANES) ira.drawOverlay(p);
+        ira.drawOverlay3d();
+      }
       syncLiveScene();
     } finally {
       applyingRemoteSceneUpdate = false;
@@ -19878,6 +26034,12 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     segCards.setScene(ct2, seg, sc.segments);
     setIraSegCatalog(buildSegCatalog(labmap, sc.ijkToRAS));
     syncLiveScene();
+    if (sc.segDisplayMode() === "colorize") {
+      applyColorizeGroupDefaults();
+      reinstallChrome();
+    } else {
+      chromeApi?.refresh();
+    }
     for (const p of PLANES) {
       const cell = document.querySelector(`[data-cell="${p}"]`);
       const tr2 = cell?.querySelector(".ann.tr");
@@ -19957,7 +26119,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   if (sceneStreamDone) {
     const applyLodUpgrade = (sv) => {
       const oldCenter = [sc.center[0], sc.center[1], sc.center[2]];
-      sc.swapVolumeField(sv.field, sv.dims, sv.ijkToRAS);
+      sc.swapVolumeField(sv.field, sv.dims, sv.ijkToRAS, sv.voxels);
       ct2.vol = sv.voxels;
       ct2.dims = sv.dims;
       ct2.ijkToRAS = sv.ijkToRAS;
@@ -20028,12 +26190,12 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     pendingIdcFocusZ = null;
   }
   const updateReadout = (p) => {
-    const el = document.getElementById("sr-" + p);
-    if (!el) return;
-    const [lo, hi2] = sliceIx.bounds(p);
+    const el3 = document.getElementById("sr-" + p);
+    if (!el3) return;
+    const [lo2, hi2] = sliceIx.bounds(p);
     const sp = sliceIx.spacing(p);
     const mm = offset01ToMm(p, off[p], sc.rasLo, sc.rasHi);
-    el.textContent = `${Math.round((mm - lo) / sp + 0.5)}/${Math.round((hi2 - lo) / sp)} \xB7 ${mm.toFixed(1)} mm`;
+    el3.textContent = `${Math.round((mm - lo2) / sp + 0.5)}/${Math.round((hi2 - lo2) / sp)} \xB7 ${mm.toFixed(1)} mm`;
   };
   {
     const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
@@ -20071,12 +26233,16 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   globalThis.addEventListener("resize", resize);
   const resizeObservers = [];
   for (const n of names) {
-    const ro = new ResizeObserver(() => resize());
-    ro.observe(cv[n]);
-    resizeObservers.push(ro);
+    const ro4 = new ResizeObserver(() => resize());
+    ro4.observe(cv[n]);
+    resizeObservers.push(ro4);
   }
-  const viewGrid = attachViewGrid(document.getElementById("grid"), [...names], resize);
-  attachDoubleClick(cv.threeD, () => viewGrid.toggleMax("threeD"));
+  viewGrid = attachViewGrid(document.getElementById("grid"), [...names], resize);
+  attachDoubleClick(cv.threeD, () => {
+    viewGrid.toggleMax("threeD");
+    maximizedCell = viewGrid.maxCell();
+    syncLiveScene();
+  });
   const setWL = (win, lev) => {
     wl.win = win;
     wl.lev = lev;
@@ -20097,7 +26263,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   presets.addEventListener("change", () => {
     if (presets.value === "auto") setWL(sc.win, sc.lev);
     else {
-      const q2 = CT_WL_PRESETS.find((x2) => x2.name === presets.value);
+      const q2 = CT_WL_PRESETS.find((x) => x.name === presets.value);
       if (q2) setWL(q2.win, q2.lev);
     }
   });
@@ -20136,7 +26302,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     cellOf: (name) => document.querySelector(`[data-cell="${name}"]`),
     slice: () => sc.slice,
     off01: (p) => off[p],
-    setOff01: (p, v2) => off[p] = Math.max(0, Math.min(1, v2)),
+    setOff01: (p, v) => off[p] = Math.max(0, Math.min(1, v)),
     offsetMm: (p) => offset01ToMm(p, off[p], sc.rasLo, sc.rasHi),
     spacing: (p) => sliceIx.spacing(p),
     step: (p, fwd) => off[p] = sliceIx.wheel(p, off[p], fwd),
@@ -20198,9 +26364,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     },
     vanishing3d: {
       canvas: () => cv.threeD,
-      pick: (u, v2) => sc.scene.pick(u, v2),
+      pick: (u, v) => sc.scene.pick(u, v),
       worldToDisplay: (ras, w, h) => camera.worldToDisplay(ras, w, h),
-      displayToWorldAtDepth: (x2, y, depth, w, h) => camera.displayToWorldAtDepth(x2, y, depth, w, h)
+      displayToWorldAtDepth: (x, y, depth, w, h) => camera.displayToWorldAtDepth(x, y, depth, w, h)
     },
     extraTools: [
       {
@@ -20248,11 +26414,11 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     tool: () => ira?.tool(),
     cellOrder: () => [...document.querySelectorAll("#grid .cell")].map((c) => c.dataset.cell),
     // test hooks
-    setRoi: (en2, vis) => {
-      roiEnabled = en2;
+    setRoi: (en4, vis) => {
+      roiEnabled = en4;
       roiVisible = vis;
-      if (en2) roiFirstEnable = false;
-      sc.setRoiEnabled(en2);
+      if (en4) roiFirstEnable = false;
+      sc.setRoiEnabled(en4);
       sc.setRoiVisible(vis);
       draw3d();
     },
@@ -20267,22 +26433,22 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     const hooks = ira.hooks(p);
     let obliqueTilt = null;
     const obliqueHooks = p === "oblique" ? {
-      onLeftGrab: (u, v2, w, h) => {
-        if (hooks.onLeftGrab(u, v2, w, h)) return true;
+      onLeftGrab: (u, v, w, h) => {
+        if (hooks.onLeftGrab(u, v, w, h)) return true;
         if (ira.leftMode() !== "scroll") return false;
-        obliqueTilt = { u, v: v2, w, h };
+        obliqueTilt = { u, v, w, h };
         cv.oblique.style.cursor = "move";
         return true;
       },
-      onLeftDrag: (u, v2, w, h) => {
+      onLeftDrag: (u, v, w, h) => {
         if (obliqueTilt) {
           const dx = (u - obliqueTilt.u) * obliqueTilt.w;
-          const dy = (v2 - obliqueTilt.v) * obliqueTilt.h;
-          obliqueTilt = { u, v: v2, w, h };
+          const dy = (v - obliqueTilt.v) * obliqueTilt.h;
+          obliqueTilt = { u, v, w, h };
           tiltObliqueByPx(dx, dy);
           return;
         }
-        hooks.onLeftDrag?.(u, v2, w, h);
+        hooks.onLeftDrag?.(u, v, w, h);
       },
       onLeftDrop: (movedPx) => {
         if (obliqueTilt) {
@@ -20294,6 +26460,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       },
       onDoubleClick: () => {
         viewGrid.toggleMax(p);
+        maximizedCell = viewGrid.maxCell();
+        syncLiveScene();
         return true;
       }
     } : {
@@ -20302,6 +26470,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       onLeftDrop: hooks.onLeftDrop,
       onDoubleClick: () => {
         viewGrid.toggleMax(p);
+        maximizedCell = viewGrid.maxCell();
+        syncLiveScene();
         return true;
       }
     };
@@ -20373,7 +26543,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   const defaultVrBake = sceneVr;
   const bakeOf = (name) => {
     if (!name) return defaultVrBake;
-    const p = CT_VR_PRESETS.find((x2) => x2.name === name);
+    const p = CT_VR_PRESETS.find((x) => x.name === name);
     if (!p) {
       console.warn(`[ira] unknown VR preset: ${name}`);
       return defaultVrBake;
@@ -20390,9 +26560,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     syncLiveScene();
   };
   const applyVrPreset = (name) => applyVrPresetFn(name);
-  const applyVrShift = (hu) => {
-    vrShift = hu;
-    sc.setVolumeShift(hu);
+  const applyVrShift = (hu3) => {
+    vrShift = hu3;
+    sc.setVolumeShift(hu3);
     draw3d();
     xhair?.redraw();
     syncLiveScene();
@@ -20426,131 +26596,198 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     draw3d();
     return items;
   };
+  let colorizeGroupOp = /* @__PURE__ */ new Map();
+  let resolvedColorizeGroups = [];
+  applyColorizeGroupDefaults = () => {
+    resolvedColorizeGroups = resolveColorizeGroups(sc.segments);
+    colorizeGroupOp = new Map(resolvedColorizeGroups.map((g) => [g.name, g.opacity]));
+    const entries = colorizeDefaultOpacityEntries(sc.segments);
+    if (entries.length) sc.setSegmentOpacities(entries);
+  };
+  const clearColorizeGroupState = () => {
+    colorizeGroupOp.clear();
+    resolvedColorizeGroups = [];
+  };
+  const restoreSurfaceSegmentOpacities = () => {
+    sc.setSegmentOpacities(sc.segments.map((s) => [s.num, 1]));
+  };
+  const setColorizeMode = (on2) => {
+    if (on2) {
+      if (!sc.hasSeg) return;
+      sc.setSegDisplayMode("colorize");
+      applyColorizeGroupDefaults();
+    } else {
+      sc.setSegDisplayMode("surface");
+      restoreSurfaceSegmentOpacities();
+      clearColorizeGroupState();
+    }
+    syncLiveScene();
+    drawAll();
+    xhair?.redraw();
+    reinstallChrome();
+  };
   Object.assign(globalThis.__iraDbg, {
     presets: () => CT_VR_PRESETS.map((p) => p.name),
     setPreset: (name) => applyVrPreset(name),
-    setShift: (hu) => applyVrShift(hu),
+    setShift: (hu3) => applyVrShift(hu3),
     vrState: () => ({ preset: vrPreset, shift: vrShift, shiftRange, dataRange: [vmin, vmax] }),
-    thumbCount: () => renderPresetThumbnails().length
+    thumbCount: () => renderPresetThumbnails().length,
+    colorize: () => sc.segDisplayMode() === "colorize",
+    setColorize: (on2) => setColorizeMode(!!on2)
   });
-  const controls = [
-    {
-      label: "Volume render",
-      getOpacity: () => sc.volumeOpacity(),
-      setOpacity: (o) => {
-        sc.setVolumeOpacity(o);
-        draw3d();
-        xhair?.redraw();
-        syncLiveScene();
+  const buildVizControls = () => {
+    const controls = [
+      {
+        label: "Volume render",
+        getOpacity: () => sc.volumeOpacity(),
+        setOpacity: (o) => {
+          sc.setVolumeOpacity(o);
+          draw3d();
+          xhair?.redraw();
+          syncLiveScene();
+        },
+        color: [0.75, 0.78, 0.85]
       },
-      color: [0.75, 0.78, 0.85]
-    },
-    // Slicer's VR "Shift" — a plain slider directly below the opacity control.
-    {
-      label: "Shift",
-      slider: {
-        min: -shiftRange,
-        max: shiftRange,
-        step: Math.max(1, Math.round(shiftRange / 200)),
-        get: () => vrShift,
-        set: (v2) => applyVrShift(v2),
-        format: (v2) => (v2 > 0 ? "+" : "") + Math.round(v2)
+      // Slicer's VR "Shift" — a plain slider directly below the opacity control.
+      {
+        label: "Shift",
+        slider: {
+          min: -shiftRange,
+          max: shiftRange,
+          step: Math.max(1, Math.round(shiftRange / 200)),
+          get: () => vrShift,
+          set: (v) => applyVrShift(v),
+          format: (v) => (v > 0 ? "+" : "") + Math.round(v)
+        },
+        disabled: () => sc.volumeOpacity() <= 0
       },
-      disabled: () => sc.volumeOpacity() <= 0
-    },
-    // Volume-rendering preset — opens the on-the-fly thumbnail menu (Slicer/OHIF CT presets).
-    {
-      label: "Preset",
-      button: { text: () => presetLabel(), run: () => openVrPresetMenu({ items: renderPresetThumbnails(), current: vrPreset, onPick: applyVrPreset }) }
-    },
-    {
-      label: "Segmentation",
-      getOpacity: () => sc.segOpacity(),
-      setOpacity: (o) => {
-        sc.setSegOpacity(o);
-        sc.slice.setOverlayOpacity(o * SEG_FILL);
-        syncLiveScene();
-        drawAll();
+      // Volume-rendering preset — opens the on-the-fly thumbnail menu (Slicer/OHIF CT presets).
+      {
+        label: "Preset",
+        button: { text: () => presetLabel(), run: () => openVrPresetMenu({ items: renderPresetThumbnails(), current: vrPreset, onPick: applyVrPreset }) }
       },
-      disabled: () => !sc.hasSeg,
-      color: [0.62, 0.9, 1]
-    },
-    {
-      label: "Segment labels",
-      get: () => labelsOn,
-      set: (on2) => {
-        labelsOn = on2;
-        syncLiveScene();
-        draw3d();
+      {
+        label: "Segmentation",
+        getOpacity: () => sc.segOpacity(),
+        setOpacity: (o) => {
+          sc.setSegOpacity(o);
+          sc.slice.setOverlayOpacity(o * SEG_FILL);
+          syncLiveScene();
+          drawAll();
+        },
+        disabled: () => !sc.hasSeg,
+        color: [0.62, 0.9, 1]
       },
-      disabled: () => !sc.hasSeg
-    },
-    // Segmentation overlay: fill (default) vs outline on the MPR planes.
-    {
-      label: "Segmentation outline",
-      get: () => sliceOutline,
-      set: (on2) => {
-        sliceOutline = on2;
-        sc.slice.setOverlayOutline(on2);
-        for (const p of PLANES) drawSlice(p);
-        xhair?.redraw();
+      // Colorize: CT+labelmap fusion + organ-group opacities (off = SDF Surface).
+      {
+        label: "Colorize",
+        get: () => sc.segDisplayMode() === "colorize",
+        set: (on2) => setColorizeMode(on2),
+        disabled: () => !sc.hasSeg
       },
-      disabled: () => !sc.hasSeg
-    },
-    // 3D volume-render crop: enabling it reveals the ROI box the first time (Slicer behaviour).
-    {
-      label: "Crop volume (3D)",
-      get: () => roiEnabled,
-      set: (on2) => {
-        roiEnabled = on2;
-        if (on2 && roiFirstEnable) {
-          roiVisible = true;
-          roiFirstEnable = false;
+      {
+        label: "Segment labels",
+        get: () => labelsOn,
+        set: (on2) => {
+          labelsOn = on2;
+          syncLiveScene();
+          draw3d();
+        },
+        disabled: () => !sc.hasSeg
+      },
+      // Segmentation overlay: fill (default) vs outline on the MPR planes.
+      {
+        label: "Segmentation outline",
+        get: () => sliceOutline,
+        set: (on2) => {
+          sliceOutline = on2;
+          sc.slice.setOverlayOutline(on2);
+          for (const p of PLANES) drawSlice(p);
+          xhair?.redraw();
+        },
+        disabled: () => !sc.hasSeg
+      },
+      // 3D volume-render crop: enabling it reveals the ROI box the first time (Slicer behaviour).
+      {
+        label: "Crop volume (3D)",
+        get: () => roiEnabled,
+        set: (on2) => {
+          roiEnabled = on2;
+          if (on2 && roiFirstEnable) {
+            roiVisible = true;
+            roiFirstEnable = false;
+          }
+          sc.setRoiEnabled(roiEnabled);
+          sc.setRoiVisible(roiVisible);
+          syncLiveScene();
+          draw3d();
+          xhair?.redraw();
+        },
+        disabled: () => sc.volumeOpacity() <= 0
+      },
+      {
+        label: "Show ROI box",
+        get: () => roiVisible,
+        set: (on2) => {
+          roiVisible = on2;
+          sc.setRoiVisible(on2);
+          syncLiveScene();
+          draw3d();
+          xhair?.redraw();
         }
-        sc.setRoiEnabled(roiEnabled);
-        sc.setRoiVisible(roiVisible);
-        syncLiveScene();
-        draw3d();
-        xhair?.redraw();
       },
-      disabled: () => sc.volumeOpacity() <= 0
-    },
-    {
-      label: "Show ROI box",
-      get: () => roiVisible,
-      set: (on2) => {
-        roiVisible = on2;
-        sc.setRoiVisible(on2);
-        syncLiveScene();
-        draw3d();
-        xhair?.redraw();
+      // DICOM corner annotations (IHE IRA) — the "official radiology look".
+      {
+        label: "Corner annotations",
+        get: () => annOn,
+        set: (on2) => {
+          annOn = on2;
+          applyAnn();
+        }
       }
-    },
-    // DICOM corner annotations (IHE IRA) — the "official radiology look".
-    {
-      label: "Corner annotations",
-      get: () => annOn,
-      set: (on2) => {
-        annOn = on2;
-        applyAnn();
+    ];
+    if (sc.segDisplayMode() === "colorize" && resolvedColorizeGroups.length) {
+      for (const g of resolvedColorizeGroups) {
+        const first = sc.segments.find((s) => s.num === g.segments[0]);
+        controls.push({
+          label: g.name,
+          section: "Organ groups",
+          getOpacity: () => colorizeGroupOp.get(g.name) ?? g.opacity,
+          setOpacity: (o) => {
+            colorizeGroupOp.set(g.name, o);
+            sc.setSegmentOpacities(g.segments.map((n) => [n, o]));
+            syncLiveScene();
+            drawAll();
+          },
+          color: first?.color ?? [0.62, 0.9, 1]
+        });
       }
     }
-  ];
-  const chrome = installChrome({
-    help: false,
-    controls,
-    anchor: cv.threeD.parentElement ?? void 0,
-    segments: {
-      list: () => sc.segments.map((s) => ({ num: s.num, name: s.name, color: s.color })),
-      get: (num2) => sc.segmentOpacity(num2),
-      set: (num2, o) => {
-        sc.setSegmentOpacity(num2, o);
-        syncLiveScene();
-        drawAll();
-      },
-      enabled: () => sc.hasSeg
+    return controls;
+  };
+  reinstallChrome = () => {
+    try {
+      chromeApi?.destroy();
+    } catch {
     }
-  });
+    chromeApi = installChrome({
+      help: false,
+      controls: buildVizControls(),
+      anchor: cv.threeD.parentElement ?? void 0,
+      segments: {
+        list: () => sc.segments.map((s) => ({ num: s.num, name: s.name, color: s.color })),
+        get: (num2) => sc.segmentOpacity(num2),
+        set: (num2, o) => {
+          sc.setSegmentOpacity(num2, o);
+          syncLiveScene();
+          drawAll();
+        },
+        enabled: () => sc.hasSeg
+      }
+    });
+  };
+  reinstallChrome();
+  const chrome = chromeApi;
   buildAnnotations();
   applyAnn();
   resize();
@@ -20581,11 +26818,45 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
           } catch {
           }
           resetIraToolbarShell();
-          for (const el of document.querySelectorAll(".ann, .ira-overlay")) {
-            el.remove();
+          for (const el3 of document.querySelectorAll(".ann, .ira-overlay")) {
+            el3.remove();
           }
         }
       };
+    }
+    if (sceneSegDone) {
+      status("loading segmentation\u2026");
+      await sceneSegDone;
+      if (signal?.aborted) {
+        return {
+          dispose: () => {
+            studyDisposed = true;
+            vanishingStore.clear();
+            setIraSegCatalog(EMPTY_SEG_CATALOG);
+            labelsOn = false;
+            try {
+              segCards.clear();
+            } catch {
+            }
+            try {
+              ira?.detachKeys();
+            } catch {
+            }
+            try {
+              chrome?.destroy();
+            } catch {
+            }
+            try {
+              sc.destroy();
+            } catch {
+            }
+            resetIraToolbarShell();
+            for (const el3 of document.querySelectorAll(".ann, .ira-overlay")) {
+              el3.remove();
+            }
+          }
+        };
+      }
     }
     sampleRange();
     if (pendingIdcSeg) {
@@ -20619,7 +26890,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       setIraConferenceHostHandler(null);
       setIraPngFullSizeCaptureHandler(null);
       globalThis.removeEventListener("resize", resize);
-      for (const ro of resizeObservers) ro.disconnect();
+      for (const ro4 of resizeObservers) ro4.disconnect();
       try {
         segCards.clear();
       } catch {
@@ -20641,8 +26912,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       } catch {
       }
       resetIraToolbarShell();
-      for (const el of document.querySelectorAll(".ann, .ira-overlay")) {
-        el.remove();
+      for (const el3 of document.querySelectorAll(".ann, .ira-overlay")) {
+        el3.remove();
       }
       for (const p of PLANES) {
         document.querySelector(`[data-cell="${p}"]`)?.classList.remove("ira-cell-selected");

@@ -2,17 +2,29 @@
  * IRA top-bar Cast topic (session info) + Reporting + Start/Leave conference + Remote AI + ?.
  */
 import {
+  applyCastConferenceHeaderActions,
+  confirmCastConferenceTakeover,
   createCastConferenceDialog,
   createCastConferenceInviteController,
   deleteCastConference,
+  openCastConferenceParticipantsPopup,
+  renderCastConferencePresence,
   shouldShowConferenceInvite,
+  showCastInfoToast,
+  transferCastConferenceLead,
   type CastConferenceView,
 } from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+import {
+  applyHeaderChrome,
+  conferenceStringsFor,
+  resolveStoredLocale,
+} from "../../../../i18n/index.ts";
 import {
   applyIraCastRadioVisual,
   getIraCastSessionInfo,
   getIraLiveScene,
   openIraReportingClient,
+  openIraWorklistClient,
   requestIraStatusFromHostWorklist,
   setIraCastStatusListener,
   setIraConferenceFollowHost,
@@ -33,6 +45,10 @@ import {
 import { unzipFileToFiles } from "../../../logic/readers/unzip-files.ts";
 
 const ID_ACTOR = "ID";
+
+function iraConferenceStrings() {
+  return conferenceStringsFor(resolveStoredLocale());
+}
 
 export type IraLocalStudyPick =
   | { kind: "folder"; name: string; handle: FileSystemDirectoryHandle }
@@ -394,96 +410,71 @@ function installLoadLocalStudyUi(): void {
     });
 }
 
-/** Short status for the tight IRA toolbar (full string stays on title). */
-function iraChipStatus(place: {
-  isSelf?: boolean;
-  isLeading?: boolean;
-  isFollowing?: boolean;
-  statusLabel?: string;
-}): string {
-  if (place.isSelf && place.isLeading) return "Host";
-  if (place.isSelf) return "You";
-  if (place.isFollowing) return "Following";
-  return String(place.statusLabel || "").trim();
-}
-
-/** Conference participant chips (same idea as worklist roster). */
-function renderConferenceChips(view: CastConferenceView | null): void {
-  const host = document.getElementById("iraConferenceChips");
-  if (!host) return;
-  host.replaceChildren();
-  if (!view?.places?.length) {
-    host.hidden = true;
-    return;
-  }
-  host.hidden = false;
-  for (const place of view.places) {
-    const chip = document.createElement("span");
-    chip.className = "ira-conference-chip";
-    if (place.isSelf) chip.classList.add("ira-conference-chip-self");
-    if (place.isLeading) chip.classList.add("ira-conference-chip-leading");
-    if (place.isFollowing) chip.classList.add("ira-conference-chip-following");
-
-    const name = document.createElement("span");
-    name.className = "ira-conference-chip-name";
-    name.textContent = place.label;
-    const tip = [place.label, place.statusLabel, place.placeId]
-      .map((s) => String(s || "").trim())
-      .filter(Boolean)
-      .join(" — ");
-    name.title = tip;
-    chip.title = tip;
-    chip.append(name);
-
-    const short = iraChipStatus(place);
-    if (short) {
-      const status = document.createElement("span");
-      status.className = "ira-conference-chip-status";
-      status.textContent = short;
-      chip.append(status);
-    }
-    host.append(chip);
-  }
-}
-
-function refreshLeaveConferenceButton(view: CastConferenceView | null): void {
-  const btn = document.getElementById(
-    "iraLeaveConferenceBtn"
-  ) as HTMLButtonElement | null;
-  if (!btn) return;
+async function requestIraConferenceTakeover(): Promise<void> {
   const info = getIraCastSessionInfo();
-  const active = Boolean(view?.places?.length);
-  const connected = info.connection === "connected";
-  if (!active) {
-    btn.hidden = true;
-    btn.disabled = true;
-    btn.textContent = "Leave conference";
-    btn.title = "Leave conference";
-    btn.setAttribute("aria-label", "Leave conference");
-    return;
+  const view = info.conference;
+  if (!view || info.connection !== "connected" || !info.topic) return;
+  if (view.selfRole === "leading" || info.conferenceFollowHost) return;
+  const ok = await confirmCastConferenceTakeover({
+    strings: iraConferenceStrings(),
+  });
+  if (!ok) return;
+  try {
+    await transferCastConferenceLead(
+      info.hubEndpoint,
+      view.hostTopic,
+      info.topic,
+      info.userName || undefined,
+    );
+  } catch (err) {
+    console.error("[ira] take over failed", err);
+    showCastInfoToast(
+      err instanceof Error ? err.message : "Failed to take over",
+    );
   }
-  const hostAction = view?.selfRole === "leading";
-  const label = hostAction ? "End conference" : "Leave conference";
-  btn.hidden = false;
-  btn.disabled = !connected;
-  btn.textContent = label;
-  btn.title = label;
-  btn.setAttribute("aria-label", label);
 }
 
-/** Shown only when no conference is in progress. */
-function refreshStartConferenceButton(view: CastConferenceView | null): void {
-  const btn = document.getElementById(
-    "iraStartConferenceBtn"
-  ) as HTMLButtonElement | null;
-  if (!btn) return;
-  const active = Boolean(view);
-  const connected = getIraCastSessionInfo().connection === "connected";
-  btn.hidden = active;
-  btn.disabled = active || !connected;
-  btn.title = connected
-    ? "Start a conference"
-    : "Connect to Cast hub to start a conference";
+/** Conference role badge on the Cast status control (no header chips). */
+function renderConferenceChips(view: CastConferenceView | null): void {
+  const statusControl = document.getElementById("iraCastStatusBtn");
+  const statusLabelEl = document.getElementById("iraCastStatus");
+  if (!(statusControl instanceof HTMLElement)) {
+    return;
+  }
+  const info = getIraCastSessionInfo();
+  renderCastConferencePresence({
+    view,
+    statusControl,
+    statusLabelEl,
+    classPrefix: "ira-conference",
+    selfStatusMode: "short",
+    followHost: Boolean(info.conferenceFollowHost),
+  });
+}
+
+function refreshConferenceHeaderActions(view: CastConferenceView | null): void {
+  const info = getIraCastSessionInfo();
+  applyCastConferenceHeaderActions({
+    view,
+    followHost: Boolean(info.conferenceFollowHost),
+    connected: info.connection === "connected",
+    strings: iraConferenceStrings(),
+    startBtn: document.getElementById(
+      "iraStartConferenceBtn",
+    ) as HTMLButtonElement | null,
+    endBtn: document.getElementById(
+      "iraLeaveConferenceBtn",
+    ) as HTMLButtonElement | null,
+    stopFollowBtn: document.getElementById(
+      "iraStopFollowingBtn",
+    ) as HTMLButtonElement | null,
+    resumeFollowBtn: document.getElementById(
+      "iraResumeFollowingBtn",
+    ) as HTMLButtonElement | null,
+    takeOverBtn: document.getElementById(
+      "iraTakeOverBtn",
+    ) as HTMLButtonElement | null,
+  });
 }
 
 function refreshRadio(): void {
@@ -491,13 +482,15 @@ function refreshRadio(): void {
   if (statusEl) applyIraCastRadioVisual(statusEl);
   const view = getIraCastSessionInfo().conference;
   renderConferenceChips(view);
-  refreshStartConferenceButton(view);
-  refreshLeaveConferenceButton(view);
+  refreshConferenceHeaderActions(view);
 }
 
 /** Install header actions and Cast topic control; call once early in main(). */
 export function installIraHeader(opts: IraHeaderOpts = {}): void {
   onMountLocalSeries = opts.onMountLocalSeries;
+  const locale = resolveStoredLocale();
+  document.documentElement.lang = locale;
+  applyHeaderChrome(document, locale);
   applyTheme(getStoredTheme());
 
   refreshRadio();
@@ -516,12 +509,13 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
 
   if (!castBtn) return;
 
-  let openConferenceDialog = (): void => {
+  let openConferenceDialog = (_anchor?: HTMLElement | null): void => {
     console.warn("[ira] conference dialog not available");
   };
   try {
     const conferenceDialog = createCastConferenceDialog({
       classPrefix: "cast-conference",
+      strings: iraConferenceStrings(),
       getSession: () => {
         const info = getIraCastSessionInfo();
         return {
@@ -535,8 +529,11 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
       onConferenceChange: (view) => {
         setIraConferenceView(view);
       },
+      onFollowChange: (followHost) => {
+        setIraConferenceFollowHost(followHost);
+      },
     });
-    openConferenceDialog = () => conferenceDialog.open();
+    openConferenceDialog = (anchor) => conferenceDialog.open(anchor ?? null);
   } catch (err) {
     console.error("[ira] conference dialog init failed", err);
   }
@@ -544,6 +541,7 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
   try {
     const inviteController = createCastConferenceInviteController({
       classPrefix: "cast-conference-invite",
+      strings: iraConferenceStrings(),
       getSession: () => {
         const info = getIraCastSessionInfo();
         return {
@@ -568,6 +566,12 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
           void requestIraStatusFromHostWorklist(hostTopic);
         }
       },
+      onLeadChange: (info) => {
+        const label =
+          String(info?.leaderLabel || info?.leaderUserName || "").trim() ||
+          "Someone";
+        showCastInfoToast(`${label} took over`);
+      },
     });
     setIraConferenceHubHandler((message) =>
       inviteController.handleHubMessage(message)
@@ -578,6 +582,17 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
 
   castBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
+    const info = getIraCastSessionInfo();
+    const view = info.conference;
+    if (view?.places?.length) {
+      openCastConferenceParticipantsPopup({
+        anchor: castBtn,
+        view,
+        followHost: Boolean(info.conferenceFollowHost),
+        classPrefix: "ira-conference",
+      });
+      return;
+    }
     if (sessionDl) fillSessionDl(sessionDl);
     if (sessionModal) sessionModal.hidden = false;
   });
@@ -599,11 +614,17 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
     ?.addEventListener("click", (ev) => {
       ev.stopPropagation();
       if (getIraCastSessionInfo().conference) return;
-      openConferenceDialog();
+      const btn =
+        ev.currentTarget instanceof HTMLElement ? ev.currentTarget : null;
+      openConferenceDialog(btn);
     });
   document.getElementById("iraMedicalInferenceBtn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
     openMedicalInferenceDialog();
+  });
+  document.getElementById("iraWorklistBtn")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openIraWorklistClient();
   });
   document.getElementById("iraReportingBtn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
@@ -619,7 +640,7 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
       const leaveBtn = document.getElementById(
         "iraLeaveConferenceBtn"
       ) as HTMLButtonElement | null;
-      const hostAction = view.selfRole === "leading";
+      const hostAction = Boolean(view.isConferenceOwner);
       if (leaveBtn) {
         leaveBtn.disabled = true;
         leaveBtn.textContent = hostAction ? "Ending…" : "Leaving…";
@@ -639,6 +660,27 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
           refreshRadio();
         });
     });
+  document
+    .getElementById("iraStopFollowingBtn")
+    ?.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      setIraConferenceFollowHost(false);
+      refreshRadio();
+    });
+  document
+    .getElementById("iraResumeFollowingBtn")
+    ?.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const info = getIraCastSessionInfo();
+      if (!info.conference || info.conferenceFollowHost) return;
+      if (info.conference.selfRole === "leading") return;
+      setIraConferenceFollowHost(true);
+      refreshRadio();
+    });
+  document.getElementById("iraTakeOverBtn")?.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    void requestIraConferenceTakeover();
+  });
   document.querySelectorAll("[data-ira-close-modal]").forEach((el) => {
     el.addEventListener("click", () => {
       if (sessionModal) sessionModal.hidden = true;

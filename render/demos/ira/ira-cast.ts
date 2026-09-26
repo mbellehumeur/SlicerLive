@@ -8,11 +8,13 @@ import CastClient, {
   castReportingPopupFeatures,
   castReportingPopupPlacement,
   CAST_REPORTING_WINDOW_NAME,
+  CAST_WORKLIST_WINDOW_NAME,
   cloneContextArray,
   generateSubscriberName,
   getHubEventLower,
   isRequestEvent,
   isRunningInCloud,
+  mapInferenceServersFromStatusResult,
   matchesCastProduct,
   messageActor,
   messageEventContext,
@@ -157,6 +159,27 @@ const reportingConnectedApps = new Map<
   { productName: string; actor: string }
 >();
 
+/** Worklist peers (CAST-WKLST / WORKLIST_CLIENT). */
+const worklistConnectedApps = new Map<
+  string,
+  { productName: string; actor: string }
+>();
+
+const TITLE_WORKLIST = "Open SlicerWorklist";
+const TITLE_WORKLIST_ONLINE = "SlicerWorklist is connected on this topic";
+const TITLE_WORKLIST_OFFLINE =
+  "Open SlicerWorklist (no worklist responded on this topic)";
+const TITLE_REPORTING = "Open DICOM SR reporting client";
+const TITLE_REPORTING_ONLINE = "DICOM SR is connected on this topic";
+const TITLE_REPORTING_OFFLINE =
+  "Open DICOM SR reporting client (no reporting responded on this topic)";
+const TITLE_REMOTE_AI = "Remote AI — inference servers";
+const TITLE_REMOTE_AI_ONLINE =
+  "Remote AI — inference server(s) online on this topic";
+
+/** True when startup STATUS (or later probe) found at least one online AI product. */
+let inferenceServersOnline = false;
+
 export type IraLiveSceneDoc = {
   url?: string;
   mrson?: string;
@@ -255,6 +278,7 @@ export function getIraCastSessionInfo(): {
   connectionDetail: string;
   hubEndpoint: string;
   conference: CastConferenceView | null;
+  conferenceFollowHost: boolean;
 } {
   return {
     topic,
@@ -265,6 +289,7 @@ export function getIraCastSessionInfo(): {
     connectionDetail,
     hubEndpoint: client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint,
     conference,
+    conferenceFollowHost,
   };
 }
 
@@ -300,9 +325,10 @@ export function setIraConferenceFollowHost(followHost: boolean): void {
   // Host leads; do not treat leading session as "following" for inbound gates.
   if (conference?.selfRole === "leading") {
     conferenceFollowHost = false;
-    return;
+  } else {
+    conferenceFollowHost = conferenceFollowChoice;
   }
-  conferenceFollowHost = conferenceFollowChoice;
+  onStatus?.(connection, connectionDetail);
 }
 
 /** True when this IRA session is the Cast conference host (leading). */
@@ -409,6 +435,19 @@ export function resolveIraReportingClientUrl(
   return "http://localhost:8150/";
 }
 
+/**
+ * Base URL for the Cast worklist SPA.
+ * Hub/cloud SPA mounts use same-origin `/worklist-client/`; local dual-server uses :8140.
+ */
+export function resolveIraWorklistUrl(
+  location: Location = globalThis.location
+): string {
+  if (shouldUseSameOriginHub(location)) {
+    return `${location.origin}/worklist-client/`;
+  }
+  return "http://localhost:8140/";
+}
+
 /** Worklist browser window from STATUS `clientWindow` (startup / presence probe). */
 type WorklistClientWindow = {
   left: number;
@@ -427,9 +466,11 @@ type StatusResponseItem = {
 };
 
 const REPORTING_WINDOW_NAME = CAST_REPORTING_WINDOW_NAME;
+const WORKLIST_WINDOW_NAME = CAST_WORKLIST_WINDOW_NAME;
 
 let worklistClientWindow: WorklistClientWindow | null = null;
 let reportingWindow: Window | null = null;
+let worklistWindow: Window | null = null;
 
 function parseClientWindow(raw: unknown): WorklistClientWindow | null {
   if (!raw || typeof raw !== "object") return null;
@@ -473,9 +514,9 @@ function adoptWorklistClientWindowFromStatusResponses(
   }
 }
 
-/** Same size/placement as worklist — shared via @cast-interface/client. */
+/** Same size/placement as shared helper — relative to this IRA window. */
 function reportingPopupPlacement() {
-  return castReportingPopupPlacement(worklistClientWindow);
+  return castReportingPopupPlacement();
 }
 
 /**
@@ -558,6 +599,69 @@ export function openIraReportingClient(): Window | null {
   }
   reportingWindow = win;
   placeCastPopupWindow(win, place);
+  return win;
+}
+
+/**
+ * Focus an already-open worklist tab via a held Window handle, or opener only when
+ * that opener claimed the Worklist window name.
+ */
+function focusExistingWorklistWindow(): boolean {
+  if (worklistWindow && !worklistWindow.closed) {
+    try {
+      worklistWindow.focus();
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
+  worklistWindow = null;
+
+  const opener = window.opener;
+  if (opener && !opener.closed) {
+    let openerName = "";
+    try {
+      openerName = String(opener.name || "");
+    } catch {
+      openerName = "";
+    }
+    if (openerName === WORKLIST_WINDOW_NAME) {
+      try {
+        opener.focus();
+      } catch {
+        /* ignore */
+      }
+      worklistWindow = opener;
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Open SlicerWorklist with the same topic / id-token as this Image Display. */
+export function openIraWorklistClient(): Window | null {
+  if (connection !== "connected" && !topic) {
+    console.warn(`${LOG} open worklist skipped: not connected`);
+    return null;
+  }
+  if (focusExistingWorklistWindow()) {
+    return worklistWindow;
+  }
+
+  const url = new URL(resolveIraWorklistUrl());
+  const persisted = readPersistedCredentials();
+  const nextTopic = topic || persisted.topic;
+  const nextToken =
+    String(client?.getConnectionState?.()?.token || "").trim() ||
+    persisted.token ||
+    String(client?.getHubConfig?.()?.token || "").trim();
+  if (nextTopic) url.searchParams.set("topic", nextTopic);
+  if (nextToken) url.searchParams.set("id-token", nextToken);
+  const href = url.toString();
+  // Named open focuses an existing Worklist tab (after it claims the name) or opens one.
+  // Prefer a normal tab (no popup features) so focus matches worklist → IRA.
+  const win = globalThis.open(href, WORKLIST_WINDOW_NAME);
+  if (win) worklistWindow = win;
   return win;
 }
 
@@ -951,6 +1055,8 @@ function setConnection(next: IraCastConnection, detail: string): void {
     conferenceFollowHost = false;
     conferenceFollowChoice = null;
     clearReportingConnectedApps();
+    clearWorklistConnectedApps();
+    clearInferenceServersOnline();
     worklistClientWindow = null;
   }
   onStatus?.(next, detail);
@@ -963,7 +1069,55 @@ function setConnection(next: IraCastConnection, detail: string): void {
 function updateIraReportingButton(): void {
   const btn = document.getElementById("iraReportingBtn");
   if (!btn) return;
-  btn.classList.toggle("ira-btn-connected", reportingConnectedApps.size > 0);
+  const online = reportingConnectedApps.size > 0;
+  btn.classList.toggle("ira-btn-connected", online);
+  btn.title = online ? TITLE_REPORTING_ONLINE : TITLE_REPORTING_OFFLINE;
+}
+
+function updateIraWorklistButton(): void {
+  const btn = document.getElementById("iraWorklistBtn");
+  if (!btn) return;
+  const online = worklistConnectedApps.size > 0;
+  btn.classList.toggle("ira-btn-connected", online);
+  btn.title = online ? TITLE_WORKLIST_ONLINE : TITLE_WORKLIST_OFFLINE;
+}
+
+function updateIraRemoteAiButton(): void {
+  const btn = document.getElementById("iraMedicalInferenceBtn");
+  if (!btn) return;
+  btn.classList.toggle("ira-btn-connected", inferenceServersOnline);
+  btn.title = inferenceServersOnline ? TITLE_REMOTE_AI_ONLINE : TITLE_REMOTE_AI;
+}
+
+function setInferenceServersOnline(online: boolean): void {
+  inferenceServersOnline = online;
+  updateIraRemoteAiButton();
+}
+
+function clearInferenceServersOnline(): void {
+  if (!inferenceServersOnline) {
+    updateIraRemoteAiButton();
+    return;
+  }
+  inferenceServersOnline = false;
+  updateIraRemoteAiButton();
+}
+
+/** Apply Remote AI header highlight from a collated STATUS request result. */
+function applyInferenceOnlineFromStatusResult(result: {
+  ok?: boolean;
+  status?: number;
+  data?: unknown;
+}): void {
+  const mapped = mapInferenceServersFromStatusResult(result);
+  const online = mapped.some((r) => r.probe?.online);
+  setInferenceServersOnline(online);
+  if (online) {
+    const titles = mapped
+      .filter((r) => r.probe?.online)
+      .map((r) => r.server.title);
+    console.info(`${LOG} STATUS: AI online —`, titles.join(", "));
+  }
 }
 
 function clearReportingConnectedApps(): void {
@@ -975,10 +1129,26 @@ function clearReportingConnectedApps(): void {
   updateIraReportingButton();
 }
 
+function clearWorklistConnectedApps(): void {
+  if (worklistConnectedApps.size === 0) {
+    updateIraWorklistButton();
+    return;
+  }
+  worklistConnectedApps.clear();
+  updateIraWorklistButton();
+}
+
 function isReportingPresencePeer(productName: string, actor: string): boolean {
   const actorKey = actor.trim().toUpperCase();
   if (actorKey === REPORTING_ACTOR) return true;
   return matchesCastProduct(productName, "reporting");
+}
+
+function isWorklistPresencePeer(productName: string, actor: string): boolean {
+  const actorKey = actor.trim().toUpperCase();
+  if (actorKey === WORKLIST_ACTOR) return true;
+  const product = productName.trim().toUpperCase();
+  return product === "CAST-WKLST" || product.startsWith("CAST-WKLST");
 }
 
 /** Port of worklist `markConnectedApp` / `upsertConnectedApp` for CAST-RPT only. */
@@ -1008,17 +1178,69 @@ function markReportingConnectedApp(message: Record<string, unknown>): void {
   updateIraReportingButton();
 }
 
-/** Port of worklist `removeConnectedApp` for reporting peers. */
+function markWorklistConnectedApp(message: Record<string, unknown>): void {
+  const subscriber = messageSubscriberName(message);
+  if (!subscriber) return;
+  const productName = messageProductName(message);
+  const actor = messageActor(message);
+  if (!isWorklistPresencePeer(productName, actor)) return;
+
+  const productKey = productName.trim().toUpperCase();
+  if (productKey) {
+    for (const [name, existing] of worklistConnectedApps) {
+      if (
+        name !== subscriber &&
+        existing.productName.trim().toUpperCase() === productKey
+      ) {
+        worklistConnectedApps.delete(name);
+      }
+    }
+  }
+
+  worklistConnectedApps.set(subscriber, {
+    productName: productName.trim(),
+    actor: actor.trim(),
+  });
+  updateIraWorklistButton();
+}
+
+function markWorklistConnectedFromStatusResponses(
+  responses: StatusResponseItem[]
+): void {
+  let found = false;
+  for (const item of responses) {
+    const actor = String(item?.actor ?? "").trim();
+    if (!isWorklistPresencePeer("", actor)) continue;
+    const key = actor || WORKLIST_ACTOR;
+    worklistConnectedApps.set(key, {
+      productName: "CAST-WKLST",
+      actor: actor || WORKLIST_ACTOR,
+    });
+    found = true;
+  }
+  if (found) updateIraWorklistButton();
+}
+
+/** Port of worklist `removeConnectedApp` for reporting / worklist peers. */
 function handleSubscriptionRemoved(message: Record<string, unknown>): boolean {
   const event = message?.event as { "hub.event"?: string } | undefined;
   if (!event || getHubEventLower(event) !== "subscription-removed") {
     return false;
   }
   const subscriber = messageSubscriberName(message);
-  if (!subscriber || !reportingConnectedApps.has(subscriber)) return false;
-  reportingConnectedApps.delete(subscriber);
-  updateIraReportingButton();
-  return true;
+  if (!subscriber) return false;
+  let changed = false;
+  if (reportingConnectedApps.has(subscriber)) {
+    reportingConnectedApps.delete(subscriber);
+    updateIraReportingButton();
+    changed = true;
+  }
+  if (worklistConnectedApps.has(subscriber)) {
+    worklistConnectedApps.delete(subscriber);
+    updateIraWorklistButton();
+    changed = true;
+  }
+  return changed;
 }
 
 function stripCastParamsFromUrl(): void {
@@ -1084,6 +1306,7 @@ function handleStatusRequest(message: Record<string, unknown>): boolean {
 
   // Same as worklist: inbound STATUS from reporting lights DICOM SR.
   markReportingConnectedApp(message);
+  markWorklistConnectedApp(message);
 
   const responseData = buildStatusResponseData();
 
@@ -1139,6 +1362,7 @@ async function handlePngFullSizeRequest(
   }
 
   markReportingConnectedApp(message);
+  markWorklistConnectedApp(message);
 
   let payload: IraPngCapturePayload | null = null;
   try {
@@ -1269,7 +1493,7 @@ function handleImagingStudyMessage(message: Record<string, unknown>): boolean {
     return true;
   }
 
-  if (conference && !conferenceFollowHost) {
+  if (conference && !conferenceFollowHost && !isIraConferenceHost()) {
     console.info(`${LOG} ImagingStudy-open ignored (not following host)`);
     return true;
   }
@@ -1377,7 +1601,7 @@ async function requestStatusFromWorklist(opts?: {
       "subscriber.name": subscriber,
       "subscriber.product.name": "SLICERLIVE-IRA",
       "subscriber.actor": ID_ACTOR,
-      "target.actor": WORKLIST_ACTOR,
+      "target.actor": "*",
       event: {
         "hub.event": requestEventFor(statusDataType),
         ...(requestTopic ? { "hub.topic": requestTopic } : {}),
@@ -1385,7 +1609,7 @@ async function requestStatusFromWorklist(opts?: {
       },
     };
 
-    console.warn(`${LOG} STATUS request → ${WORKLIST_ACTOR}`, {
+    console.warn(`${LOG} STATUS request → *`, {
       subscriber,
       topic: requestTopic,
       presenceOnly: skipApplyStudy,
@@ -1403,12 +1627,15 @@ async function requestStatusFromWorklist(opts?: {
       return;
     }
 
+    applyInferenceOnlineFromStatusResult(result);
+
     const envelope =
       result.data && typeof result.data === "object"
         ? (result.data as { responses?: StatusResponseItem[] })
         : {};
     const responses = Array.isArray(envelope.responses) ? envelope.responses : [];
     adoptWorklistClientWindowFromStatusResponses(responses);
+    markWorklistConnectedFromStatusResponses(responses);
 
     // Presence ping done; do not re-open a study we already have from URL/open.
     if (
@@ -1511,15 +1738,10 @@ export function applyIraCastRadioVisual(statusEl: HTMLElement): void {
     "ira-cast-connected",
     "ira-cast-disconnected",
     "ira-cast-error",
-    "ira-cast-pulse",
-    "ira-cast-conference-pulse"
+    "ira-cast-pulse"
   );
   statusEl.classList.add(`ira-cast-${visual.tone}`);
   statusEl.classList.toggle("ira-cast-pulse", visual.pulse);
-  statusEl.classList.toggle(
-    "ira-cast-conference-pulse",
-    visual.conferencePulse
-  );
   const label = topic.trim() || "—";
   statusEl.textContent = label;
   const tip = conference?.title

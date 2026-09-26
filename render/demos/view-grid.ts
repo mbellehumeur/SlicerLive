@@ -7,6 +7,8 @@
 // was hand-rolled inline in real-browser.
 
 export interface ViewGrid {
+  /** Maximize `cell`, or restore the 2×2 grid when `null`. */
+  setMax(cell: string | null): void;
   toggleMax(cell: string): void;
   isMax(cell: string): boolean;
   maxCell(): string | null;
@@ -15,12 +17,21 @@ export interface ViewGrid {
 export function attachViewGrid(grid: HTMLElement, cells: readonly string[], onResize: () => void): ViewGrid {
   let maxed: string | null = null;
   const cellDiv = (cell: string) => grid.querySelector<HTMLElement>(`.cell[data-cell="${cell}"]`)!;
+  const apply = () => {
+    for (const n of cells) cellDiv(n).classList.toggle("max", n === maxed);
+    grid.classList.toggle("has-max", maxed !== null);
+    requestAnimationFrame(onResize);   // let the grid re-layout, then re-size the buffers
+  };
   return {
+    setMax(cell) {
+      const next = cell && cells.includes(cell) ? cell : null;
+      if (maxed === next) return;
+      maxed = next;
+      apply();
+    },
     toggleMax(cell) {
       maxed = maxed === cell ? null : cell;
-      for (const n of cells) cellDiv(n).classList.toggle("max", n === maxed);
-      grid.classList.toggle("has-max", maxed !== null);
-      requestAnimationFrame(onResize);   // let the grid re-layout, then re-size the buffers
+      apply();
     },
     isMax(cell) { return maxed === cell; },
     maxCell: () => maxed,

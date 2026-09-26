@@ -11,6 +11,7 @@ import type { IraLiveSceneDoc } from "./ira-cast.ts";
 export const IRA_VOL_NODE_ID = "vol1";
 export const IRA_SEG_NODE_ID = "seg1";
 export const IRA_CAM_NODE_ID = "cam1";
+export const IRA_LAYOUT_NODE_ID = "layout1";
 
 /** Slicer layoutName ↔ IRA MPR plane (Red/Yellow/Green + Oblique). */
 export type IraSliceLayoutName = "Red" | "Yellow" | "Green" | "Oblique";
@@ -128,6 +129,11 @@ export type IraSceneSyncInput = {
   volumeOpacity?: number;
   /** VR transfer-function shift along the scalar axis (HU offset). */
   volumeShift?: number;
+  /**
+   * Half-span of the VR shift slider (HU), typically max(200, (vmax-vmin)/2).
+   * Published so remote clients (reporting) can match IRA’s slider range.
+   */
+  volumeShiftRange?: number;
   /** Active VR preset id (Slicer CT-* name), or '' / null for default W/L. */
   volumePreset?: string | null;
   /** Volume-render crop enabled. */
@@ -143,6 +149,8 @@ export type IraSceneSyncInput = {
   camera?: IraCameraPose | null;
   /** MPR slice frames (Red/Yellow/Green/Oblique LiveScene view nodes). */
   slices?: IraSliceFrame[] | null;
+  /** Double-click maximized viewport cell id, or null when 2×2 is restored. */
+  maximizedCell?: string | null;
 };
 
 type SegEntry = {
@@ -184,6 +192,16 @@ export function buildIraLiveSceneDoc(input: IraSceneSyncInput): IraLiveSceneDoc 
       : typeof prevVol?.shift === "number" && Number.isFinite(prevVol.shift)
         ? Number(prevVol.shift)
         : 0;
+  const volShiftRange =
+    typeof input.volumeShiftRange === "number" &&
+    Number.isFinite(input.volumeShiftRange) &&
+    input.volumeShiftRange > 0
+      ? Number(input.volumeShiftRange)
+      : typeof prevVol?.shiftRange === "number" &&
+          Number.isFinite(prevVol.shiftRange) &&
+          Number(prevVol.shiftRange) > 0
+        ? Number(prevVol.shiftRange)
+        : 500;
   const volPreset =
     input.volumePreset !== undefined
       ? String(input.volumePreset || "").trim()
@@ -210,6 +228,7 @@ export function buildIraLiveSceneDoc(input: IraSceneSyncInput): IraLiveSceneDoc 
     modality: input.modality || "CT",
     opacity: volOpacity,
     shift: volShift,
+    shiftRange: volShiftRange,
     preset: volPreset,
     cropEnabled,
     roiVisible,
@@ -296,6 +315,25 @@ export function buildIraLiveSceneDoc(input: IraSceneSyncInput): IraLiveSceneDoc 
     }
   }
 
+  const prevLayout = nodes[IRA_LAYOUT_NODE_ID] as Record<string, unknown> | undefined;
+  const maximizedCell =
+    input.maximizedCell !== undefined
+      ? input.maximizedCell
+        ? String(input.maximizedCell).trim() || null
+        : null
+      : prevLayout?.maximizedCell != null &&
+          String(prevLayout.maximizedCell).trim()
+        ? String(prevLayout.maximizedCell).trim()
+        : null;
+  nodes[IRA_LAYOUT_NODE_ID] = {
+    ...(prevLayout || {}),
+    type: "layout",
+    id: IRA_LAYOUT_NODE_ID,
+    name: String(prevLayout?.name || "Layout"),
+    arrangementName: String(prevLayout?.arrangementName || "fourUp"),
+    maximizedCell,
+  } as MrsonNode;
+
   return {
     ...(input.base || {}),
     blobBase: String(input.base?.blobBase || "").trim() || "ira://local/",
@@ -324,6 +362,11 @@ export type SceneUpdateApplyResult = {
   camera?: IraCameraPose;
   /** MPR slice frames when view/slice nodes were put / patched. */
   slices: IraSliceApplyIntent[];
+  /**
+   * Maximized viewport cell when a layout node was applied.
+   * `null` = restore multi-up; `undefined` = layout not in this update.
+   */
+  maximizedCell?: string | null;
   /** True when the scene document nodes were mutated. */
   changed: boolean;
 };
@@ -437,6 +480,7 @@ export function applySceneUpdateOps(
   let roiVisible: boolean | undefined;
   let camera: IraCameraPose | undefined;
   const slicesByLayout = new Map<IraSliceLayoutName, IraSliceApplyIntent>();
+  let maximizedCell: string | null | undefined;
 
   for (const op of ops) {
     if (!op || typeof op !== "object" || !op.op || !op.id) continue;
@@ -445,6 +489,13 @@ export function applySceneUpdateOps(
     if (res.changed) changed = true;
     const after = map.get(op.id);
     if (!after) continue;
+
+    if (after.type === "layout") {
+      const raw = (after as { maximizedCell?: unknown }).maximizedCell;
+      maximizedCell =
+        raw == null || raw === "" ? null : String(raw).trim() || null;
+      continue;
+    }
 
     if (after.type === "camera") {
       const pose = cameraPoseFromNode(after as Record<string, unknown>);
@@ -551,6 +602,7 @@ export function applySceneUpdateOps(
       roiVisible,
       camera,
       slices: [...slicesByLayout.values()],
+      maximizedCell,
       changed,
     },
   };
@@ -740,6 +792,17 @@ export function buildIraDisplaySceneUpdateOps(
         });
       }
     }
+    if (full || displayFieldChanged(prevVol, vol, "shiftRange")) {
+      const r = Number(vol.shiftRange);
+      if (Number.isFinite(r) && r > 0) {
+        ops.push({
+          op: "patch",
+          id: volId,
+          path: "#/shiftRange",
+          value: r,
+        });
+      }
+    }
     if (full || displayFieldChanged(prevVol, vol, "preset")) {
       ops.push({
         op: "patch",
@@ -811,6 +874,19 @@ export function buildIraDisplaySceneUpdateOps(
         op: "put",
         id,
         node: structuredClone(slice) as MrsonNode,
+      });
+    }
+  }
+
+  const layoutId = IRA_LAYOUT_NODE_ID;
+  const layout = doc.nodes[layoutId] as Record<string, unknown> | undefined;
+  const prevLayout = prev?.nodes?.[layoutId] as Record<string, unknown> | undefined;
+  if (layout && typeof layout === "object" && layout.type === "layout") {
+    if (full || displayFieldChanged(prevLayout, layout, "maximizedCell")) {
+      ops.push({
+        op: "put",
+        id: layoutId,
+        node: structuredClone(layout) as MrsonNode,
       });
     }
   }

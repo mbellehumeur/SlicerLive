@@ -1,0 +1,1064 @@
+<!doctype html>
+<html lang="en" data-theme="slicerlive">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SlicerLive - IRA</title>
+<style>
+  :root, [data-theme='slicerlive'] {
+    color-scheme: dark;
+    --ira-bg: #05060a;
+    --ira-bar: #0b0e16;
+    --ira-border: #1b2740;
+    --ira-fg: #cdd7e6;
+    --ira-fg-muted: #9fb3d0;
+    --ira-surface: #121722;
+    --ira-surface-2: #1b2740;
+    --ira-accent: #4f95d8;
+  }
+  [data-theme='ohif'] {
+    --ira-bg: #090c14;
+    --ira-bar: #151a1f;
+    --ira-border: #2c3640;
+    --ira-fg: #d3d8de;
+    --ira-fg-muted: #91a0ad;
+    --ira-surface: #1c232b;
+    --ira-surface-2: #27313b;
+    --ira-accent: #348cfd;
+  }
+  html, body { height: 100%; margin: 0; background: var(--ira-bg); font: 13px -apple-system, system-ui, sans-serif; color: var(--ira-fg); }
+  #viewer { position: relative; display: flex; flex-direction: column; width: 100vw; height: 100vh; }
+  #ira-bar { display: flex; align-items: center; gap: 14px; padding: 7px 14px; background: var(--ira-bar); border-bottom: 1px solid var(--ira-border); }
+  #ira-bar .ira-bar-start { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  #ira-bar .brand { font-weight: 700; color: #fff; white-space: nowrap; }
+  #ira-bar #info { color: var(--ira-fg-muted); font-size: 12px; }
+  .ira-bar-spacer { flex: 1; min-width: 8px; }
+  .ira-bar-actions { display: flex; align-items: center; gap: 6px; }
+  .ira-menu-wrap { position: relative; }
+  .ira-icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; padding: 0; cursor: pointer;
+    border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); color: var(--ira-fg);
+  }
+  .ira-icon-btn:hover { background: var(--ira-surface-2); }
+  .ira-icon-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .ira-icon-btn:disabled:hover { background: var(--ira-surface); }
+  .ira-text-btn {
+    width: auto;
+    min-width: 34px;
+    padding: 0 10px;
+    font: 600 12px/1 -apple-system, system-ui, sans-serif;
+    white-space: nowrap;
+  }
+  /* Match worklist .wl-viewer-btn sizing in the header only */
+  #ira-bar .ira-text-btn {
+    height: auto;
+    padding: 4px 10px;
+  }
+  /* Same idea as worklist .wl-viewer-btn-connected */
+  .ira-icon-btn.ira-btn-connected {
+    border-color: var(--ira-accent);
+    background: color-mix(in srgb, var(--ira-accent) 18%, var(--ira-surface));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ira-accent) 35%, transparent);
+  }
+  .ira-icon-btn.ira-btn-connected:hover {
+    background: color-mix(in srgb, var(--ira-accent) 28%, var(--ira-surface-2));
+  }
+  .ira-viewer-label {
+    margin: 0 2px 0 4px;
+    color: var(--ira-fg-muted);
+    font: 600 11px/1 -apple-system, system-ui, sans-serif;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .ira-viewer-label-first {
+    margin-left: 0;
+  }
+  /* Separate app launchers (Worklist / DICOM SR) from local tools (Remote AI …). */
+  #iraMedicalInferenceBtn {
+    margin-left: 10px;
+  }
+  .ira-conference-chips {
+    display: none !important;
+  }
+  .ira-conference-chips[hidden] { display: none !important; }
+  .ira-conference-participants-popup {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--ira-border);
+    border-radius: 8px;
+    background: var(--ira-surface);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+    color: var(--ira-fg);
+    font: 12px/1.35 -apple-system, system-ui, sans-serif;
+  }
+  .ira-conference-participants-popup-title {
+    font: 650 12px/1.2 -apple-system, system-ui, sans-serif;
+    color: var(--ira-fg-muted);
+    letter-spacing: 0.02em;
+  }
+  .ira-conference-participants-popup-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: min(50vh, 16rem);
+    overflow: auto;
+  }
+  .ira-conference-participants-popup .ira-conference-chip {
+    max-width: none;
+    width: 100%;
+    box-sizing: border-box;
+    justify-content: space-between;
+  }
+  /* Toolbar chips — used inside participants popover */
+  .ira-conference-chip {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    max-width: 12rem;
+    height: 28px;
+    padding: 0 9px;
+    border: 1px solid var(--ira-border);
+    border-radius: 5px;
+    background: var(--ira-surface);
+    font-size: 11px;
+    line-height: 1;
+  }
+  .ira-conference-chip-self {
+    border-color: color-mix(in srgb, var(--ira-accent) 70%, var(--ira-border));
+    background: color-mix(in srgb, var(--ira-accent) 14%, var(--ira-surface));
+  }
+  .ira-conference-user {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    border-color: color-mix(in srgb, var(--ira-accent) 70%, var(--ira-border));
+    background: color-mix(in srgb, var(--ira-accent) 14%, var(--ira-surface));
+  }
+  .ira-conference-user-leading::before {
+    content: "";
+    flex: 0 0 6px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ira-accent);
+  }
+  .ira-conference-chip-leading::before,
+  .ira-conference-chip-following::before {
+    content: "";
+    flex: 0 0 6px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ira-accent);
+  }
+  .ira-conference-chip-following::before {
+    background: #4ade80;
+  }
+  .ira-conference-chip-following {
+    border-color: color-mix(in srgb, #4ade80 45%, var(--ira-border));
+    background: color-mix(in srgb, #4ade80 10%, var(--ira-surface));
+  }
+  .ira-conference-chip-skipping::before {
+    background: var(--ira-fg-muted);
+  }
+  .ira-conference-chip-skipping {
+    border-color: color-mix(in srgb, var(--ira-fg-muted) 45%, var(--ira-border));
+    background: color-mix(in srgb, var(--ira-fg-muted) 8%, var(--ira-surface));
+  }
+  .ira-conference-chip-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-weight: 650;
+    color: var(--ira-fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ira-conference-chip-status {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--ira-fg-muted);
+    white-space: nowrap;
+  }
+  .ira-conference-chip-status[hidden] { display: none !important; }
+  .ira-leave-conference-btn {
+    height: 28px;
+    min-height: 28px;
+    padding: 0 10px;
+    font: 600 11px/1 -apple-system, system-ui, sans-serif;
+    border-radius: 5px;
+    border-color: color-mix(in srgb, #f87171 45%, var(--ira-border));
+    color: #fca5a5;
+    background: color-mix(in srgb, #f87171 10%, var(--ira-surface));
+  }
+  .ira-leave-conference-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, #f87171 18%, var(--ira-surface-2));
+  }
+  .ira-leave-conference-btn[hidden] { display: none !important; }
+  .ira-stop-following-btn[hidden] { display: none !important; }
+  .ira-resume-following-btn[hidden] { display: none !important; }
+  .ira-take-over-btn[hidden] { display: none !important; }
+  .ira-start-conference-btn[hidden] { display: none !important; }
+  .ira-modal.ira-modal-wide { width: min(720px, 100%); max-height: min(90vh, 640px); overflow: auto; }
+  /* Floating Remote AI window — non-modal so the viewer stays interactive. */
+  #iraInferenceModal.ira-floating-window {
+    position: fixed;
+    inset: auto;
+    top: 56px;
+    right: 88px;
+    left: auto;
+    bottom: auto;
+    z-index: 50;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    display: block;
+    align-items: unset;
+    justify-content: unset;
+    pointer-events: none;
+  }
+  #iraInferenceModal.ira-floating-window[hidden] { display: none !important; }
+  #iraInferenceModal .ira-modal-inference {
+    pointer-events: auto;
+    width: min(686px, calc(100vw - 24px));
+    max-height: min(95vh, 936px);
+    overflow: auto;
+    resize: both;
+  }
+  #iraInferenceModal .ira-modal-inference.is-minimized {
+    width: min(320px, calc(100vw - 24px));
+    max-height: none;
+    height: auto !important;
+    overflow: hidden;
+    resize: none;
+  }
+  #iraInferenceModal .ira-modal-inference.is-minimized .ira-inference-body {
+    display: none;
+  }
+  #iraInferenceModal .ira-modal-header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+  #iraInferenceModal .ira-modal-minimize {
+    border: 0;
+    background: transparent;
+    color: var(--ira-fg-muted);
+    font-size: 16px;
+    line-height: 1;
+    width: 1.75rem;
+    height: 1.75rem;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  #iraInferenceModal .ira-modal-minimize:hover {
+    color: var(--ira-fg);
+    background: var(--ira-surface-2);
+  }
+  #iraInferenceModal .ira-floating-drag-handle {
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+  }
+  #iraInferenceModal .ira-floating-drag-handle.ira-dragging {
+    cursor: grabbing;
+  }
+  .ira-scene-view-pre {
+    margin: 0;
+    max-height: min(60vh, 28rem);
+    overflow: auto;
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--ira-border);
+    background: var(--ira-surface);
+    color: var(--ira-fg);
+    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .ira-inference-body { padding-top: 10px; }
+  .ira-inference-layout {
+    display: grid;
+    grid-template-columns: minmax(12rem, 0.7fr) minmax(28rem, 1.8fr);
+    gap: 12px;
+    min-height: 23rem;
+  }
+  .ira-inference-toolbar { margin-bottom: 8px; }
+  .ira-inference-list {
+    display: flex; flex-direction: column; gap: 6px;
+    max-height: min(65vh, 28rem); overflow: auto;
+  }
+  .ira-inference-row {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); color: var(--ira-fg);
+    padding: 8px 10px;
+  }
+  .ira-inference-row:hover { background: var(--ira-surface-2); }
+  .ira-inference-row.is-selected {
+    border-color: var(--ira-accent);
+    background: color-mix(in srgb, var(--ira-accent) 14%, var(--ira-surface));
+  }
+  .ira-inference-row-title { font-weight: 700; font-size: 13px; }
+  .ira-inference-desc {
+    margin-top: 2px; font-size: 11px; color: var(--ira-fg-muted); line-height: 1.35;
+  }
+  .ira-inference-row-meta {
+    display: flex; gap: 8px; align-items: center; margin-top: 4px; font-size: 11px;
+  }
+  .ira-inference-avail { color: var(--ira-fg-muted); }
+  .ira-inference-avail.is-online { color: #4ade80; }
+  .ira-inference-avail.is-offline { color: #f87171; }
+  .ira-inference-location { color: var(--ira-fg-muted); }
+  .ira-inference-detail, .ira-inference-log {
+    margin: 0; padding: 10px 12px; border-radius: 6px;
+    border: 1px solid var(--ira-border); background: var(--ira-surface);
+    color: var(--ira-fg); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .ira-inference-detail {
+    min-height: 6rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .ira-inference-log {
+    margin-top: 10px;
+    max-height: 16rem;
+    overflow: auto;
+    color: var(--ira-fg-muted);
+    white-space: pre;
+    word-break: normal;
+    overflow-wrap: normal;
+  }
+  .ira-inference-detail-card {
+    font: 13px/1.45 -apple-system, system-ui, sans-serif;
+    white-space: normal;
+  }
+  .cast-inference-info-card { display: flex; flex-direction: column; gap: 8px; }
+  .cast-inference-info-heading {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .cast-inference-info-icon {
+    width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0;
+  }
+  .cast-inference-info-title { font-weight: 700; font-size: 14px; color: var(--ira-fg); }
+  .cast-inference-info-summary { margin: 0; color: var(--ira-fg-muted); }
+  .cast-inference-info-links {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  .cast-inference-info-link, .cast-inference-info-coffee {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 8px; border-radius: 5px;
+    border: 1px solid var(--ira-border); background: var(--ira-surface-2);
+    color: var(--ira-accent); text-decoration: none; font-size: 12px; font-weight: 600;
+  }
+  .cast-inference-info-github-icon {
+    flex: 0 0 auto;
+    display: block;
+  }
+  .cast-inference-info-coffee-icon {
+    flex: 0 0 auto;
+    display: block;
+    width: 12px;
+    height: 16px;
+    object-fit: contain;
+  }
+  .ira-inference-run-btn {
+    margin-top: 6px;
+    min-height: 36px;
+    padding: 0 18px;
+    background: var(--ira-accent);
+    border-color: var(--ira-accent);
+    color: #0b1220;
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .ira-inference-run-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--ira-accent) 88%, #fff);
+    border-color: color-mix(in srgb, var(--ira-accent) 88%, #fff);
+  }
+  .ira-inference-run-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .ira-inference-run-btn:disabled:hover {
+    background: var(--ira-accent);
+    border-color: var(--ira-accent);
+  }
+  .ira-inference-op-notes {
+    margin: 10px 0 0; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid var(--ira-border); background: var(--ira-surface);
+    color: var(--ira-fg-muted); font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+  }
+  .ira-inference-note { margin: 8px 0; font-size: 12px; color: var(--ira-fg-muted); min-height: 0; }
+  .ira-inference-note:empty { display: none; }
+  .ira-totalseg-options {
+    margin: 8px 0;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .ira-totalseg-options[hidden] { display: none !important; }
+  .ira-totalseg-row {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    font-size: 12px; color: var(--ira-fg);
+  }
+  .ira-totalseg-row label { font-weight: 600; min-width: 4.5rem; }
+  .ira-totalseg-row select,
+  .ira-totalseg-row input[type="search"] {
+    flex: 1; min-width: 12rem; max-width: 100%;
+    padding: 4px 8px; border-radius: 5px;
+    border: 1px solid var(--ira-border); background: var(--ira-surface);
+    color: var(--ira-fg); font-size: 12px;
+  }
+  .ira-totalseg-modality {
+    font-size: 12px; color: var(--ira-fg-muted);
+  }
+  .ira-totalseg-modality strong { color: var(--ira-fg); font-weight: 700; }
+  .ira-totalseg-link {
+    font-size: 12px; color: var(--ira-accent); text-decoration: none;
+  }
+  .ira-totalseg-link:hover { text-decoration: underline; }
+  .ira-totalseg-hits {
+    margin: 0; padding: 0; list-style: none;
+    max-height: 8.5rem; overflow: auto;
+    border: 1px solid var(--ira-border); border-radius: 5px;
+    background: var(--ira-surface);
+  }
+  .ira-totalseg-hits[hidden] { display: none !important; }
+  .ira-totalseg-hit {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    border: 0; border-bottom: 1px solid var(--ira-border);
+    background: transparent; color: var(--ira-fg);
+    padding: 6px 8px; font: 12px/1.35 -apple-system, system-ui, sans-serif;
+  }
+  .ira-totalseg-hit:last-child { border-bottom: 0; }
+  .ira-totalseg-hit:hover { background: var(--ira-surface-2); }
+  .ira-totalseg-hit-class { font-weight: 600; }
+  .ira-totalseg-hit-task { color: var(--ira-fg-muted); font-size: 11px; }
+  .ira-mhub-options {
+    margin: 8px 0;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .ira-mhub-options[hidden] { display: none !important; }
+  .ira-mhub-filters {
+    display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+    font-size: 12px; color: var(--ira-fg-muted);
+  }
+  .ira-mhub-filters strong { color: var(--ira-fg); font-weight: 700; }
+  .ira-mhub-filter {
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .ira-mhub-filter label { font-weight: 600; color: var(--ira-fg); }
+  .ira-mhub-filter select {
+    min-width: 9rem; max-width: 100%;
+    padding: 4px 8px; border-radius: 5px;
+    border: 1px solid var(--ira-border); background: var(--ira-surface);
+    color: var(--ira-fg); font-size: 12px;
+  }
+  .ira-mhub-model-list {
+    margin: 0; padding: 0; list-style: none;
+    max-height: 14rem; overflow: auto;
+    border: 1px solid var(--ira-border); border-radius: 5px;
+    background: var(--ira-surface);
+  }
+  .ira-mhub-model {
+    display: flex; gap: 8px; align-items: flex-start;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--ira-border);
+    font: 12px/1.35 -apple-system, system-ui, sans-serif;
+    color: var(--ira-fg);
+  }
+  .ira-mhub-model:last-child { border-bottom: 0; }
+  .ira-mhub-model input[type="checkbox"] {
+    margin-top: 2px; flex-shrink: 0;
+  }
+  .ira-mhub-model-body { min-width: 0; flex: 1; }
+  .ira-mhub-model-label {
+    display: block; font-weight: 600; cursor: pointer;
+  }
+  .ira-mhub-model-desc {
+    display: block; margin-top: 2px;
+    color: var(--ira-fg-muted); font-size: 11px;
+  }
+  .ira-mhub-model-links {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin-top: 6px;
+  }
+  .ira-mhub-model-link,
+  .ira-mhub-model-cite {
+    font-size: 11px; font-weight: 600;
+    color: var(--ira-accent); text-decoration: none;
+  }
+  .ira-mhub-model-link:hover { text-decoration: underline; }
+  .ira-mhub-model-cite {
+    cursor: help;
+    border-bottom: 1px dotted color-mix(in srgb, var(--ira-accent) 55%, transparent);
+  }
+  .ira-mhub-empty {
+    margin: 0; padding: 10px;
+    font-size: 12px; color: var(--ira-fg-muted);
+  }
+  .ira-mhub-find-row {
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .ira-mhub-find-row label {
+    font-size: 12px; font-weight: 600; color: var(--ira-fg);
+  }
+  .ira-mhub-find-row input {
+    width: 100%; box-sizing: border-box;
+    padding: 6px 8px; border-radius: 5px;
+    border: 1px solid var(--ira-border); background: var(--ira-surface);
+    color: var(--ira-fg); font-size: 12px;
+  }
+  .ira-mhub-context-note {
+    margin: 0; font-size: 11px; color: var(--ira-fg-muted); line-height: 1.4;
+  }
+  .ira-load-local-body { display: flex; flex-direction: column; gap: 12px; }
+  .ira-load-local-check {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; color: var(--ira-fg); cursor: pointer;
+  }
+  .ira-load-local-hint { margin: 0; font-size: 12px; color: var(--ira-fg-muted); }
+  .ira-load-local-pickers { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ira-load-local-selection {
+    margin: 0; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid var(--ira-border); background: var(--ira-surface);
+    color: var(--ira-fg); font-size: 12px; word-break: break-all;
+  }
+  .ira-load-local-actions {
+    display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px;
+  }
+  .ira-load-local-series {
+    display: flex; flex-direction: column; gap: 6px;
+    max-height: min(40vh, 16rem); overflow: auto;
+  }
+  .ira-load-local-series[hidden] { display: none !important; }
+  .ira-load-local-series-btn {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); color: var(--ira-fg);
+    padding: 8px 10px; font: 600 12px/1.35 -apple-system, system-ui, sans-serif;
+  }
+  .ira-load-local-series-btn:hover:not(:disabled) { background: var(--ira-surface-2); }
+  .ira-load-local-series-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .ira-load-local-series-meta {
+    display: block; margin-top: 2px; font-weight: 500; font-size: 11px;
+    color: var(--ira-fg-muted);
+  }
+  @media (max-width: 900px) {
+    .ira-inference-layout { grid-template-columns: 1fr; }
+    #iraInferenceModal .ira-modal-inference {
+      width: min(100vw - 16px, 686px);
+    }
+  }
+  .ira-menu {
+    position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; padding: 4px; z-index: 40;
+    background: var(--ira-surface); border: 1px solid var(--ira-border); border-radius: 6px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.45);
+  }
+  .ira-menu[hidden] { display: none !important; }
+  .ira-menu-item {
+    display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 4px;
+    background: transparent; color: var(--ira-fg); font: inherit; cursor: pointer;
+  }
+  .ira-menu-item:hover { background: var(--ira-surface-2); }
+  .ira-menu-item:disabled {
+    opacity: .4; cursor: default;
+  }
+  .ira-menu-item:disabled:hover { background: transparent; }
+  .ira-menu-item[aria-checked='true'] { background: var(--ira-accent); color: #0b1220; }
+  .ira-menu-sep { height: 1px; margin: 4px 6px; background: var(--ira-border); }
+  .ira-cast-status {
+    display: inline-flex; align-items: center; justify-content: center;
+    max-width: 14rem; overflow: hidden; text-overflow: ellipsis;
+    font: inherit;
+    color: inherit;
+  }
+  .ira-cast-connecting { color: #facc15; }
+  .ira-cast-error, .ira-cast-disconnected { color: #f87171; }
+  .ira-cast-pulse { animation: ira-pulse 1.5s ease-in-out infinite; }
+  @keyframes ira-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  .ira-modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center;
+    justify-content: center; z-index: 50; padding: 20px;
+  }
+  #iraLoadLocalModal.ira-modal-backdrop { z-index: 70; }
+  .ira-modal-backdrop[hidden] { display: none !important; }
+  .ira-modal {
+    width: min(440px, 100%); background: var(--ira-bar); border: 1px solid var(--ira-border);
+    border-radius: 6px; box-shadow: 0 8px 28px rgba(0,0,0,.45);
+  }
+  .ira-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid var(--ira-border);
+  }
+  .ira-modal-header h2 { margin: 0; font-size: 14px; }
+  .ira-modal-body { padding: 14px; color: var(--ira-fg-muted); line-height: 1.45; }
+  .ira-modal-close { border: 0; background: transparent; color: var(--ira-fg-muted); font-size: 18px; cursor: pointer; }
+  .ira-kv { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; margin: 0; }
+  .ira-kv dt { color: var(--ira-fg-muted); }
+  /* Cast conference dialog (createCastConferenceDialog) */
+  .cast-conference-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex;
+    align-items: center; justify-content: center; z-index: 60; padding: 20px;
+  }
+  .cast-conference-overlay.cast-conference-overlay-anchored {
+    align-items: flex-start; justify-content: flex-start; padding: 0;
+  }
+  .cast-conference-overlay[hidden] { display: none !important; }
+  .cast-conference-dialog {
+    width: min(21rem, 100%); max-height: min(90vh, 36rem); overflow-y: auto;
+    background: var(--ira-bar); border: 1px solid var(--ira-border); border-radius: 6px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.45); color: var(--ira-fg); outline: none;
+  }
+  .cast-conference-overlay-anchored .cast-conference-dialog {
+    position: absolute; margin: 0;
+  }
+  .cast-conference-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid var(--ira-border);
+  }
+  .cast-conference-title { margin: 0; font-size: 14px; }
+  .cast-conference-close {
+    border: 0; background: transparent; color: var(--ira-fg-muted);
+    font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
+  }
+  .cast-conference-close:hover { color: var(--ira-fg); }
+  .cast-conference-body { padding: 14px; }
+  .cast-conference-section {
+    margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--ira-border);
+  }
+  .cast-conference-section:last-child {
+    margin-bottom: 0; padding-bottom: 0; border-bottom: 0;
+  }
+  .cast-conference-section-title {
+    margin: 0 0 8px; font: 650 12px/1.2 -apple-system, system-ui, sans-serif;
+    color: var(--ira-fg-muted); letter-spacing: 0.02em; text-transform: uppercase;
+  }
+  .cast-conference-field { margin-bottom: 10px; }
+  .cast-conference-label { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; }
+  .cast-conference-select, .cast-conference-input {
+    width: 100%; box-sizing: border-box; padding: 6px 8px;
+    border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); color: var(--ira-fg); font: inherit;
+  }
+  .cast-conference-topics {
+    max-height: 8rem; overflow-y: auto; border: 1px solid var(--ira-border);
+    border-radius: 6px; padding: 6px 8px; background: var(--ira-surface);
+  }
+  .cast-conference-topic-row {
+    display: flex; align-items: center; gap: 8px; padding: 4px 0;
+    font-size: 12px; cursor: pointer;
+  }
+  .cast-conference-muted { margin: 0; font-size: 12px; color: var(--ira-fg-muted); }
+  .cast-conference-status { margin: 0 0 10px; font-size: 12px; line-height: 1.4; }
+  .cast-conference-status-success { color: #4ade80; }
+  .cast-conference-status-error { color: #f87171; }
+  .cast-conference-info { margin: 6px 0 10px; font-size: 12px; line-height: 1.45; color: var(--ira-fg-muted); }
+  .cast-conference-places-label { margin: 8px 0 6px; font-size: 12px; font-weight: 600; color: var(--ira-fg); }
+  .cast-conference-places { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .cast-conference-place {
+    display: inline-flex; flex-direction: column; gap: 2px; max-width: 100%;
+    padding: 5px 8px; border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); font-size: 12px; line-height: 1.3;
+  }
+  .cast-conference-place-self { border-color: var(--ira-accent); }
+  .cast-conference-place-leading { box-shadow: inset 3px 0 0 var(--ira-accent); }
+  .cast-conference-place-following {
+    border-color: #4ade80; box-shadow: inset 3px 0 0 #4ade80;
+  }
+  .cast-conference-place-name { font-weight: 600; color: var(--ira-fg); }
+  .cast-conference-place-status { font-size: 11px; color: var(--ira-fg-muted); }
+  .cast-conference-primary, .cast-conference-secondary {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 32px; padding: 0 12px; border: 1px solid var(--ira-border);
+    border-radius: 6px; background: var(--ira-surface); color: var(--ira-fg);
+    font: inherit; cursor: pointer;
+  }
+  .cast-conference-primary {
+    width: 100%; margin-top: 4px; background: var(--ira-accent);
+    border-color: var(--ira-accent); color: #0b1220;
+  }
+  .cast-conference-primary:disabled, .cast-conference-secondary:disabled {
+    opacity: .55; cursor: not-allowed;
+  }
+  .cast-conference-actions {
+    display: flex; justify-content: flex-end; gap: 8px; padding: 0 14px 14px;
+  }
+  .cast-conference-invite-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex;
+    align-items: center; justify-content: center; z-index: 61; padding: 20px;
+  }
+  .cast-conference-invite-overlay[hidden] { display: none !important; }
+  .cast-conference-invite-dialog {
+    width: min(24rem, 100%); max-height: min(90vh, 28rem); overflow-y: auto;
+    background: var(--ira-bar); border: 1px solid var(--ira-border); border-radius: 6px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.45); color: var(--ira-fg); outline: none;
+  }
+  .cast-conference-invite-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid var(--ira-border);
+  }
+  .cast-conference-invite-title { margin: 0; font-size: 14px; }
+  .cast-conference-invite-close {
+    border: 0; background: transparent; color: var(--ira-fg-muted);
+    font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
+  }
+  .cast-conference-invite-body { padding: 14px; }
+  .cast-conference-invite-lead {
+    margin: 0 0 12px; font-size: 13px; line-height: 1.45; color: var(--ira-fg);
+  }
+  .cast-conference-invite-status { margin: 0 0 10px; font-size: 12px; line-height: 1.4; }
+  .cast-conference-invite-status-error { color: #f87171; }
+  .cast-conference-invite-actions { display: flex; flex-direction: column; gap: 8px; }
+  .cast-conference-invite-primary, .cast-conference-invite-secondary {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 34px; padding: 0 12px; border: 1px solid var(--ira-border);
+    border-radius: 6px; background: var(--ira-surface); color: var(--ira-fg);
+    font: inherit; cursor: pointer;
+  }
+  .cast-conference-invite-primary {
+    background: var(--ira-accent); border-color: var(--ira-accent); color: #0b1220; font-weight: 600;
+  }
+  .cast-conference-invite-primary:disabled, .cast-conference-invite-secondary:disabled {
+    opacity: .55; cursor: not-allowed;
+  }
+  .ira-kv dd { margin: 0; word-break: break-all; font-family: ui-monospace, monospace; font-size: 12px; color: var(--ira-fg); }
+  #grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; min-height: 0; background: var(--ira-border); }
+  /* Dental hanging protocol: 3 anatomical MPR on top, 3D + oblique on bottom. */
+  #grid.layout-dental {
+    grid-template-columns: repeat(6, 1fr);
+    grid-template-rows: 1fr 1fr;
+    grid-template-areas:
+      "ax ax co co sa sa"
+      "td td td ob ob ob";
+  }
+  #grid.layout-dental [data-cell="axial"] { grid-area: ax; }
+  #grid.layout-dental [data-cell="coronal"] { grid-area: co; }
+  #grid.layout-dental [data-cell="sagittal"] { grid-area: sa; }
+  #grid.layout-dental [data-cell="threeD"] { grid-area: td; }
+  #grid.layout-dental [data-cell="oblique"] { grid-area: ob; }
+  #grid.has-max .cell { display: none; }
+  #grid.has-max .cell.max { display: block; grid-area: 1 / 1 / -1 / -1; }
+  .cell { position: relative; min-width: 0; min-height: 0; background: #000; }
+  .cell canvas { width: 100%; height: 100%; display: block; background: #000; touch-action: none; }
+  .cell canvas.ira-overlay { background: transparent; }
+  .cell .lab { position: absolute; top: 5px; left: 7px; font-weight: 700; font-size: 11px; opacity: .9; pointer-events: none; }
+  .lab.axial { color: #f05a5a; } .lab.coronal { color: #5ad07a; } .lab.sagittal { color: #f0d24a; }
+  .lab.threeD { color: #9fb3d0; } .lab.oblique { color: #c9a0ff; }
+  .orient { position: absolute; font-weight: 700; font-size: 12px; color: var(--ira-fg-muted); opacity: .8; pointer-events: none; }
+  .o-t { top: 5px; left: 50%; transform: translateX(-50%); } .o-b { bottom: 5px; left: 50%; transform: translateX(-50%); }
+  .o-l { left: 7px; top: 50%; transform: translateY(-50%); } .o-r { right: 7px; top: 50%; transform: translateY(-50%); }
+  .sr { position: absolute; bottom: 5px; left: 7px; font: 600 11px -apple-system, system-ui, sans-serif; color: #d6e2f2;
+        opacity: .9; font-variant-numeric: tabular-nums; background: rgba(11,14,22,.6); padding: 1px 6px; border-radius: 4px; }
+  .iuo { position: absolute; bottom: 5px; right: 7px; font: 700 9px -apple-system, system-ui, sans-serif; color: #8a1f1f; opacity: .9; letter-spacing: .5px; pointer-events: none; }
+  #status { position: fixed; bottom: 6px; left: 10px; z-index: 5; background: rgba(5,6,10,.78);
+            padding: 3px 12px; border-radius: 6px; color: var(--ira-fg-muted); font-family: ui-monospace, monospace; font-size: 11px;
+            max-width: 70vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+</style>
+</head>
+<body>
+  <div id="viewer">
+    <div id="ira-bar">
+      <div class="ira-bar-start">
+        <span class="brand">SlicerLive - IRA</span>
+        <button type="button" id="iraCastStatusBtn" class="ira-icon-btn ira-text-btn"
+          aria-label="Session info" title="Session info">
+          <span id="iraCastStatus" class="ira-cast-status ira-cast-idle">—</span>
+        </button>
+        <button
+          type="button"
+          id="iraStartConferenceBtn"
+          class="ira-icon-btn ira-text-btn ira-start-conference-btn"
+          aria-label="Conferencing"
+          title="Conferencing"
+        >
+          Conferencing
+        </button>
+        <button
+          type="button"
+          id="iraLeaveConferenceBtn"
+          class="ira-icon-btn ira-text-btn ira-leave-conference-btn"
+          aria-label="Leave conference"
+          title="Leave conference"
+          hidden
+          disabled
+        >
+          Leave conference
+        </button>
+        <button
+          type="button"
+          id="iraStopFollowingBtn"
+          class="ira-icon-btn ira-text-btn ira-stop-following-btn"
+          aria-label="Stop following"
+          title="Stop following the conference leader"
+          hidden
+        >
+          Stop following
+        </button>
+        <button
+          type="button"
+          id="iraResumeFollowingBtn"
+          class="ira-icon-btn ira-text-btn ira-resume-following-btn"
+          aria-label="Resume following"
+          title="Resume following the conference leader"
+          hidden
+        >
+          Resume following
+        </button>
+        <button
+          type="button"
+          id="iraTakeOverBtn"
+          class="ira-icon-btn ira-text-btn ira-take-over-btn"
+          aria-label="Take over"
+          title="Take over as conference leader"
+          hidden
+        >
+          Take over
+        </button>
+      </div>
+      <span id="info"></span>
+      <select id="wl-readout" style="display:none"></select>
+      <div class="ira-bar-spacer"></div>
+      <div class="ira-bar-actions">
+        <span class="ira-viewer-label ira-viewer-label-first">Worklist:</span>
+        <button
+          type="button"
+          id="iraWorklistBtn"
+          class="ira-icon-btn ira-text-btn"
+          aria-label="Open SlicerWorklist"
+          title="Open SlicerWorklist"
+        >
+          SlicerWorklist
+        </button>
+        <span class="ira-viewer-label">Reporting:</span>
+        <button
+          type="button"
+          id="iraReportingBtn"
+          class="ira-icon-btn ira-text-btn"
+          aria-label="Open DICOM SR reporting"
+          title="Open DICOM SR reporting client"
+        >
+          DICOM SR
+        </button>
+        <button
+          type="button"
+          id="iraMedicalInferenceBtn"
+          class="ira-icon-btn ira-text-btn"
+          aria-label="Remote AI"
+          title="Remote AI — inference servers"
+        >
+          Remote AI
+        </button>
+        <button
+          type="button"
+          id="iraLoadLocalStudyBtn"
+          class="ira-icon-btn ira-text-btn"
+          aria-label="Load study"
+          title="Load study"
+        >
+          Load study
+        </button>
+        <button type="button" id="iraSettingsBtn" class="ira-icon-btn" aria-label="Controls & key bindings"
+          title="Controls & key bindings"
+          style="font:700 15px -apple-system,system-ui,sans-serif">?</button>
+      </div>
+    </div>
+    <div id="grid">
+      <div class="cell" data-cell="axial">
+        <canvas id="c-axial"></canvas><span class="lab axial">Axial</span>
+        <span class="orient o-t">A</span><span class="orient o-b">P</span><span class="orient o-l">R</span><span class="orient o-r">L</span>
+        <span id="sr-axial" class="sr"></span><span class="iuo">INVESTIGATIONAL USE ONLY</span>
+      </div>
+      <div class="cell" data-cell="threeD">
+        <canvas id="c-threeD"></canvas><span class="lab threeD">3D</span>
+        <span class="iuo">INVESTIGATIONAL USE ONLY</span>
+      </div>
+      <div class="cell" data-cell="coronal">
+        <canvas id="c-coronal"></canvas><span class="lab coronal">Coronal</span>
+        <span class="orient o-t">S</span><span class="orient o-b">I</span><span class="orient o-l">R</span><span class="orient o-r">L</span>
+        <span id="sr-coronal" class="sr"></span><span class="iuo">INVESTIGATIONAL USE ONLY</span>
+      </div>
+      <div class="cell" data-cell="sagittal">
+        <canvas id="c-sagittal"></canvas><span class="lab sagittal">Sagittal</span>
+        <span class="orient o-t">S</span><span class="orient o-b">I</span><span class="orient o-l">A</span><span class="orient o-r">P</span>
+        <span id="sr-sagittal" class="sr"></span><span class="iuo">INVESTIGATIONAL USE ONLY</span>
+      </div>
+      <div class="cell" data-cell="oblique" style="display:none">
+        <canvas id="c-oblique"></canvas><span class="lab oblique" title="Scroll: wheel · Drag: tilt plane">Oblique</span>
+        <span id="sr-oblique" class="sr"></span><span class="iuo">INVESTIGATIONAL USE ONLY</span>
+      </div>
+    </div>
+    <div id="status">loading…</div>
+  </div>
+
+  <div id="iraSessionModal" class="ira-modal-backdrop" hidden>
+    <div class="ira-modal" role="dialog" aria-labelledby="iraSessionTitle">
+      <div class="ira-modal-header">
+        <h2 id="iraSessionTitle">Session info</h2>
+        <button type="button" class="ira-modal-close" data-ira-close-modal aria-label="Close">×</button>
+      </div>
+      <div class="ira-modal-body"><dl id="iraSessionDl" class="ira-kv"></dl></div>
+    </div>
+  </div>
+  <div id="iraSceneViewModal" class="ira-modal-backdrop" hidden>
+    <div class="ira-modal ira-modal-wide" role="dialog" aria-labelledby="iraSceneViewTitle">
+      <div class="ira-modal-header">
+        <h2 id="iraSceneViewTitle">Scene View</h2>
+        <button type="button" class="ira-modal-close" data-ira-close-modal aria-label="Close">×</button>
+      </div>
+      <div class="ira-modal-body">
+        <pre id="iraSceneViewPre" class="ira-scene-view-pre">No LiveScene loaded</pre>
+      </div>
+    </div>
+  </div>
+  <div id="iraInferenceModal" class="ira-floating-window" hidden>
+    <div class="ira-modal ira-modal-inference" role="dialog" aria-labelledby="iraInferenceTitle">
+      <div class="ira-modal-header ira-floating-drag-handle" data-ira-inference-drag>
+        <h2 id="iraInferenceTitle">Remote AI - inference servers</h2>
+        <div class="ira-modal-header-actions">
+          <button
+            type="button"
+            id="iraInferenceMinimizeBtn"
+            class="ira-modal-minimize"
+            aria-label="Minimize"
+            aria-expanded="true"
+            title="Minimize"
+          >−</button>
+          <button type="button" class="ira-modal-close" data-ira-close-modal aria-label="Close">×</button>
+        </div>
+      </div>
+      <div class="ira-modal-body ira-inference-body">
+        <div class="ira-inference-layout">
+          <div class="ira-inference-left">
+            <div class="ira-inference-toolbar">
+              <button type="button" id="iraInferenceRefreshBtn" class="ira-icon-btn ira-text-btn">Refresh status</button>
+            </div>
+            <div id="iraInferenceList" class="ira-inference-list" role="listbox" aria-label="Inference servers"></div>
+          </div>
+          <div class="ira-inference-right">
+            <pre id="iraInferenceDetail" class="ira-inference-detail">Select an inference server.</pre>
+            <p id="iraInferenceNote" class="ira-inference-note"></p>
+            <div id="iraTotalSegOptions" class="ira-totalseg-options" hidden>
+              <div class="ira-totalseg-row ira-totalseg-modality">
+                <span>Study modality: <strong id="iraTotalSegModality">—</strong></span>
+                <a
+                  class="ira-totalseg-link"
+                  href="https://backend.totalsegmentator.com/find-task/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >Browse on totalsegmentator.com</a>
+              </div>
+              <div class="ira-totalseg-row">
+                <label for="iraTotalSegFind">Find</label>
+                <input
+                  type="search"
+                  id="iraTotalSegFind"
+                  placeholder="Structure name (e.g. spleen, liver…)"
+                  autocomplete="off"
+                  aria-label="Find TotalSegmentator structure"
+                />
+              </div>
+              <ul id="iraTotalSegHits" class="ira-totalseg-hits" hidden role="listbox" aria-label="Matching structures"></ul>
+              <div class="ira-totalseg-row">
+                <label for="iraTotalSegGroup">Group</label>
+                <select id="iraTotalSegGroup" aria-label="TotalSegmentator task group"></select>
+              </div>
+              <div class="ira-totalseg-row">
+                <label for="iraTotalSegTask">Task</label>
+                <select id="iraTotalSegTask" aria-label="TotalSegmentator task"></select>
+              </div>
+            </div>
+            <div id="iraMhubOptions" class="ira-mhub-options" hidden>
+              <div class="ira-mhub-filters">
+                <span class="ira-mhub-filter">
+                  Study modality: <strong id="iraMhubModality">—</strong>
+                </span>
+                <span class="ira-mhub-filter">
+                  <label for="iraMhubBodyPart">Body part examined</label>
+                  <select id="iraMhubBodyPart" aria-label="Body part examined"></select>
+                </span>
+              </div>
+              <p id="iraMhubContextNote" class="ira-mhub-context-note" hidden></p>
+              <div class="ira-mhub-find-row">
+                <label for="iraMhubFind">Find models by anatomy</label>
+                <input
+                  type="search"
+                  id="iraMhubFind"
+                  placeholder="e.g. liver kidney"
+                  autocomplete="off"
+                  aria-label="Find MHub models by anatomy"
+                />
+              </div>
+              <div
+                id="iraMhubModelList"
+                class="ira-mhub-model-list"
+                role="group"
+                aria-label="Applicable MHub models"
+              ></div>
+            </div>
+            <button type="button" id="iraInferenceRunBtn" class="ira-icon-btn ira-text-btn ira-inference-run-btn" disabled>Run</button>
+            <pre id="iraInferenceLog" class="ira-inference-log" aria-live="polite"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="iraLoadLocalModal" class="ira-modal-backdrop" hidden>
+    <div class="ira-modal" role="dialog" aria-labelledby="iraLoadLocalTitle">
+      <div class="ira-modal-header">
+        <h2 id="iraLoadLocalTitle">Load study</h2>
+        <button type="button" class="ira-modal-close" data-ira-close-modal aria-label="Close">×</button>
+      </div>
+      <div class="ira-modal-body ira-load-local-body">
+        <label class="ira-load-local-check">
+          <input type="checkbox" id="iraLoadLocalAnonymize" checked />
+          Anonymized
+        </label>
+        <p class="ira-load-local-hint">Choose a DICOM folder or a ZIP archive containing DICOM files.</p>
+        <div class="ira-load-local-pickers">
+          <button type="button" id="iraLoadLocalFolderBtn" class="ira-icon-btn ira-text-btn">
+            Choose folder…
+          </button>
+          <button type="button" id="iraLoadLocalZipBtn" class="ira-icon-btn ira-text-btn">
+            Choose ZIP…
+          </button>
+        </div>
+        <input type="file" id="iraLoadLocalZipInput" accept=".zip,application/zip" hidden />
+        <p id="iraLoadLocalSelection" class="ira-load-local-selection" aria-live="polite">No folder or ZIP selected.</p>
+        <p id="iraLoadLocalStatus" class="ira-load-local-hint" aria-live="polite" hidden></p>
+        <div id="iraLoadLocalSeries" class="ira-load-local-series" hidden></div>
+        <div class="ira-load-local-actions">
+          <button type="button" id="iraLoadLocalCancelBtn" class="ira-icon-btn ira-text-btn">Cancel</button>
+          <button type="button" id="iraLoadLocalConfirmBtn" class="ira-icon-btn ira-text-btn" disabled>
+            Load
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="iraAboutModal" class="ira-modal-backdrop" hidden>
+    <div class="ira-modal" role="dialog" aria-labelledby="iraAboutTitle">
+      <div class="ira-modal-header">
+        <h2 id="iraAboutTitle">About</h2>
+        <button type="button" class="ira-modal-close" data-ira-close-modal aria-label="Close">×</button>
+      </div>
+      <div class="ira-modal-body">
+        <p>SlicerLive IRA — IHE Integrated Reporting Applications reader.</p>
+        <p>Joins a Cast hub as Image Display (<code>ID</code>) when opened with <code>topic</code> and <code>id-token</code> from the worklist.</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="ira.js?v=colorize-button"></script>
+</body>
+</html>

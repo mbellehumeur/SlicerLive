@@ -86,6 +86,8 @@ class _Peer:
             self.get_node(msg.get("id"))
 
     def subscribe(self, types, localBulk, metadataOnly):
+        # Drop prior observers so re-subscribe (Cast or WS) does not stack handlers.
+        self.teardown()
         self.types = set(types); self.localBulk = set(localBulk or ()); self.metadataOnly = metadataOnly
         scenePath = HS._ensure_serialized(force=True)
         with open(scenePath) as f:
@@ -279,17 +281,59 @@ class _Peer:
         except Exception: pass  # noqa: BLE001
 
 
+class CastSink:
+    """WsClient-shaped sink: no TCP socket; ``send_text`` delivers LiveSync JSON to Cast.
+
+    Attached as a normal ``_Peer`` so MRML observers and ``_Peer.send`` are reused.
+    """
+
+    def __init__(self, on_text):
+        self._on_text = on_text
+
+    def send_text(self, text):
+        try:
+            self._on_text(text)
+        except Exception as e:  # noqa: BLE001
+            print("mrson_peer CastSink: %s" % e)
+
+
 class MrsonPeerServer:
     def __init__(self, port):
         self.port = port
         self.seq = 0
         self.aliases = {}          # real MRML id -> client's provisional id (from put)
-        self.peers = {}            # WsClient -> _Peer
+        self.peers = {}            # WsClient | CastSink -> _Peer
+        self._cast_sink = None     # CastSink | None
         self.server = WsServer(port, on_message=self._on_message, on_close=self._on_close)
 
     def next_seq(self):
         self.seq += 1
         return self.seq
+
+    def attach_cast_sink(self, on_text):
+        """Register (or replace) an internal Cast peer. Returns the ``_Peer`` instance."""
+        self.detach_cast_sink()
+        sink = CastSink(on_text)
+        peer = _Peer(sink, self)
+        self.peers[sink] = peer
+        self._cast_sink = sink
+        return peer
+
+    def detach_cast_sink(self):
+        sink = self._cast_sink
+        if sink is None:
+            return
+        peer = self.peers.pop(sink, None)
+        self._cast_sink = None
+        if peer is not None:
+            peer.teardown()
+
+    def cast_peer(self):
+        """Return the attached Cast ``_Peer``, or None."""
+        sink = self._cast_sink
+        if sink is None:
+            return None
+        return self.peers.get(sink)
 
     def _on_message(self, client, text):
         try:
@@ -310,6 +354,7 @@ class MrsonPeerServer:
             peer.teardown()
 
     def stop(self):
+        self.detach_cast_sink()
         for p in list(self.peers.values()):
             p.teardown()
         self.peers = {}

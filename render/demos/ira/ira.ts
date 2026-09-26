@@ -448,7 +448,8 @@ export function mountIra(cfg: IraCfg): IraApi {
     p: Plane,
   ): boolean => {
     if (s.plane && s.plane === p && typeof s.mm === "number") {
-      return Math.abs(s.mm - cfg.offsetMm(p)) <= cfg.spacing(p) / 2 + 1e-3;
+      const tol = Math.max(cfg.spacing(p), 1) * 1.5;
+      return Math.abs(s.mm - cfg.offsetMm(p)) <= tol;
     }
     // Fallback: any point near this slice (RAS mm along normal for axis-aligned MPR).
     const nAxis: Partial<Record<Plane, 0 | 1 | 2>> = {
@@ -1470,13 +1471,10 @@ export function mountIra(cfg: IraCfg): IraApi {
     },
     onLeftDrop: () => {
       if (tool !== "marker" || !markerDraft || markerDraft.plane !== p) return;
-      if (markerDraft.pts.length >= 2) {
-        publishMarker("end", markerDraft);
-      } else {
-        // Too short — still end so peers/TTL clear any single-point draft.
-        publishMarker("end", markerDraft);
-      }
+      const draft = markerDraft;
       markerDraft = null;
+      // End even for short strokes so peers/TTL clear any single-point draft.
+      publishMarker("end", draft);
       redrawOverlays();
     },
   });
@@ -1486,8 +1484,9 @@ export function mountIra(cfg: IraCfg): IraApi {
     marker3dActive = false;
     marker3dPointerId = null;
     if (markerDraft && markerDraft.plane === "threeD") {
-      publishMarker("end", markerDraft);
+      const draft = markerDraft;
       markerDraft = null;
+      publishMarker("end", draft);
       redrawOverlays();
     }
   };

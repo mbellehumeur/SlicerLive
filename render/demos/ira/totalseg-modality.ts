@@ -6,11 +6,18 @@ import {
   getIraLiveScene,
 } from "./ira-cast.ts";
 import { modalityFromSceneName } from "./ira-scene.ts";
+import { mhubContextHintsFromImagingStudy } from "./mhub-models.ts";
 import type { TotalSegModality } from "./totalseg-tasks.ts";
 
 export type OpenStudyTotalSegModality =
   | { modality: TotalSegModality; source: string; assumed?: boolean }
   | { modality: null; source: string; reason: string };
+
+export type ImagingModality = "CT" | "MR" | "PT";
+
+export type OpenStudyImagingModality =
+  | { modality: ImagingModality; source: string }
+  | { modality: null; source: string; reason?: string };
 
 function codingModality(value: unknown): string {
   if (!value) return "";
@@ -44,7 +51,20 @@ function normalizeTotalSegModality(raw: string): TotalSegModality | "other" | ""
   return "other";
 }
 
+/** Normalize to CT / MR / PT for MHub filtering (null when unknown/unsupported). */
+function normalizeImagingModality(raw: string): ImagingModality | "other" | "" {
+  const m = raw.trim().toUpperCase();
+  if (!m) return "";
+  if (m === "CT" || m === "CTAC") return "CT";
+  if (m === "MR" || m === "MRI") return "MR";
+  if (m === "PT" || m === "PET" || m === "NM") return "PT";
+  return "other";
+}
+
 function modalityFromContext(context: unknown[]): string {
+  // Prefer shared MHubSkill-style hints (study.modality + IDC volume file labels).
+  const hints = mhubContextHintsFromImagingStudy(context);
+  if (hints.modality) return hints.modality;
   for (const item of context) {
     if (!item || typeof item !== "object") continue;
     const resource = (item as { resource?: unknown }).resource;
@@ -84,6 +104,37 @@ function modalityFromLiveScene(): string {
     return modalityFromSceneName(name);
   }
   return "";
+}
+
+function rawOpenStudyModality(): { raw: string; source: string } {
+  const ctx = getIraImagingStudyOpenContext();
+  const fromCtx = modalityFromContext(ctx);
+  if (fromCtx) return { raw: fromCtx, source: "ImagingStudy context" };
+  const fromUrl = modalityFromUrl();
+  if (fromUrl) return { raw: fromUrl, source: "URL modality" };
+  const fromScene = modalityFromLiveScene();
+  if (fromScene) return { raw: fromScene, source: "scene volume name" };
+  return { raw: "", source: "none" };
+}
+
+/**
+ * Best-effort CT / MR / PT for MHub model filtering.
+ * Returns modality null when unknown (caller shows all models).
+ */
+export function resolveOpenStudyImagingModality(): OpenStudyImagingModality {
+  const { raw, source } = rawOpenStudyModality();
+  const normalized = normalizeImagingModality(raw);
+  if (normalized === "CT" || normalized === "MR" || normalized === "PT") {
+    return { modality: normalized, source };
+  }
+  if (normalized === "other") {
+    return {
+      modality: null,
+      source,
+      reason: `Open study modality ${raw} is not CT, MR, or PT`,
+    };
+  }
+  return { modality: null, source: "none", reason: "Unknown study modality" };
 }
 
 /**

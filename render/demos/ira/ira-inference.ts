@@ -27,7 +27,15 @@ import {
   type TotalSegModality,
   type TotalSegTask,
 } from "./totalseg-tasks.ts";
-import { resolveOpenStudyTotalSegModality } from "./totalseg-modality.ts";
+import { resolveOpenStudyImagingModality, resolveOpenStudyTotalSegModality } from "./totalseg-modality.ts";
+import {
+  findMhubModelsForAnatomy,
+  listMhubBodyPartsForModels,
+  listMhubModelsForBodyPart,
+  listMhubModelsForModality,
+  mhubContextHintsFromImagingStudy,
+  type MhubModelDef,
+} from "./mhub-models.ts";
 
 export type InferenceServerDef = CastInferenceServerDef;
 export type InferenceProbeResult = CastProductStatusProbe;
@@ -46,6 +54,19 @@ type VolumeFile = { url: string; fileName: string };
 let selectedId: string | null = null;
 let rows: RowState[] = [];
 let installed = false;
+/** Checked MHub model names preserved across list refreshes. */
+const mhubSelectedModels = new Set<string>();
+let mhubFilteredModels: MhubModelDef[] = [];
+let mhubModalityLabel = "—";
+let mhubModalityNote = "";
+/** Selected body-part filter (empty = all for modality). */
+let mhubBodyPart = "";
+let mhubBodyPartBound = false;
+let mhubFindQuery = "";
+let mhubFindBound = false;
+/** True after the user manually changes body-part (skip auto-seed). */
+let mhubBodyPartUserSet = false;
+let mhubAutoBodyPart = "";
 
 /** Remember last floating-window position across open/close. */
 let floatPos: { left: number; top: number } | null = null;
@@ -514,6 +535,227 @@ function syncTotalSegOptionsVisibility(): void {
   }
 }
 
+function readSelectedMhubModels(): string[] {
+  return mhubFilteredModels
+    .map((m) => m.name)
+    .filter((name) => mhubSelectedModels.has(name));
+}
+
+function ensureMhubBodyPartBinding(): void {
+  if (mhubBodyPartBound) return;
+  const select = $("iraMhubBodyPart") as HTMLSelectElement | null;
+  if (!select) return;
+  mhubBodyPartBound = true;
+  select.addEventListener("change", () => {
+    mhubBodyPart = String(select.value || "").trim();
+    mhubBodyPartUserSet = true;
+    refreshMhubModelList();
+    updateDetail();
+  });
+}
+
+function ensureMhubFindBinding(): void {
+  if (mhubFindBound) return;
+  const find = $("iraMhubFind") as HTMLInputElement | null;
+  if (!find) return;
+  mhubFindBound = true;
+  find.addEventListener("input", () => {
+    mhubFindQuery = String(find.value || "").trim();
+    refreshMhubModelList();
+    updateDetail();
+  });
+}
+
+function refreshMhubModelList(): void {
+  const list = $("iraMhubModelList");
+  const modalityEl = $("iraMhubModality");
+  const bodyPartSel = $("iraMhubBodyPart") as HTMLSelectElement | null;
+  const noteEl = $("iraMhubContextNote");
+  const findEl = $("iraMhubFind") as HTMLInputElement | null;
+  if (!list) return;
+  ensureMhubBodyPartBinding();
+  ensureMhubFindBinding();
+
+  const resolved = resolveOpenStudyImagingModality();
+  const modality = resolved.modality;
+  const hints = mhubContextHintsFromImagingStudy(getIraImagingStudyOpenContext());
+  mhubAutoBodyPart = hints.bodyPart;
+  const modalityModels = listMhubModelsForModality(modality);
+  if (modality) {
+    mhubModalityLabel = modality;
+    mhubModalityNote = "";
+  } else {
+    mhubModalityLabel = "unknown";
+    mhubModalityNote =
+      resolved.reason || "Unknown modality — showing all MHub models.";
+  }
+  if (modalityEl) modalityEl.textContent = mhubModalityLabel;
+
+  const bodyParts = listMhubBodyPartsForModels(modalityModels);
+  if (bodyPartSel) {
+    const prev = mhubBodyPart || String(bodyPartSel.value || "").trim();
+    bodyPartSel.replaceChildren();
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.textContent = "All body parts";
+    bodyPartSel.append(allOpt);
+    for (const bp of bodyParts) {
+      const opt = document.createElement("option");
+      opt.value = bp;
+      opt.textContent = bp === "WHOLEBODY" ? "Whole body" : bp;
+      bodyPartSel.append(opt);
+    }
+    let keep = prev && bodyParts.some((bp) => bp === prev) ? prev : "";
+    if (
+      !mhubBodyPartUserSet &&
+      !keep &&
+      mhubAutoBodyPart &&
+      bodyParts.some((bp) => bp === mhubAutoBodyPart)
+    ) {
+      keep = mhubAutoBodyPart;
+    }
+    mhubBodyPart = keep;
+    bodyPartSel.value = keep;
+    bodyPartSel.disabled = bodyParts.length === 0;
+  }
+
+  if (findEl && findEl.value !== mhubFindQuery) {
+    // Keep typed query; only sync if empty on first paint.
+    if (!mhubFindQuery) findEl.value = "";
+  }
+
+  let filtered = listMhubModelsForBodyPart(modalityModels, mhubBodyPart);
+  if (mhubFindQuery) {
+    filtered = findMhubModelsForAnatomy(mhubFindQuery, filtered);
+  }
+  mhubFilteredModels = filtered;
+
+  if (noteEl) {
+    const bits: string[] = [];
+    if (modality) bits.push(modality);
+    if (mhubBodyPart) {
+      bits.push(
+        mhubBodyPart === "WHOLEBODY" ? "Whole body" : mhubBodyPart,
+      );
+    }
+    if (mhubFindQuery) bits.push(`anatomy “${mhubFindQuery}”`);
+    const fromCtx =
+      !mhubBodyPartUserSet &&
+      mhubBodyPart &&
+      mhubBodyPart === mhubAutoBodyPart;
+    if (bits.length) {
+      noteEl.hidden = false;
+      noteEl.textContent = fromCtx
+        ? `Filtered for ${bits.join(" · ")} (from open study).`
+        : `Filtered for ${bits.join(" · ")}.`;
+    } else {
+      noteEl.hidden = true;
+      noteEl.textContent = "";
+    }
+  }
+
+  // Drop selections that no longer apply to the filtered list.
+  const allowed = new Set(mhubFilteredModels.map((m) => m.name));
+  for (const name of [...mhubSelectedModels]) {
+    if (!allowed.has(name)) mhubSelectedModels.delete(name);
+  }
+
+  list.replaceChildren();
+  if (!modalityModels.length) {
+    const empty = document.createElement("p");
+    empty.className = "ira-mhub-empty";
+    empty.textContent = modality
+      ? `No MHub models support ${modality} for the open study.`
+      : "No MHub models in catalog.";
+    list.append(empty);
+    return;
+  }
+  if (!mhubFilteredModels.length) {
+    const empty = document.createElement("p");
+    empty.className = "ira-mhub-empty";
+    empty.textContent = mhubFindQuery
+      ? `No MHub models match anatomy “${mhubFindQuery}”.`
+      : mhubBodyPart
+        ? `No MHub models for body part “${mhubBodyPart}”.`
+        : "No MHub models match the current filters.";
+    list.append(empty);
+    return;
+  }
+
+  for (const model of mhubFilteredModels) {
+    const row = document.createElement("label");
+    row.className = "ira-mhub-model";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = model.name;
+    cb.checked = mhubSelectedModels.has(model.name);
+    cb.addEventListener("change", () => {
+      if (cb.checked) mhubSelectedModels.add(model.name);
+      else mhubSelectedModels.delete(model.name);
+      updateDetail();
+    });
+
+    const body = document.createElement("span");
+    body.className = "ira-mhub-model-body";
+    const label = document.createElement("span");
+    label.className = "ira-mhub-model-label";
+    label.textContent = model.label;
+    body.append(label);
+    const desc = String(model.description || "").trim();
+    if (desc) {
+      const d = document.createElement("span");
+      d.className = "ira-mhub-model-desc";
+      d.textContent = desc;
+      body.append(d);
+    }
+
+    const links = document.createElement("span");
+    links.className = "ira-mhub-model-links";
+    links.addEventListener("click", (ev) => ev.stopPropagation());
+    links.addEventListener("mousedown", (ev) => ev.stopPropagation());
+
+    const appendLink = (href: string, text: string, title?: string) => {
+      const a = document.createElement("a");
+      a.className = "ira-mhub-model-link";
+      a.href = href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = text;
+      if (title) a.title = title;
+      links.append(a);
+    };
+
+    const github = String(model.githubUrl || "").trim();
+    if (github) appendLink(github, "GitHub");
+    const website = String(model.websiteUrl || "").trim();
+    if (website) appendLink(website, "Website");
+    const cite = String(model.cite || "").trim();
+    const citeUrl = String(model.citeUrl || "").trim();
+    if (citeUrl) {
+      appendLink(citeUrl, "Cite", cite || undefined);
+    } else if (cite) {
+      const citeEl = document.createElement("span");
+      citeEl.className = "ira-mhub-model-cite";
+      citeEl.textContent = "Cite";
+      citeEl.title = cite;
+      links.append(citeEl);
+    }
+    if (links.childNodes.length) body.append(links);
+
+    row.append(cb, body);
+    list.append(row);
+  }
+}
+
+function syncMhubOptionsVisibility(): void {
+  const panel = $("iraMhubOptions");
+  if (!panel) return;
+  const show = selectedId === "mhub";
+  panel.hidden = !show;
+  if (show) refreshMhubModelList();
+}
+
 function readTotalSegOptions(): { task: string; fast: boolean } {
   const select = $("iraTotalSegTask") as HTMLSelectElement | null;
   const fallback = totalSegModality
@@ -584,6 +826,7 @@ function updateDetail(): void {
     runBtn.disabled = true;
     if (note) note.textContent = "";
     syncTotalSegOptionsVisibility();
+    syncMhubOptionsVisibility();
     return;
   }
 
@@ -618,8 +861,9 @@ function updateDetail(): void {
   const needsNifti = row.def.hubEvent === "nifti-send";
   const hasNifti = files.some(looksLikeNiftiVolumeFile);
 
-  // Refresh TotalSeg modality/task UI before Run enablement checks.
+  // Refresh TotalSeg / MHub option UIs before Run enablement checks.
   syncTotalSegOptionsVisibility();
+  syncMhubOptionsVisibility();
 
   let disableReason = "";
   if (!connected) disableReason = "Connect to Cast (open from the worklist) to run inference.";
@@ -632,6 +876,12 @@ function updateDetail(): void {
     disableReason =
       totalSegUnsupportedReason ||
       "TotalSegmentator requires a CT or MR study.";
+  } else if (row.def.id === "mhub") {
+    if (!mhubFilteredModels.length) {
+      disableReason = mhubModalityNote || "No applicable MHub models for this study.";
+    } else if (!readSelectedMhubModels().length) {
+      disableReason = "Select at least one MHub model.";
+    }
   }
 
   runBtn.disabled = Boolean(disableReason);
@@ -642,6 +892,11 @@ function updateDetail(): void {
       note.textContent = totalSegAssumed
         ? "Assuming CT — open an MR study for MR tasks."
         : "";
+    } else if (row.def.id === "mhub") {
+      const ready = `Ready to run ${readSelectedMhubModels().length} model(s) on the open study.`;
+      note.textContent = mhubModalityNote
+        ? `${mhubModalityNote} ${ready}`
+        : ready;
     } else {
       note.textContent = "Ready to run on the open study.";
     }
@@ -780,11 +1035,17 @@ async function runSelected(): Promise<void> {
     const hubEvent = hubEventForInferenceJob(row.def.hubEvent, files);
     appendLog(`Publishing ${files.length} file(s) as ${hubEvent}…`);
     const contextExtras =
-      row.def.id === "totalseg" ? readTotalSegOptions() : undefined;
-    if (contextExtras) {
+      row.def.id === "totalseg"
+        ? readTotalSegOptions()
+        : row.def.id === "mhub"
+          ? { models: readSelectedMhubModels() }
+          : undefined;
+    if (contextExtras && "task" in contextExtras) {
       appendLog(
         `TotalSeg options: task=${contextExtras.task}, fast=${contextExtras.fast}`,
       );
+    } else if (contextExtras && "models" in contextExtras) {
+      appendLog(`MHub models: ${contextExtras.models.join(", ")}`);
     }
     const result = await publishInferenceJob({
       product: row.def.product,
@@ -810,6 +1071,16 @@ export function openMedicalInferenceDialog(): void {
   }
   rows = INFERENCE_SERVERS.map((def) => ({ def, probe: null, probing: false }));
   selectedId = null;
+  mhubSelectedModels.clear();
+  mhubFilteredModels = [];
+  mhubModalityLabel = "—";
+  mhubModalityNote = "";
+  mhubBodyPart = "";
+  mhubFindQuery = "";
+  mhubBodyPartUserSet = false;
+  mhubAutoBodyPart = "";
+  const find = $("iraMhubFind") as HTMLInputElement | null;
+  if (find) find.value = "";
   const log = $("iraInferenceLog");
   if (log) log.textContent = "";
   installInferenceWindowDrag();

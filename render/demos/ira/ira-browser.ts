@@ -12,6 +12,7 @@
 // then add a gallery tile linking webgpu/ira.html.
 import { initDevice } from "../../device.ts";
 import { loadSceneVolumeFieldProgressive, type SceneVolume } from "../../scene-volume.ts";
+import { loadSceneSegLabelmap } from "../../scene-seg.ts";
 import type { ImageField } from "../../fields.ts";
 import { slicerDefaultOffset01, type PlaneBasis } from "../../slice-renderer.ts";
 import { offset01ToMm, SliceInteractor } from "../../slice-interactor.ts";
@@ -19,10 +20,15 @@ import { buildSegrouletteScene, type SegrouletteScene } from "../segroulette-sce
 import { type Crosshair4up, mountCrosshair } from "../crosshair.ts";
 import { attachCameraControls, framedCamera } from "../camera-control.ts";
 import { attachSliceControls } from "../slice-control.ts";
-import { attachDoubleClick, attachViewGrid } from "../view-grid.ts";
+import { attachDoubleClick, attachViewGrid, type ViewGrid } from "../view-grid.ts";
 import { attachWidgetControls } from "../widget-control.ts";
 import type { Box, HandleMeta } from "../roi-widget.ts";
-import { installChrome, type VizControl } from "../sl-chrome.ts";
+import { installChrome, type Chrome, type VizControl } from "../sl-chrome.ts";
+import {
+  colorizeDefaultOpacityEntries,
+  resolveColorizeGroups,
+  type ColorizeGroupResolved,
+} from "./colorize-groups.ts";
 import { buildFontAtlas } from "../../sdf-text.ts";
 import { mountSegmentCards } from "../../segment-cards.ts";
 import { loadSeries } from "../../vendor/idc_tools/index.js";
@@ -681,6 +687,8 @@ async function mountStudyFromSource(
   let pendingLodUpgrade: SceneVolume | null = null;
   /** Late SEG from IDC progressive path (attached after mount). */
   let pendingIdcSeg: SegLabelmap | undefined;
+  /** LiveScene embedded segmentation fetch (resolved before attach). */
+  let sceneSegDone: Promise<void> | null = null;
   /** Host volume filled by IDC slabs (same buffer passed to buildSegrouletteScene). */
   let idcStreamVol: Float32Array | null = null;
   /** Set when the worker posts the final full CT (assemble done; SEG may still be loading). */
@@ -786,6 +794,20 @@ async function mountStudyFromSource(
       sd: `${sv.name} · LiveScene`,
       lic: "LiveScene",
     };
+    // LiveScene may embed a vtkMRMLSegmentationNode (e.g. TotalSegmentator-CT).
+    // Fetch/resample in parallel with the remaining volume stream; attach after mount.
+    sceneSegDone = loadSceneSegLabelmap(sceneSource, ct.dims, ct.ijkToRAS, { signal }).then(
+      (res) => {
+        if (signal?.aborted) return;
+        if (!res.ok) {
+          if (!/no vtkMRMLSegmentationNode/.test(res.error)) {
+            console.warn("[ira] LiveScene segmentation:", res.error);
+          }
+          return;
+        }
+        pendingIdcSeg = res.seg;
+      },
+    );
   } else {
     setIraLiveScene(null);
     source = input;
@@ -883,6 +905,11 @@ async function mountStudyFromSource(
   const sc: SegrouletteScene = buildSegrouletteScene(gpu, srgb, ct, seg, {
     volumeField: sceneLodField,
   });
+  // Filled after installChrome — Colorize / refreshSegChrome refresh the badge popup.
+  let chromeApi: Chrome | null = null;
+  /** Assigned once chrome helpers exist (below); refreshSegChrome may call them after mount. */
+  let applyColorizeGroupDefaults: () => void = () => {};
+  let reinstallChrome: () => void = () => {};
   scHold = sc;
   const thisCastMountId = ++castNiftiMountId;
   if (sceneVr) sc.setVolumePreset(sceneVr);
@@ -1235,6 +1262,9 @@ async function mountStudyFromSource(
   };
   /** Skip host publish while applying an inbound scene-update. */
   let applyingRemoteSceneUpdate = false;
+  /** Double-click maximized cell; shared with viewGrid (assigned later). */
+  let maximizedCell: string | null = null;
+  let viewGrid: ViewGrid | null = null;
   let hostScenePublishRaf = 0;
   let hostScenePublishPending: ReturnType<typeof buildIraLiveSceneDoc> | null = null;
   let hostScenePublishPrev: ReturnType<typeof getIraLiveScene> = null;
@@ -1289,6 +1319,7 @@ async function mountStudyFromSource(
       volumeName: source.sd || ct.modality || "Volume",
       volumeOpacity: sc.volumeOpacity(),
       volumeShift: sc.volumeShift(),
+      volumeShiftRange: Math.max(200, (vmax - vmin) / 2),
       volumePreset: vrPreset,
       cropEnabled: roiEnabled,
       roiVisible: roiVisible,
@@ -1309,6 +1340,7 @@ async function mountStudyFromSource(
         viewAngle: camera.viewAngle,
       },
       slices: collectSliceFrames(),
+      maximizedCell,
     });
     setIraLiveScene(doc);
     scheduleHostScenePublish(doc, prev);
@@ -1349,6 +1381,7 @@ async function mountStudyFromSource(
         volumeName: source.sd || ct.modality || "Volume",
         volumeOpacity: sc.volumeOpacity(),
         volumeShift: sc.volumeShift(),
+        volumeShiftRange: Math.max(200, (vmax - vmin) / 2),
         volumePreset: vrPreset,
         cropEnabled: roiEnabled,
         roiVisible: roiVisible,
@@ -1369,6 +1402,7 @@ async function mountStudyFromSource(
           viewAngle: camera.viewAngle,
         },
         slices: collectSliceFrames(),
+        maximizedCell,
       });
       const { doc, result } = applySceneUpdateOps(base, rest);
       setIraLiveScene(doc);
@@ -1426,7 +1460,16 @@ async function mountStudyFromSource(
           sc.slice.setMirrorFrame(p, intent.centerRAS, fov[0], fov[1]);
         }
       }
+      if (result.maximizedCell !== undefined) {
+        maximizedCell = result.maximizedCell;
+        viewGrid?.setMax(result.maximizedCell);
+      }
       drawAll();
+      // Re-paint local vanishing ink after slice/camera changes (leader has no self-echo path).
+      if (ira) {
+        for (const p of PLANES) ira.drawOverlay(p);
+        ira.drawOverlay3d();
+      }
       syncLiveScene();
     } finally {
       applyingRemoteSceneUpdate = false;
@@ -1439,6 +1482,13 @@ async function mountStudyFromSource(
     segCards.setScene(ct, seg, sc.segments);
     setIraSegCatalog(buildSegCatalog(labmap, sc.ijkToRAS));
     syncLiveScene();
+    // Colorize still on → re-resolve groups against the new labelmap and rebuild chrome rows.
+    if (sc.segDisplayMode() === "colorize") {
+      applyColorizeGroupDefaults();
+      reinstallChrome();
+    } else {
+      chromeApi?.refresh();
+    }
     for (const p of PLANES) {
       const cell = document.querySelector(`[data-cell="${p}"]`) as HTMLElement | null;
       const tr = cell?.querySelector(".ann.tr") as HTMLElement | null;
@@ -1523,7 +1573,7 @@ async function mountStudyFromSource(
   if (sceneStreamDone) {
     const applyLodUpgrade = (sv: SceneVolume) => {
       const oldCenter = [sc.center[0], sc.center[1], sc.center[2]] as [number, number, number];
-      sc.swapVolumeField(sv.field, sv.dims, sv.ijkToRAS);
+      sc.swapVolumeField(sv.field, sv.dims, sv.ijkToRAS, sv.voxels);
       ct.vol = sv.voxels;
       ct.dims = sv.dims;
       ct.ijkToRAS = sv.ijkToRAS;
@@ -1653,8 +1703,12 @@ async function mountStudyFromSource(
     resizeObservers.push(ro);
   }
 
-  const viewGrid = attachViewGrid(document.getElementById("grid")!, [...names], resize);
-  attachDoubleClick(cv.threeD, () => viewGrid.toggleMax("threeD"));
+  viewGrid = attachViewGrid(document.getElementById("grid")!, [...names], resize);
+  attachDoubleClick(cv.threeD, () => {
+    viewGrid!.toggleMax("threeD");
+    maximizedCell = viewGrid!.maxCell();
+    syncLiveScene();
+  });
 
   const setWL = (win: number, lev: number) => {
     wl.win = win;
@@ -1885,7 +1939,9 @@ async function mountStudyFromSource(
             hooks.onLeftDrop?.(movedPx);
           },
           onDoubleClick: () => {
-            viewGrid.toggleMax(p);
+            viewGrid!.toggleMax(p);
+            maximizedCell = viewGrid!.maxCell();
+            syncLiveScene();
             return true;
           },
         }
@@ -1894,7 +1950,9 @@ async function mountStudyFromSource(
           onLeftDrag: hooks.onLeftDrag,
           onLeftDrop: hooks.onLeftDrop,
           onDoubleClick: () => {
-            viewGrid.toggleMax(p);
+            viewGrid!.toggleMax(p);
+            maximizedCell = viewGrid!.maxCell();
+            syncLiveScene();
             return true;
           },
         };
@@ -2038,134 +2096,206 @@ async function mountStudyFromSource(
     draw3d();
     return items;
   };
+  // SlicerLive badge popup: 3D volume-rendering + segmentation controls (NON-IRA), anchored
+  // to the 3D cell — the SlicerLive-native version of the reader's "Live" controls.
+  /** Live organ-group opacities while Colorize is on (name → 0..1). */
+  let colorizeGroupOp = new Map<string, number>();
+  let resolvedColorizeGroups: ColorizeGroupResolved[] = [];
+
+  applyColorizeGroupDefaults = () => {
+    resolvedColorizeGroups = resolveColorizeGroups(sc.segments);
+    colorizeGroupOp = new Map(resolvedColorizeGroups.map((g) => [g.name, g.opacity]));
+    const entries = colorizeDefaultOpacityEntries(sc.segments);
+    if (entries.length) sc.setSegmentOpacities(entries);
+  };
+
+  const clearColorizeGroupState = () => {
+    colorizeGroupOp.clear();
+    resolvedColorizeGroups = [];
+  };
+
+  const restoreSurfaceSegmentOpacities = () => {
+    sc.setSegmentOpacities(sc.segments.map((s) => [s.num, 1]));
+  };
+
+  const setColorizeMode = (on: boolean) => {
+    if (on) {
+      if (!sc.hasSeg) return;
+      sc.setSegDisplayMode("colorize");
+      applyColorizeGroupDefaults();
+    } else {
+      sc.setSegDisplayMode("surface");
+      restoreSurfaceSegmentOpacities();
+      clearColorizeGroupState();
+    }
+    syncLiveScene();
+    drawAll();
+    xhair?.redraw();
+    reinstallChrome();
+  };
+
   Object.assign((globalThis as Record<string, unknown>).__iraDbg as object, {
     presets: () => CT_VR_PRESETS.map((p) => p.name),
     setPreset: (name: string | null) => applyVrPreset(name),
     setShift: (hu: number) => applyVrShift(hu),
     vrState: () => ({ preset: vrPreset, shift: vrShift, shiftRange, dataRange: [vmin, vmax] }),
     thumbCount: () => renderPresetThumbnails().length,
+    colorize: () => sc.segDisplayMode() === "colorize",
+    setColorize: (on: boolean) => setColorizeMode(!!on),
   });
 
-  // SlicerLive badge popup: 3D volume-rendering + segmentation controls (NON-IRA), anchored
-  // to the 3D cell — the SlicerLive-native version of the reader's "Live" controls.
-  const controls: VizControl[] = [
-    {
-      label: "Volume render",
-      getOpacity: () => sc.volumeOpacity(),
-      setOpacity: (o) => {
-        sc.setVolumeOpacity(o);
-        draw3d();
-        xhair?.redraw();
-        syncLiveScene();
+  const buildVizControls = (): VizControl[] => {
+    const controls: VizControl[] = [
+      {
+        label: "Volume render",
+        getOpacity: () => sc.volumeOpacity(),
+        setOpacity: (o) => {
+          sc.setVolumeOpacity(o);
+          draw3d();
+          xhair?.redraw();
+          syncLiveScene();
+        },
+        color: [0.75, 0.78, 0.85],
       },
-      color: [0.75, 0.78, 0.85],
-    },
-    // Slicer's VR "Shift" — a plain slider directly below the opacity control.
-    {
-      label: "Shift",
-      slider: {
-        min: -shiftRange,
-        max: shiftRange,
-        step: Math.max(1, Math.round(shiftRange / 200)),
-        get: () => vrShift,
-        set: (v) => applyVrShift(v),
-        format: (v) => (v > 0 ? "+" : "") + Math.round(v),
+      // Slicer's VR "Shift" — a plain slider directly below the opacity control.
+      {
+        label: "Shift",
+        slider: {
+          min: -shiftRange,
+          max: shiftRange,
+          step: Math.max(1, Math.round(shiftRange / 200)),
+          get: () => vrShift,
+          set: (v) => applyVrShift(v),
+          format: (v) => (v > 0 ? "+" : "") + Math.round(v),
+        },
+        disabled: () => sc.volumeOpacity() <= 0,
       },
-      disabled: () => sc.volumeOpacity() <= 0,
-    },
-    // Volume-rendering preset — opens the on-the-fly thumbnail menu (Slicer/OHIF CT presets).
-    {
-      label: "Preset",
-      button: { text: () => presetLabel(), run: () => openVrPresetMenu({ items: renderPresetThumbnails(), current: vrPreset, onPick: applyVrPreset }) },
-    },
-    {
-      label: "Segmentation",
-      getOpacity: () => sc.segOpacity(),
-      setOpacity: (o) => {
-        sc.setSegOpacity(o); // 3D surface global opacity
-        sc.slice.setOverlayOpacity(o * SEG_FILL); // AND the 2D MPR overlay (fill/outline)
-        syncLiveScene();
-        drawAll();
+      // Volume-rendering preset — opens the on-the-fly thumbnail menu (Slicer/OHIF CT presets).
+      {
+        label: "Preset",
+        button: { text: () => presetLabel(), run: () => openVrPresetMenu({ items: renderPresetThumbnails(), current: vrPreset, onPick: applyVrPreset }) },
       },
-      disabled: () => !sc.hasSeg,
-      color: [0.62, 0.9, 1.0],
-    },
-    {
-      label: "Segment labels",
-      get: () => labelsOn,
-      set: (on) => {
-        labelsOn = on;
-        syncLiveScene();
-        draw3d();
+      {
+        label: "Segmentation",
+        getOpacity: () => sc.segOpacity(),
+        setOpacity: (o) => {
+          sc.setSegOpacity(o); // 3D surface global opacity
+          sc.slice.setOverlayOpacity(o * SEG_FILL); // AND the 2D MPR overlay (fill/outline)
+          syncLiveScene();
+          drawAll();
+        },
+        disabled: () => !sc.hasSeg,
+        color: [0.62, 0.9, 1.0],
       },
-      disabled: () => !sc.hasSeg,
-    },
-    // Segmentation overlay: fill (default) vs outline on the MPR planes.
-    {
-      label: "Segmentation outline",
-      get: () => sliceOutline,
-      set: (on) => {
-        sliceOutline = on;
-        sc.slice.setOverlayOutline(on);
-        for (const p of PLANES) drawSlice(p);
-        xhair?.redraw();
+      // Colorize: CT+labelmap fusion + organ-group opacities (off = SDF Surface).
+      {
+        label: "Colorize",
+        get: () => sc.segDisplayMode() === "colorize",
+        set: (on) => setColorizeMode(on),
+        disabled: () => !sc.hasSeg,
       },
-      disabled: () => !sc.hasSeg,
-    },
-    // 3D volume-render crop: enabling it reveals the ROI box the first time (Slicer behaviour).
-    {
-      label: "Crop volume (3D)",
-      get: () => roiEnabled,
-      set: (on) => {
-        roiEnabled = on;
-        if (on && roiFirstEnable) {
-          roiVisible = true;
-          roiFirstEnable = false;
-        }
-        sc.setRoiEnabled(roiEnabled);
-        sc.setRoiVisible(roiVisible);
-        syncLiveScene();
-        draw3d();
-        xhair?.redraw();
+      {
+        label: "Segment labels",
+        get: () => labelsOn,
+        set: (on) => {
+          labelsOn = on;
+          syncLiveScene();
+          draw3d();
+        },
+        disabled: () => !sc.hasSeg,
       },
-      disabled: () => sc.volumeOpacity() <= 0,
-    },
-    {
-      label: "Show ROI box",
-      get: () => roiVisible,
-      set: (on) => {
-        roiVisible = on;
-        sc.setRoiVisible(on);
-        syncLiveScene();
-        draw3d();
-        xhair?.redraw();
+      // Segmentation overlay: fill (default) vs outline on the MPR planes.
+      {
+        label: "Segmentation outline",
+        get: () => sliceOutline,
+        set: (on) => {
+          sliceOutline = on;
+          sc.slice.setOverlayOutline(on);
+          for (const p of PLANES) drawSlice(p);
+          xhair?.redraw();
+        },
+        disabled: () => !sc.hasSeg,
       },
-    },
-    // DICOM corner annotations (IHE IRA) — the "official radiology look".
-    {
-      label: "Corner annotations",
-      get: () => annOn,
-      set: (on) => {
-        annOn = on;
-        applyAnn();
+      // 3D volume-render crop: enabling it reveals the ROI box the first time (Slicer behaviour).
+      {
+        label: "Crop volume (3D)",
+        get: () => roiEnabled,
+        set: (on) => {
+          roiEnabled = on;
+          if (on && roiFirstEnable) {
+            roiVisible = true;
+            roiFirstEnable = false;
+          }
+          sc.setRoiEnabled(roiEnabled);
+          sc.setRoiVisible(roiVisible);
+          syncLiveScene();
+          draw3d();
+          xhair?.redraw();
+        },
+        disabled: () => sc.volumeOpacity() <= 0,
       },
-    },
-  ];
-  const chrome = installChrome({
-    help: false,
-    controls,
-    anchor: cv.threeD.parentElement ?? undefined,
-    segments: {
-      list: () => sc.segments.map((s) => ({ num: s.num, name: s.name, color: s.color })),
-      get: (num) => sc.segmentOpacity(num),
-      set: (num, o) => {
-        sc.setSegmentOpacity(num, o);
-        syncLiveScene();
-        drawAll();
+      {
+        label: "Show ROI box",
+        get: () => roiVisible,
+        set: (on) => {
+          roiVisible = on;
+          sc.setRoiVisible(on);
+          syncLiveScene();
+          draw3d();
+          xhair?.redraw();
+        },
       },
-      enabled: () => sc.hasSeg,
-    },
-  });
+      // DICOM corner annotations (IHE IRA) — the "official radiology look".
+      {
+        label: "Corner annotations",
+        get: () => annOn,
+        set: (on) => {
+          annOn = on;
+          applyAnn();
+        },
+      },
+    ];
+
+    if (sc.segDisplayMode() === "colorize" && resolvedColorizeGroups.length) {
+      for (const g of resolvedColorizeGroups) {
+        const first = sc.segments.find((s) => s.num === g.segments[0]);
+        controls.push({
+          label: g.name,
+          section: "Organ groups",
+          getOpacity: () => colorizeGroupOp.get(g.name) ?? g.opacity,
+          setOpacity: (o) => {
+            colorizeGroupOp.set(g.name, o);
+            sc.setSegmentOpacities(g.segments.map((n) => [n, o]));
+            syncLiveScene();
+            drawAll();
+          },
+          color: first?.color ?? [0.62, 0.9, 1.0],
+        });
+      }
+    }
+    return controls;
+  };
+
+  reinstallChrome = () => {
+    try { chromeApi?.destroy(); } catch { /* ignore */ }
+    chromeApi = installChrome({
+      help: false,
+      controls: buildVizControls(),
+      anchor: cv.threeD.parentElement ?? undefined,
+      segments: {
+        list: () => sc.segments.map((s) => ({ num: s.num, name: s.name, color: s.color })),
+        get: (num) => sc.segmentOpacity(num),
+        set: (num, o) => {
+          sc.setSegmentOpacity(num, o);
+          syncLiveScene();
+          drawAll();
+        },
+        enabled: () => sc.hasSeg,
+      },
+    });
+  };
+  reinstallChrome();
+  const chrome = chromeApi!;
 
   buildAnnotations();
   applyAnn();
@@ -2206,6 +2336,44 @@ async function mountStudyFromSource(
           }
         },
       };
+    }
+    if (sceneSegDone) {
+      status("loading segmentation…");
+      await sceneSegDone;
+      if (signal?.aborted) {
+        return {
+          dispose: () => {
+            studyDisposed = true;
+            vanishingStore.clear();
+            setIraSegCatalog(EMPTY_SEG_CATALOG);
+            labelsOn = false;
+            try {
+              segCards.clear();
+            } catch {
+              /* ignore */
+            }
+            try {
+              ira?.detachKeys();
+            } catch {
+              /* ignore */
+            }
+            try {
+              chrome?.destroy();
+            } catch {
+              /* ignore */
+            }
+            try {
+              sc.destroy();
+            } catch {
+              /* ignore */
+            }
+            resetIraToolbarShell();
+            for (const el of document.querySelectorAll(".ann, .ira-overlay")) {
+              el.remove();
+            }
+          },
+        };
+      }
     }
     sampleRange();
     if (pendingIdcSeg) {

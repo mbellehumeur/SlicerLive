@@ -3,6 +3,7 @@
  * Always present on IRA status-response as context key ``segmentation``.
  */
 import type { SegLabelmap, SegmentTerminology } from "../../vendor/idc_tools/types.js";
+import { enrichTerminologyFromSegdb } from "../../../../reporting/segdb-lookup.ts";
 
 export type SegCatalogCoded = {
   scheme: string;
@@ -101,6 +102,7 @@ export function countSegmentVoxels(lab: Uint8Array): Map<number, number> {
 /**
  * Build a STATUS catalog from the currently displayed labelmap.
  * Merged overlays are reported as one segmentation instance (current display).
+ * Missing SCT codes are filled from MHubSkill SegDB when the label matches.
  */
 export function buildSegCatalog(
   labmap: SegLabelmap | null | undefined,
@@ -128,11 +130,16 @@ export function buildSegCatalog(
     const color: [number, number, number] = fromColors
       ? [fromColors[1], fromColors[2], fromColors[3]]
       : [1, 1, 1];
+    const label = labmap.names[num] || `Segment ${num}`;
+    const terminology = enrichTerminologyFromSegdb(
+      label,
+      termFor(labmap.terminology?.[num]),
+    );
     segments.push({
       number: num,
-      label: labmap.names[num] || `Segment ${num}`,
+      label,
       color,
-      terminology: termFor(labmap.terminology?.[num]),
+      terminology,
       voxelCount,
       volumeMm3: voxelCount * voxVol,
     });
