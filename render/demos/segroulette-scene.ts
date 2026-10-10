@@ -102,8 +102,10 @@ export interface SegrouletteScene {
   /** Batched opacity set — updates all, then rebakes the overlay + SDF ONCE (Isolate/Reset over N segments). */
   setSegmentOpacities(entries: [number, number][]): void;
   segmentOpacity(num: number): number;
-  /** Binary visibility convenience (opacity 0/1) — kept for tests + callers that only toggle. */
+  /** Binary visibility convenience — kept for tests + callers that only toggle. */
   setSegmentVisible(num: number, visible: boolean): void;
+  /** Batched visibility set — updates all, then rebakes the overlay + SDF ONCE (hide-all / scene-update). */
+  setSegmentVisibilities(entries: [number, boolean][]): void;
   isSegmentVisible(num: number): boolean;
   // Volume-only ROI crop (Slicer's independent enable + visibility). The box crops the VR but NOT
   // the segmentation. `roi` is the draggable widget; enable applies the clip, visible shows the box.
@@ -516,15 +518,23 @@ export function buildSegrouletteScene(
     },
     segmentOpacity: (num) => opacityOf(num),
     setSegmentVisible(num, visible) {
-      if (visible) segVisible.delete(num);
-      else segVisible.set(num, false);
+      out.setSegmentVisibilities([[num, visible]]);
+    },
+    setSegmentVisibilities(entries) {
+      // Batched: set every visibility flag, then rebake overlay + SDF attr ONCE. Hide-all / Cast
+      // scene-update rewrite every segment; calling setSegmentVisible per segment would rebake N times.
+      if (!entries.length) return;
+      for (const [num, visible] of entries) {
+        if (visible) segVisible.delete(num);
+        else segVisible.set(num, false);
+        if (segDisplayMode !== "colorize") segLogic?.setLabelOpacity(num, effectiveOpacity(num));
+      }
       if (segDisplayMode === "colorize" && colorizeField) {
         syncColorizePalette();
         scene.syncUniforms();
         return;
       }
       rebakeColorized();
-      segLogic?.setLabelOpacity(num, effectiveOpacity(num));
       segLogic?.refineNow();
     },
     isSegmentVisible: (num) => visibleOf(num),

@@ -131,7 +131,10 @@ fn fs_main(v : V) -> @location(0) vec4<f32> {
     let e = max(max(distance(n0.rgb, ov.rgb) + abs(n0.a - ov.a), distance(n1.rgb, ov.rgb) + abs(n1.a - ov.a)),
                 max(distance(n2.rgb, ov.rgb) + abs(n2.a - ov.a), distance(n3.rgb, ov.rgb) + abs(n3.a - ov.a)));
     let edge = clamp((e - 0.03) * 12.0, 0.0, 1.0);   // 0 in the interior, 1 at a colour/label edge
-    outA = clamp(ov.a * u.params.w * edge, 0.0, 1.0);
+    // Label-overlay (Colorize) mode: contours draw at full strength for every VISIBLE segment,
+    // independent of its fill opacity, so faint groups (lungs/muscle at ~5%) still read as shapes.
+    let segA = select(ov.a, select(0.0, 1.0, ov.a > 0.0), u.size.z > 0.5);
+    outA = clamp(segA * u.params.w * edge, 0.0, 1.0);
   }
   col = mix(col, ov.rgb, max(fillA, outA));
   return vec4<f32>(srgb2physical(col), 1.0);

@@ -1,5 +1,6 @@
 /**
- * IRA top-bar Cast topic (session info) + Reporting + Start/Leave conference + Remote AI + ?.
+ * IRA top-bar Conferencing + Reporting + Start/Leave conference + Remote AI + ?.
+ * User/topic session control lives in the Conferencing dialog.
  */
 import {
   applyCastConferenceHeaderActions,
@@ -17,7 +18,11 @@ import {
 import {
   applyHeaderChrome,
   conferenceStringsFor,
+  persistLocale,
+  applyDocumentLocale,
   resolveStoredLocale,
+  wireLanguagePicker,
+  type AppLocale,
 } from "../../../../i18n/index.ts";
 import {
   applyIraCastRadioVisual,
@@ -25,6 +30,7 @@ import {
   getIraLiveScene,
   openIraReportingClient,
   openIraWorklistClient,
+  refreshIraSegLabelsForLocale,
   requestIraStatusFromHostWorklist,
   setIraCastStatusListener,
   setIraConferenceFollowHost,
@@ -434,10 +440,14 @@ async function requestIraConferenceTakeover(): Promise<void> {
   }
 }
 
+/** Topic / session control from the Conferencing dialog (not the header). */
+let iraSessionStatusControl: HTMLElement | null = null;
+let iraSessionStatusLabel: HTMLElement | null = null;
+
 /** Conference role badge on the Cast status control (no header chips). */
 function renderConferenceChips(view: CastConferenceView | null): void {
-  const statusControl = document.getElementById("iraCastStatusBtn");
-  const statusLabelEl = document.getElementById("iraCastStatus");
+  const statusControl = iraSessionStatusControl;
+  const statusLabelEl = iraSessionStatusLabel;
   if (!(statusControl instanceof HTMLElement)) {
     return;
   }
@@ -478,7 +488,7 @@ function refreshConferenceHeaderActions(view: CastConferenceView | null): void {
 }
 
 function refreshRadio(): void {
-  const statusEl = document.getElementById("iraCastStatus");
+  const statusEl = iraSessionStatusLabel;
   if (statusEl) applyIraCastRadioVisual(statusEl);
   const view = getIraCastSessionInfo().conference;
   renderConferenceChips(view);
@@ -489,14 +499,10 @@ function refreshRadio(): void {
 export function installIraHeader(opts: IraHeaderOpts = {}): void {
   onMountLocalSeries = opts.onMountLocalSeries;
   const locale = resolveStoredLocale();
-  document.documentElement.lang = locale;
+  applyDocumentLocale(locale);
   applyHeaderChrome(document, locale);
   applyTheme(getStoredTheme());
 
-  refreshRadio();
-  setIraCastStatusListener(() => refreshRadio());
-
-  const castBtn = document.getElementById("iraCastStatusBtn");
   const helpBtn = document.getElementById("iraSettingsBtn");
   const sessionModal = document.getElementById("iraSessionModal");
   const sceneViewModal = document.getElementById("iraSceneViewModal");
@@ -507,14 +513,19 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
   installMedicalInferenceUi();
   installLoadLocalStudyUi();
 
-  if (!castBtn) return;
-
+  let conferenceDialog: ReturnType<typeof createCastConferenceDialog> | null =
+    null;
+  let inviteController: ReturnType<
+    typeof createCastConferenceInviteController
+  > | null = null;
   let openConferenceDialog = (_anchor?: HTMLElement | null): void => {
     console.warn("[ira] conference dialog not available");
   };
   try {
-    const conferenceDialog = createCastConferenceDialog({
+    conferenceDialog = createCastConferenceDialog({
       classPrefix: "cast-conference",
+      // Right-align under Conferencing so the panel opens left of the viz card.
+      anchorAlign: "end",
       strings: iraConferenceStrings(),
       getSession: () => {
         const info = getIraCastSessionInfo();
@@ -532,14 +543,35 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
       onFollowChange: (followHost) => {
         setIraConferenceFollowHost(followHost);
       },
+      onSessionControlClick: (btn) => {
+        const info = getIraCastSessionInfo();
+        const view = info.conference;
+        if (view?.places?.length) {
+          openCastConferenceParticipantsPopup({
+            anchor: btn,
+            view,
+            followHost: Boolean(info.conferenceFollowHost),
+            classPrefix: "ira-conference",
+          });
+          return;
+        }
+        if (sessionDl) fillSessionDl(sessionDl);
+        if (sessionModal) sessionModal.hidden = false;
+      },
     });
-    openConferenceDialog = (anchor) => conferenceDialog.open(anchor ?? null);
+    const sessionControl = conferenceDialog.getSessionControl();
+    iraSessionStatusControl = sessionControl.button;
+    iraSessionStatusLabel = sessionControl.label;
+    openConferenceDialog = (anchor) => conferenceDialog!.open(anchor ?? null);
   } catch (err) {
     console.error("[ira] conference dialog init failed", err);
   }
 
+  refreshRadio();
+  setIraCastStatusListener(() => refreshRadio());
+
   try {
-    const inviteController = createCastConferenceInviteController({
+    inviteController = createCastConferenceInviteController({
       classPrefix: "cast-conference-invite",
       strings: iraConferenceStrings(),
       getSession: () => {
@@ -574,28 +606,25 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
       },
     });
     setIraConferenceHubHandler((message) =>
-      inviteController.handleHubMessage(message)
+      inviteController!.handleHubMessage(message)
     );
   } catch (err) {
     console.error("[ira] conference invite init failed", err);
   }
 
-  castBtn.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    const info = getIraCastSessionInfo();
-    const view = info.conference;
-    if (view?.places?.length) {
-      openCastConferenceParticipantsPopup({
-        anchor: castBtn,
-        view,
-        followHost: Boolean(info.conferenceFollowHost),
-        classPrefix: "ira-conference",
-      });
-      return;
-    }
-    if (sessionDl) fillSessionDl(sessionDl);
-    if (sessionModal) sessionModal.hidden = false;
+  wireLanguagePicker({
+    getLocale: resolveStoredLocale,
+    setLocale: (code: AppLocale) => {
+      persistLocale(code);
+      applyHeaderChrome(document, code);
+      const strings = conferenceStringsFor(code);
+      conferenceDialog?.setStrings?.(strings);
+      inviteController?.setStrings?.(strings);
+      refreshRadio();
+      refreshIraSegLabelsForLocale();
+    },
   });
+
   helpBtn?.addEventListener("click", (ev) => {
     ev.stopPropagation();
     const hasScene = Boolean(getIraLiveScene());
@@ -613,7 +642,6 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
     .getElementById("iraStartConferenceBtn")
     ?.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      if (getIraCastSessionInfo().conference) return;
       const btn =
         ev.currentTarget instanceof HTMLElement ? ev.currentTarget : null;
       openConferenceDialog(btn);

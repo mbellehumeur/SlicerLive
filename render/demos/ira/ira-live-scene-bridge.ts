@@ -330,7 +330,7 @@ export function buildIraLiveSceneDoc(input: IraSceneSyncInput): IraLiveSceneDoc 
     type: "layout",
     id: IRA_LAYOUT_NODE_ID,
     name: String(prevLayout?.name || "Layout"),
-    arrangementName: String(prevLayout?.arrangementName || "fourUp"),
+    arrangementName: String(prevLayout?.arrangementName || "threeOne"),
     maximizedCell,
   } as MrsonNode;
 

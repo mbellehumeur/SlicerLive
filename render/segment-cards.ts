@@ -14,7 +14,14 @@ interface CodedEntry { scheme: string; value: string; meaning: string }
 interface SegTerm { type?: CodedEntry | null; region?: CodedEntry | null }
 export interface CtLike { vol: Int16Array | Float32Array; dims: [number, number, number]; ijkToRAS: number[]; modality?: string }
 export interface SegLike { lab: Uint8Array; terminology?: Record<number, SegTerm> }
-export interface SegmentInfo { num: number; name: string; color: [number, number, number]; voxels: number }
+export interface SegmentInfo {
+  num: number;
+  name: string;
+  color: [number, number, number];
+  voxels: number;
+  /** Wire/English name for terminology echo checks when `name` is localized. */
+  englishName?: string;
+}
 
 /** Coded terminology → a body line under the name: a meaning that ADDS to the name (region / a differing
  *  type), else the code (e.g. "SRT T-71000"), so it never just echoes the label. Undefined when absent. */
@@ -52,7 +59,14 @@ function build(ct: CtLike, seg: SegLike, segments: SegmentInfo[], maxCards: numb
     const e = acc.get(s.num); if (!e) continue;
     const c = ras(e.x / e.n, e.y / e.n, e.z / e.n);
     const hu = isCT ? { mean: e.s / e.n, std: Math.sqrt(Math.max(0, e.s2 / e.n - (e.s / e.n) ** 2)) } : undefined;
-    specs.push({ anchorRAS: c, id: s.num, title: s.name, subtitle: bodyText(term[s.num], s.name), swatch: s.color, stat: { voxels: e.n, volumeCc: (e.n * voxMm3) / 1000, hu } });
+    specs.push({
+      anchorRAS: c,
+      id: s.num,
+      title: s.name,
+      subtitle: bodyText(term[s.num], s.englishName ?? s.name),
+      swatch: s.color,
+      stat: { voxels: e.n, volumeCc: (e.n * voxMm3) / 1000, hu },
+    });
     const [lx, ly, lz] = e.lo, [hx, hy, hz] = e.hi;
     geom.push({ corners: [[lx, ly, lz], [hx, ly, lz], [lx, hy, lz], [hx, hy, lz], [lx, ly, hz], [hx, ly, hz], [lx, hy, hz], [hx, hy, hz]].map(([i, j, k]) => ras(i, j, k)) });
   }

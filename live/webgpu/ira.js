@@ -45,11 +45,11 @@ function perspectiveZO(fovy, aspect, near, far) {
   m[14] = far * near / (near - far);
   return m;
 }
-function perspectiveZOTile(fovy, viewW, viewH, x, y, w, h, near, far) {
+function perspectiveZOTile(fovy, viewW, viewH, x, y2, w, h, near, far) {
   const t = near * Math.tan(fovy / 2), b = -t;
   const r = t * (viewW / viewH), l = -r;
   const l2 = l + (r - l) * x / viewW, r2 = l + (r - l) * (x + w) / viewW;
-  const t2 = t - (t - b) * y / viewH, b2 = t - (t - b) * (y + h) / viewH;
+  const t2 = t - (t - b) * y2 / viewH, b2 = t - (t - b) * (y2 + h) / viewH;
   const m = new Float32Array(16);
   m[0] = 2 * near / (r2 - l2);
   m[5] = 2 * near / (t2 - b2);
@@ -168,10 +168,10 @@ function volumeAABBFromIjkToRAS(ijkToRAS, dims) {
 }
 function applyMat4(m, p) {
   const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
-  const y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
-  const z2 = m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14];
+  const y2 = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+  const z = m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14];
   const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15] || 1;
-  return [x / w, y / w, z2 / w];
+  return [x / w, y2 / w, z / w];
 }
 function spacingFromIjkToRAS(ijkToRAS) {
   const col = (c) => Math.hypot(ijkToRAS[c], ijkToRAS[4 + c], ijkToRAS[8 + c]);
@@ -194,19 +194,19 @@ function writeScalarTexture3DSlices(dev, texture, data, dims, zStart, zCount) {
   const maxBuffer = Math.max(1, Number(dev.limits.maxBufferSize) || 256 * 1024 * 1024);
   const maxChunkBytes = Math.max(bytesPerSlice, Math.floor(maxBuffer * 0.9));
   const slicesPerChunk = Math.max(1, Math.floor(maxChunkBytes / bytesPerSlice));
-  let z2 = zStart;
+  let z = zStart;
   const zEnd = zStart + depth;
-  while (z2 < zEnd) {
-    const chunkDepth = Math.min(slicesPerChunk, zEnd - z2);
-    const offsetFloats = z2 * dx * dy;
+  while (z < zEnd) {
+    const chunkDepth = Math.min(slicesPerChunk, zEnd - z);
+    const offsetFloats = z * dx * dy;
     const chunk = data.subarray(offsetFloats, offsetFloats + chunkDepth * dx * dy);
     dev.queue.writeTexture(
-      { texture, origin: [0, 0, z2] },
+      { texture, origin: [0, 0, z] },
       chunk,
       { bytesPerRow, rowsPerImage },
       [dx, dy, chunkDepth]
     );
-    z2 += chunkDepth;
+    z += chunkDepth;
   }
 }
 function writeScalarTexture3DRegion(dev, texture, data, dims, xStart, yStart, zStart, xCount, yCount, zCount) {
@@ -276,12 +276,12 @@ var ImageField = class {
       const bytesPerRow = dims[0] * bpe, rowsPerImage = dims[1], sliceBytes = bytesPerRow * rowsPerImage;
       const CHUNK = 256 * 1024 * 1024;
       const slab = Math.max(1, Math.min(dims[2], Math.floor(CHUNK / Math.max(1, sliceBytes))));
-      for (let z2 = 0; z2 < dims[2]; z2 += slab) {
-        const depth = Math.min(slab, dims[2] - z2);
+      for (let z = 0; z < dims[2]; z += slab) {
+        const depth = Math.min(slab, dims[2] - z);
         dev.queue.writeTexture(
-          { texture: this.volTex, origin: { x: 0, y: 0, z: z2 } },
+          { texture: this.volTex, origin: { x: 0, y: 0, z } },
           src,
-          { offset: z2 * sliceBytes, bytesPerRow, rowsPerImage },
+          { offset: z * sliceBytes, bytesPerRow, rowsPerImage },
           [dims[0], dims[1], depth]
         );
       }
@@ -475,7 +475,7 @@ fn sample_field_img${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
     out[off + 23] = this.shade[3];
     out[off + 24] = this.unit;
   }
-  bindEntries(_s, base) {
+  bindEntries(_s2, base) {
     return [
       { binding: base, resource: this.volTex.createView() },
       { binding: base + 1, resource: this.lutTex.createView() }
@@ -810,7 +810,7 @@ fn sample_field_seg${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
     out[off + 33] = this.box[1][1];
     out[off + 34] = this.box[1][2];
   }
-  bindEntries(_s, base) {
+  bindEntries(_s2, base) {
     const e = [{ binding: base, resource: this.tex.createView() }];
     if (this.attrTex) e.push({ binding: base + 1, resource: this.attrTex.createView() });
     return e;
@@ -831,8 +831,8 @@ var ZDT = {
   "<u1": Uint8Array
 };
 async function inflateDeflate(buf) {
-  const ds = new DecompressionStream("deflate");
-  return await new Response(new Response(buf).body.pipeThrough(ds)).arrayBuffer();
+  const ds2 = new DecompressionStream("deflate");
+  return await new Response(new Response(buf).body.pipeThrough(ds2)).arrayBuffer();
 }
 var blobFetch = (url) => fetch(url);
 function normalizeFetchOpts(onBytesOrOpts, concurrency = 12) {
@@ -850,22 +850,22 @@ function normalizeFetchOpts(onBytesOrOpts, concurrency = 12) {
     onBytes: onBytesOrOpts
   };
 }
-async function fetchZarrVolume(blobBase, z2, onBytesOrOpts, concurrency = 12) {
+async function fetchZarrVolume(blobBase, z, onBytesOrOpts, concurrency = 12) {
   const opts = normalizeFetchOpts(onBytesOrOpts, concurrency);
   if (opts.onSlab || opts.onChunk || opts.into) {
-    return await fetchZarrVolumeF32(blobBase, z2, opts);
+    return await fetchZarrVolumeF32(blobBase, z, opts);
   }
-  const zv = await fetchZarrVolumeNative(blobBase, z2, opts);
+  const zv = await fetchZarrVolumeNative(blobBase, z, opts);
   const data = zv.data instanceof Float32Array ? zv.data : Float32Array.from(zv.data);
   return { data, dims: zv.dims, range: zv.range };
 }
-async function fetchZarrVolumeNative(blobBase, z2, onBytesOrOpts, concurrency = 12) {
+async function fetchZarrVolumeNative(blobBase, z, onBytesOrOpts, concurrency = 12) {
   const opts = normalizeFetchOpts(onBytesOrOpts, concurrency);
-  const Ctor = ZDT[z2.dtype] ?? Int16Array;
-  return await assembleZarr(blobBase, z2, Ctor, opts);
+  const Ctor = ZDT[z.dtype] ?? Int16Array;
+  return await assembleZarr(blobBase, z, Ctor, opts);
 }
-async function fetchZarrVolumeF32(blobBase, z2, opts) {
-  const zv = await assembleZarr(blobBase, z2, Float32Array, opts);
+async function fetchZarrVolumeF32(blobBase, z, opts) {
+  const zv = await assembleZarr(blobBase, z, Float32Array, opts);
   return { data: zv.data, dims: zv.dims, range: zv.range };
 }
 function orderChunkJobsMprFirst(ncz, ncy, ncx) {
@@ -892,10 +892,10 @@ function orderChunkJobsMprFirst(ncz, ncy, ncx) {
   rest.sort(byCenter);
   return [...axial, ...cross3, ...rest];
 }
-async function assembleZarr(blobBase, z2, Ctor, opts) {
-  const [nz, ny, nx] = z2.shape, [cz, cy, cx] = z2.chunks, [ncz, ncy, ncx] = z2.chunkGrid;
-  const hashes = z2.chunkHashes;
-  const posBase = blobBase + z2.dir + "/" + z2.dataset + "/";
+async function assembleZarr(blobBase, z, Ctor, opts) {
+  const [nz, ny, nx] = z.shape, [cz, cy, cx] = z.chunks, [ncz, ncy, ncx] = z.chunkGrid;
+  const hashes = z.chunkHashes;
+  const posBase = blobBase + z.dir + "/" + z.dataset + "/";
   const chunkUrl = (kk, jj, ii2) => hashes ? blobBase + hashes[kk + "." + jj + "." + ii2] : posBase + kk + "." + jj + "." + ii2;
   const expected = nz * ny * nx;
   let out;
@@ -944,7 +944,7 @@ async function assembleZarr(blobBase, z2, Ctor, opts) {
         gz = await resp.arrayBuffer();
         onBytes?.(gz.byteLength);
       }
-      const SrcCtor = ZDT[z2.dtype] ?? Int16Array;
+      const SrcCtor = ZDT[z.dtype] ?? Int16Array;
       const chunk = new SrcCtor(await inflateDeflate(gz));
       const z0 = kk * cz, y0 = jj * cy, x0 = ii2 * cx;
       const zw = Math.min(cz, nz - z0), yw = Math.min(cy, ny - y0), xw = Math.min(cx, nx - x0);
@@ -984,7 +984,7 @@ async function assembleZarr(blobBase, z2, Ctor, opts) {
     }
   };
   await Promise.all(Array.from({ length: Math.min(opts.concurrency, jobs.length) }, worker));
-  return { data: out, dtype: z2.dtype, dims, range: [lo2, hi2] };
+  return { data: out, dtype: z.dtype, dims, range: [lo2, hi2] };
 }
 
 // render/mrson.ts
@@ -1070,7 +1070,7 @@ function interpTF(tf, s, comps) {
     if (s <= tf[i][0]) {
       const a = tf[i - 1], b = tf[i];
       const u = (s - a[0]) / Math.max(b[0] - a[0], 1e-9);
-      return Array.from({ length: comps }, (_2, c) => a[1 + c] + u * (b[1 + c] - a[1 + c]));
+      return Array.from({ length: comps }, (_, c) => a[1 + c] + u * (b[1 + c] - a[1 + c]));
     }
   }
   return last.slice(1, 1 + comps);
@@ -1123,7 +1123,7 @@ function scaledIjkToRAS(base, factor) {
 }
 function levelFromRecord(L, fallbackIjk) {
   const level = Number(L.level ?? 0);
-  const z2 = {
+  const z = {
     dir: L.dir,
     dataset: String(L.dataset ?? level),
     shape: L.shape,
@@ -1134,7 +1134,7 @@ function levelFromRecord(L, fallbackIjk) {
     chunkHashes: L.chunkHashes
   };
   const ijk = Array.isArray(L.ijkToRAS) ? L.ijkToRAS.slice() : scaledIjkToRAS(fallbackIjk, 2 ** level);
-  return { level, z: z2, ijkToRAS: ijk };
+  return { level, z, ijkToRAS: ijk };
 }
 async function resolveSceneLevels(parsed) {
   const attrs = parsed.vol.attrs ?? {};
@@ -1176,7 +1176,7 @@ async function parseSceneJson(sceneSource, opts = {}) {
   const blobBase = new URL(wrapper.blobBase ?? "./blobs/", sceneAbs).href;
   const vol = Object.values(nodes).find((n) => n.class === "vtkMRMLScalarVolumeNode" && n.attrs?.zarr);
   if (!vol) throw new Error("no zarr ScalarVolumeNode in scene");
-  const z2 = vol.attrs.zarr;
+  const z = vol.attrs.zarr;
   let ijkToRAS = vol.attrs.ijkToRAS;
   if (!ijkToRAS) throw new Error("volume node has no ijkToRAS");
   if (opts.extraTranslationRAS) {
@@ -1214,7 +1214,7 @@ async function parseSceneJson(sceneSource, opts = {}) {
     nodes,
     blobBase,
     vol,
-    z: z2,
+    z,
     ijkToRAS,
     lut,
     clim,
@@ -1339,11 +1339,11 @@ function invAffineRowMajor(m) {
     1
   ];
 }
-function applyRowMajor(m, i, j2, k) {
+function applyRowMajor(m, i, j, k) {
   return [
-    m[0] * i + m[1] * j2 + m[2] * k + m[3],
-    m[4] * i + m[5] * j2 + m[6] * k + m[7],
-    m[8] * i + m[9] * j2 + m[10] * k + m[11]
+    m[0] * i + m[1] * j + m[2] * k + m[3],
+    m[4] * i + m[5] * j + m[6] * k + m[7],
+    m[8] * i + m[9] * j + m[10] * k + m[11]
   ];
 }
 function resampleLabelmapToCt(src, srcDims, srcIjkToRas, ctDims, ctIjkToRas) {
@@ -1355,10 +1355,10 @@ function resampleLabelmapToCt(src, srcDims, srcIjkToRas, ctDims, ctIjkToRas) {
   let clipped = 0;
   for (let k = 0; k < nz; k++) {
     const plane = k * nx * ny;
-    for (let j2 = 0; j2 < ny; j2++) {
-      const row = plane + j2 * nx;
+    for (let j = 0; j < ny; j++) {
+      const row = plane + j * nx;
       for (let i = 0; i < nx; i++) {
-        const [rx, ry, rz] = applyRowMajor(ctIjkToRas, i, j2, k);
+        const [rx, ry, rz] = applyRowMajor(ctIjkToRas, i, j, k);
         const [si2, sj, sk] = applyRowMajor(rasToSrc, rx, ry, rz);
         const ii2 = Math.round(si2);
         const jj = Math.round(sj);
@@ -1674,7 +1674,10 @@ fn fs_main(v : V) -> @location(0) vec4<f32> {
     let e = max(max(distance(n0.rgb, ov.rgb) + abs(n0.a - ov.a), distance(n1.rgb, ov.rgb) + abs(n1.a - ov.a)),
                 max(distance(n2.rgb, ov.rgb) + abs(n2.a - ov.a), distance(n3.rgb, ov.rgb) + abs(n3.a - ov.a)));
     let edge = clamp((e - 0.03) * 12.0, 0.0, 1.0);   // 0 in the interior, 1 at a colour/label edge
-    outA = clamp(ov.a * u.params.w * edge, 0.0, 1.0);
+    // Label-overlay (Colorize) mode: contours draw at full strength for every VISIBLE segment,
+    // independent of its fill opacity, so faint groups (lungs/muscle at ~5%) still read as shapes.
+    let segA = select(ov.a, select(0.0, 1.0, ov.a > 0.0), u.size.z > 0.5);
+    outA = clamp(segA * u.params.w * edge, 0.0, 1.0);
   }
   col = mix(col, ov.rgb, max(fillA, outA));
   return vec4<f32>(srgb2physical(col), 1.0);
@@ -2013,9 +2016,9 @@ var SliceRenderer = class {
    *  uS/vS are the FULL in-plane extents mapped across the viewport width/height. */
   frameFor(orient, offset01, aspectWH) {
     const b = this.basisOf(orient);
-    const vs = this.viewState[orient];
+    const vs2 = this.viewState[orient];
     const { uS0, vS0 } = this.fitUV(orient, aspectWH);
-    const uS = uS0 / vs.zoom, vS = vS0 / vs.zoom;
+    const uS = uS0 / vs2.zoom, vS = vS0 / vs2.zoom;
     const c = [(this.rasLo[0] + this.rasHi[0]) / 2, (this.rasLo[1] + this.rasHi[1]) / 2, (this.rasLo[2] + this.rasHi[2]) / 2];
     const nx = this.extentAlong(b.nDir);
     const want = nx.lo + Math.max(0, Math.min(1, offset01)) * (nx.hi - nx.lo);
@@ -2023,9 +2026,9 @@ var SliceRenderer = class {
     c[0] += b.nDir[0] * (want - have);
     c[1] += b.nDir[1] * (want - have);
     c[2] += b.nDir[2] * (want - have);
-    c[0] += b.uDir[0] * vs.panU + b.vDir[0] * vs.panV;
-    c[1] += b.uDir[1] * vs.panU + b.vDir[1] * vs.panV;
-    c[2] += b.uDir[2] * vs.panU + b.vDir[2] * vs.panV;
+    c[0] += b.uDir[0] * vs2.panU + b.vDir[0] * vs2.panV;
+    c[1] += b.uDir[1] * vs2.panU + b.vDir[1] * vs2.panV;
+    c[2] += b.uDir[2] * vs2.panU + b.vDir[2] * vs2.panV;
     return { b, c, uS, vS };
   }
   /** Zoom factor for an orientation (1 = fitted). */
@@ -2034,20 +2037,20 @@ var SliceRenderer = class {
   }
   /** Pan the in-plane view by a pixel delta (drag): the anatomy under the cursor follows it. */
   panByPixels(orient, dxPx, dyPx, w, h) {
-    const z2 = this.viewState[orient].zoom;
+    const z = this.viewState[orient].zoom;
     const { uS0, vS0 } = this.fitUV(orient, w / h);
-    const uS = uS0 / z2, vS = vS0 / z2;
+    const uS = uS0 / z, vS = vS0 / z;
     this.viewState[orient].panU -= dxPx / w * uS;
     this.viewState[orient].panV += dyPx / h * vS;
   }
   /** Zoom by `factor` (>1 zooms in) about a pivot (u,v in [0,1]); the pivot point stays fixed. */
   zoomAbout(orient, factor, pu, pv, w, h) {
-    const vs = this.viewState[orient];
+    const vs2 = this.viewState[orient];
     const { uS0, vS0 } = this.fitUV(orient, w / h);
-    const z2 = Math.max(0.2, Math.min(50, vs.zoom * factor));
-    vs.panU += (pu - 0.5) * (uS0 / vs.zoom - uS0 / z2);
-    vs.panV += (0.5 - pv) * (vS0 / vs.zoom - vS0 / z2);
-    vs.zoom = z2;
+    const z = Math.max(0.2, Math.min(50, vs2.zoom * factor));
+    vs2.panU += (pu - 0.5) * (uS0 / vs2.zoom - uS0 / z);
+    vs2.panV += (0.5 - pv) * (vS0 / vs2.zoom - vS0 / z);
+    vs2.zoom = z;
   }
   /** Reset pan/zoom for an orientation to the fitted view. */
   resetView(orient) {
@@ -2058,9 +2061,9 @@ var SliceRenderer = class {
     return structuredClone(this.viewState);
   }
   /** Restore a (possibly partial) snapshot from getViewState(). */
-  setViewState(vs) {
-    for (const k of Object.keys(vs)) {
-      const v = vs[k];
+  setViewState(vs2) {
+    for (const k of Object.keys(vs2)) {
+      const v = vs2[k];
       if (v && Number.isFinite(v.zoom) && v.zoom > 0) this.viewState[k] = { ...v };
     }
   }
@@ -2233,7 +2236,7 @@ struct VO { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
     await buf.mapAsync(GPUMapMode.READ);
     const padded = new Uint8Array(buf.getMappedRange());
     const out = new Uint8Array(w * h * 4);
-    for (let y = 0; y < h; y++) out.set(padded.subarray(y * bpr, y * bpr + w * 4), y * w * 4);
+    for (let y2 = 0; y2 < h; y2++) out.set(padded.subarray(y2 * bpr, y2 * bpr + w * 4), y2 * w * 4);
     buf.unmap();
     target.destroy();
     buf.destroy();
@@ -3420,9 +3423,9 @@ ${pickDispatch}
       this.dev.queue.submit([enc2.finish()]);
       await read.mapAsync(GPUMapMode.READ);
       const t = new BigUint64Array(read.getMappedRange());
-      const ms = Number(t[1] - t[0]) / 1e6;
+      const ms2 = Number(t[1] - t[0]) / 1e6;
       read.unmap();
-      if (ms > 0 && Number.isFinite(ms)) samples.push(ms);
+      if (ms2 > 0 && Number.isFinite(ms2)) samples.push(ms2);
     }
     target.destroy();
     qs.destroy();
@@ -3446,7 +3449,7 @@ ${pickDispatch}
     await buf.mapAsync(GPUMapMode.READ);
     const padded = new Uint8Array(buf.getMappedRange());
     const out = new Uint8Array(width * height * 4);
-    for (let y = 0; y < height; y++) out.set(padded.subarray(y * bpr, y * bpr + width * 4), y * width * 4);
+    for (let y2 = 0; y2 < height; y2++) out.set(padded.subarray(y2 * bpr, y2 * bpr + width * 4), y2 * width * 4);
     buf.unmap();
     target.destroy();
     buf.destroy();
@@ -3478,7 +3481,7 @@ ${pickDispatch}
     await buf.mapAsync(GPUMapMode.READ);
     const padded = new Uint8Array(buf.getMappedRange());
     const out = new Uint8Array(width * height * 4);
-    for (let y = 0; y < height; y++) out.set(padded.subarray(y * bpr, y * bpr + width * 4), y * width * 4);
+    for (let y2 = 0; y2 < height; y2++) out.set(padded.subarray(y2 * bpr, y2 * bpr + width * 4), y2 * width * 4);
     buf.unmap();
     target.destroy();
     buf.destroy();
@@ -4047,7 +4050,7 @@ fn sample_field_clz${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
     out[off + 29] = this.dims[1];
     out[off + 30] = this.dims[2];
   }
-  bindEntries(_s, base) {
+  bindEntries(_s2, base) {
     return [
       { binding: base, resource: this.ctTex.createView() },
       { binding: base + 1, resource: this.labTex.createView() },
@@ -4155,10 +4158,10 @@ var FiducialField = class {
       `  fid${s}_colors : array<vec4<f32>, ${MAX}>,`
     ].join("\n");
   }
-  declareBindings(_s, _base) {
+  declareBindings(_s2, _base) {
     return "";
   }
-  bindEntries(_s, _base) {
+  bindEntries(_s2, _base) {
     return [];
   }
   // --- empty-space skipping -------------------------------------------------
@@ -4470,20 +4473,20 @@ function createRoiWidget(lo2, hi2, opts = {}) {
 // algorithms/geom.ts
 function labelmapHasInternalBoundary(lab, dims) {
   const [nx, ny, nz] = dims;
-  const at2 = (x, y, z2) => lab[(z2 * ny + y) * nx + x];
-  for (let z2 = 0; z2 < nz; z2++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
-    const v = at2(x, y, z2);
+  const at2 = (x, y2, z) => lab[(z * ny + y2) * nx + x];
+  for (let z = 0; z < nz; z++) for (let y2 = 0; y2 < ny; y2++) for (let x = 0; x < nx; x++) {
+    const v = at2(x, y2, z);
     if (v === 0) continue;
     if (x + 1 < nx) {
-      const n = at2(x + 1, y, z2);
+      const n = at2(x + 1, y2, z);
       if (n !== 0 && n !== v) return true;
     }
-    if (y + 1 < ny) {
-      const n = at2(x, y + 1, z2);
+    if (y2 + 1 < ny) {
+      const n = at2(x, y2 + 1, z);
       if (n !== 0 && n !== v) return true;
     }
-    if (z2 + 1 < nz) {
-      const n = at2(x, y, z2 + 1);
+    if (z + 1 < nz) {
+      const n = at2(x, y2, z + 1);
       if (n !== 0 && n !== v) return true;
     }
   }
@@ -4506,13 +4509,13 @@ function resampleIsotropic(lab, dims, ijkToRAS, maxDim, maxVoxels = Infinity) {
     for (let i = 0; i < out.length; i++) out[i] = lab[i];
     return { lab: out, dims, ijkToRAS, vox, coarsened };
   }
-  for (let z2 = 0; z2 < cz; z2++) {
-    const sz = Math.min(nz - 1, Math.floor((z2 + 0.5) * nz / cz));
-    for (let y = 0; y < cy; y++) {
-      const sy = Math.min(ny - 1, Math.floor((y + 0.5) * ny / cy));
+  for (let z = 0; z < cz; z++) {
+    const sz = Math.min(nz - 1, Math.floor((z + 0.5) * nz / cz));
+    for (let y2 = 0; y2 < cy; y2++) {
+      const sy = Math.min(ny - 1, Math.floor((y2 + 0.5) * ny / cy));
       for (let x = 0; x < cx; x++) {
         const sx = Math.min(nx - 1, Math.floor((x + 0.5) * nx / cx));
-        out[(z2 * cy + y) * cx + x] = lab[(sz * ny + sy) * nx + sx];
+        out[(z * cy + y2) * cx + x] = lab[(sz * ny + sy) * nx + sx];
       }
     }
   }
@@ -4602,8 +4605,8 @@ var EditableSegmentation = class {
     await buf.mapAsync(GPUMapMode.READ);
     const padded = new Uint32Array(buf.getMappedRange());
     const out = new Uint32Array(dx * dy * dz);
-    for (let z2 = 0; z2 < dz; z2++) for (let y = 0; y < dy; y++) {
-      const src = (z2 * dy + y) * rowU32, dst = (z2 * dy + y) * dx;
+    for (let z = 0; z < dz; z++) for (let y2 = 0; y2 < dy; y2++) {
+      const src = (z * dy + y2) * rowU32, dst = (z * dy + y2) * dx;
       for (let x = 0; x < dx; x++) out[dst + x] = padded[src + x];
     }
     buf.unmap();
@@ -4942,8 +4945,8 @@ var JfaSdfBaker = class {
       return s * Math.pow(2, e - 15) * (1 + f / 1024);
     };
     const out = new Float32Array(dx * dy * dz);
-    for (let z2 = 0; z2 < dz; z2++) for (let y = 0; y < dy; y++) for (let x = 0; x < dx; x++) {
-      out[(z2 * dy + y) * dx + x] = h2f(u162[(z2 * dy + y) * rowU16 + x * 4 + 3]);
+    for (let z = 0; z < dz; z++) for (let y2 = 0; y2 < dy; y2++) for (let x = 0; x < dx; x++) {
+      out[(z * dy + y2) * dx + x] = h2f(u162[(z * dy + y2) * rowU16 + x * 4 + 3]);
     }
     buf.unmap();
     buf.destroy();
@@ -5370,15 +5373,15 @@ var SegmentationLogic = class {
     const inv = invertAffine(this.sdf.sdfIjkToRAS());
     const lo2 = [Infinity, Infinity, Infinity];
     const hi2 = [-Infinity, -Infinity, -Infinity];
-    for (const x of [regionRAS.lo[0], regionRAS.hi[0]]) for (const y of [regionRAS.lo[1], regionRAS.hi[1]]) for (const z2 of [regionRAS.lo[2], regionRAS.hi[2]]) {
-      const i = inv[0] * x + inv[1] * y + inv[2] * z2 + inv[3];
-      const j2 = inv[4] * x + inv[5] * y + inv[6] * z2 + inv[7];
-      const k = inv[8] * x + inv[9] * y + inv[10] * z2 + inv[11];
+    for (const x of [regionRAS.lo[0], regionRAS.hi[0]]) for (const y2 of [regionRAS.lo[1], regionRAS.hi[1]]) for (const z of [regionRAS.lo[2], regionRAS.hi[2]]) {
+      const i = inv[0] * x + inv[1] * y2 + inv[2] * z + inv[3];
+      const j = inv[4] * x + inv[5] * y2 + inv[6] * z + inv[7];
+      const k = inv[8] * x + inv[9] * y2 + inv[10] * z + inv[11];
       lo2[0] = Math.min(lo2[0], i);
-      lo2[1] = Math.min(lo2[1], j2);
+      lo2[1] = Math.min(lo2[1], j);
       lo2[2] = Math.min(lo2[2], k);
       hi2[0] = Math.max(hi2[0], i);
-      hi2[1] = Math.max(hi2[1], j2);
+      hi2[1] = Math.max(hi2[1], j);
       hi2[2] = Math.max(hi2[2], k);
     }
     return {
@@ -5768,9 +5771,9 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
       }
       rebuild();
     },
-    setLayers(sv, ss) {
+    setLayers(sv, ss2) {
       this.setVolumeOpacity(sv ? 1 : 0);
-      this.setSegOpacity(ss ? 1 : 0);
+      this.setSegOpacity(ss2 ? 1 : 0);
     },
     setVolumeOpacity(o) {
       volumeOpacity = Math.max(0, Math.min(1, o));
@@ -5861,15 +5864,21 @@ function buildSegrouletteScene(gpu, format, ct2, seg, opts = {}) {
     },
     segmentOpacity: (num2) => opacityOf(num2),
     setSegmentVisible(num2, visible) {
-      if (visible) segVisible.delete(num2);
-      else segVisible.set(num2, false);
+      out.setSegmentVisibilities([[num2, visible]]);
+    },
+    setSegmentVisibilities(entries) {
+      if (!entries.length) return;
+      for (const [num2, visible] of entries) {
+        if (visible) segVisible.delete(num2);
+        else segVisible.set(num2, false);
+        if (segDisplayMode !== "colorize") segLogic?.setLabelOpacity(num2, effectiveOpacity(num2));
+      }
       if (segDisplayMode === "colorize" && colorizeField) {
         syncColorizePalette();
         scene.syncUniforms();
         return;
       }
       rebakeColorized();
-      segLogic?.setLabelOpacity(num2, effectiveOpacity(num2));
       segLogic?.refineNow();
     },
     isSegmentVisible: (num2) => visibleOf(num2),
@@ -5990,7 +5999,7 @@ function createCrosshair(visible = true) {
   };
   return st2;
 }
-function drawCross(ctx, x, y, opts = {}) {
+function drawCross(ctx, x, y2, opts = {}) {
   const size = opts.size ?? 11, gap = opts.gap ?? 3;
   ctx.save();
   ctx.lineWidth = 1.5;
@@ -5998,14 +6007,14 @@ function drawCross(ctx, x, y, opts = {}) {
   ctx.shadowColor = "rgba(0,0,0,0.8)";
   ctx.shadowBlur = 2;
   ctx.beginPath();
-  ctx.moveTo(x - size, y);
-  ctx.lineTo(x - gap, y);
-  ctx.moveTo(x + gap, y);
-  ctx.lineTo(x + size, y);
-  ctx.moveTo(x, y - size);
-  ctx.lineTo(x, y - gap);
-  ctx.moveTo(x, y + gap);
-  ctx.lineTo(x, y + size);
+  ctx.moveTo(x - size, y2);
+  ctx.lineTo(x - gap, y2);
+  ctx.moveTo(x + gap, y2);
+  ctx.lineTo(x + size, y2);
+  ctx.moveTo(x, y2 - size);
+  ctx.lineTo(x, y2 - gap);
+  ctx.moveTo(x, y2 + gap);
+  ctx.lineTo(x, y2 + size);
   ctx.stroke();
   ctx.restore();
 }
@@ -6227,13 +6236,13 @@ var VtkCamera = class _VtkCamera {
   /** Inverse of worldToDisplay at a FIXED view-depth: the world point under display pixel (x,y)
    *  lying in the plane perpendicular to the view at `depth`. Dragging a 3D handle in this plane
    *  keeps its distance from the camera, so it tracks the cursor without depth ambiguity. */
-  displayToWorldAtDepth(x, y, depth, w, h) {
+  displayToWorldAtDepth(x, y2, depth, w, h) {
     const { right, up } = this.basis();
     const dop = this.directionOfProjection;
     const halfH = Math.max(1e-6, depth) * Math.tan(this.viewAngle * Math.PI / 360);
     const aspect = w / h;
     const ndcx = x / w * 2 - 1;
-    const ndcy = 1 - y / h * 2;
+    const ndcy = 1 - y2 / h * 2;
     const offset2 = add(scale(right, ndcx * halfH * aspect), scale(up, ndcy * halfH));
     return add(add(this.position, scale(dop, depth)), offset2);
   }
@@ -6289,9 +6298,9 @@ var CameraInteractor = class _CameraInteractor {
   /** Mouse move while dragging. width/height are the view size in CSS pixels. */
   move(cssX, cssY, width, height) {
     if (this.action === "none" || !this.prev) return;
-    const [x, y] = _CameraInteractor.toDisplay(cssX, cssY, height);
+    const [x, y2] = _CameraInteractor.toDisplay(cssX, cssY, height);
     const dx = x - this.prev[0];
-    const dy = y - this.prev[1];
+    const dy = y2 - this.prev[1];
     if (dx === 0 && dy === 0) return;
     switch (this.action) {
       case "rotate":
@@ -6304,10 +6313,10 @@ var CameraInteractor = class _CameraInteractor {
         this.scale(dy, height);
         break;
       case "spin":
-        this.spin(x, y, this.prev[0], this.prev[1], width, height);
+        this.spin(x, y2, this.prev[0], this.prev[1], width, height);
         break;
     }
-    this.prev = [x, y];
+    this.prev = [x, y2];
     this.onChange?.();
   }
   /** vtkMRMLCameraWidget::ProcessRotate */
@@ -6327,9 +6336,9 @@ var CameraInteractor = class _CameraInteractor {
     this.camera.dolly(Math.pow(1.1, -dyf));
   }
   /** vtkMRMLCameraWidget::ProcessSpin — roll about the view plane normal. */
-  spin(x, y, px, py, width, height) {
+  spin(x, y2, px, py, width, height) {
     const cx = width / 2, cy = height / 2;
-    const newAngle = Math.atan2(y - cy, x - cx) * 180 / Math.PI;
+    const newAngle = Math.atan2(y2 - cy, x - cx) * 180 / Math.PI;
     const oldAngle = Math.atan2(py - cy, px - cx) * 180 / Math.PI;
     this.roll(newAngle - oldAngle);
   }
@@ -6389,12 +6398,12 @@ function attachCameraControls(canvas, camera, opts = {}) {
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   canvas.addEventListener("pointerdown", (e) => {
     if (!on2()) return;
-    const { x, y } = local(e);
-    pointers.set(e.pointerId, { x, y });
+    const { x, y: y2 } = local(e);
+    pointers.set(e.pointerId, { x, y: y2 });
     canvas.setPointerCapture(e.pointerId);
     if (pointers.size === 1) {
-      interactor.start(e.button, x, y, canvas.clientHeight, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey });
-      opts.onLog?.("cameraStart", { action: interactor.action, x, y, button: e.button, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey });
+      interactor.start(e.button, x, y2, canvas.clientHeight, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey });
+      opts.onLog?.("cameraStart", { action: interactor.action, x, y: y2, button: e.button, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey });
     } else if (pointers.size === 2) {
       interactor.end();
       pinch = pinchState();
@@ -6430,8 +6439,8 @@ function attachCameraControls(canvas, camera, opts = {}) {
   canvas.addEventListener("pointermove", (e) => {
     if (!on2()) return;
     if (!pointers.has(e.pointerId)) return;
-    const { x, y } = local(e);
-    pointers.set(e.pointerId, { x, y });
+    const { x, y: y2 } = local(e);
+    pointers.set(e.pointerId, { x, y: y2 });
     if (pointers.size >= 3) {
       const c = centroid();
       if (triple) opts.onVolumeDrag?.(c.mx - triple.mx, c.my - triple.my);
@@ -6446,7 +6455,7 @@ function attachCameraControls(canvas, camera, opts = {}) {
       }
       pinch = p;
     } else if (interactor.action !== "none") {
-      interactor.move(x, y, canvas.clientWidth, canvas.clientHeight);
+      interactor.move(x, y2, canvas.clientWidth, canvas.clientHeight);
     }
   });
   canvas.addEventListener("wheel", (e) => {
@@ -6709,7 +6718,7 @@ function attachWidgetControls(canvas, camera, opts) {
     return [ro4[0] + rd[0] * t, ro4[1] + rd[1] * t, ro4[2] + rd[2] * t];
   };
   const pick = (e) => {
-    const { x, y, rw, rh } = cursorCss(e);
+    const { x, y: y2, rw, rh } = cursorCss(e);
     const { w, h } = opts.getSize();
     const { vp } = camMatrices(camera, w, h);
     const touch = e.pointerType === "touch";
@@ -6718,7 +6727,7 @@ function attachWidgetControls(canvas, camera, opts) {
       const s = project(vp, hnd.world, rw, rh);
       if (!s) continue;
       const r = (hnd.pickPx ?? 16) * (touch ? 2.75 : 1);
-      const d = Math.hypot(s.x - x, s.y - y);
+      const d = Math.hypot(s.x - x, s.y - y2);
       if (d < r && d < bestD) {
         bestD = d;
         best = hnd;
@@ -6765,10 +6774,10 @@ function attachWidgetControls(canvas, camera, opts) {
   const onMove = (e) => {
     if (!grabbed || e.pointerId !== grabbedId) return;
     e.stopPropagation();
-    const { x, y, rw, rh } = cursorCss(e);
+    const { x, y: y2, rw, rh } = cursorCss(e);
     const { w, h } = opts.getSize();
     const { invVp } = camMatrices(camera, w, h);
-    const world = unprojectToPlane(invVp, x, y, rw, rh, grabbed.world);
+    const world = unprojectToPlane(invVp, x, y2, rw, rh, grabbed.world);
     opts.onDrag(grabbed, world);
     opts.onChange?.();
   };
@@ -7553,25 +7562,25 @@ function layoutText(font, text, opts = {}) {
   return { quads, width: maxLineW, height: lineIdx * lineH, lines: lineIdx };
 }
 var INF = 1e20;
-function edt1d(f, n, d, v, z2) {
+function edt1d(f, n, d, v, z) {
   let k = 0;
   v[0] = 0;
-  z2[0] = -INF;
-  z2[1] = INF;
+  z[0] = -INF;
+  z[1] = INF;
   for (let q2 = 1; q2 < n; q2++) {
     let s = (f[q2] + q2 * q2 - (f[v[k]] + v[k] * v[k])) / (2 * q2 - 2 * v[k]);
-    while (s <= z2[k]) {
+    while (s <= z[k]) {
       k--;
       s = (f[q2] + q2 * q2 - (f[v[k]] + v[k] * v[k])) / (2 * q2 - 2 * v[k]);
     }
     k++;
     v[k] = q2;
-    z2[k] = s;
-    z2[k + 1] = INF;
+    z[k] = s;
+    z[k + 1] = INF;
   }
   k = 0;
   for (let q2 = 0; q2 < n; q2++) {
-    while (z2[k + 1] < q2) k++;
+    while (z[k + 1] < q2) k++;
     const dv = q2 - v[k];
     d[q2] = dv * dv + f[v[k]];
   }
@@ -7580,17 +7589,17 @@ function edt2d(mask, w, h) {
   const g = new Float64Array(w * h);
   for (let i = 0; i < w * h; i++) g[i] = mask[i] ? 0 : INF;
   const maxn = Math.max(w, h);
-  const f = new Float64Array(maxn), d = new Float64Array(maxn), z2 = new Float64Array(maxn + 1);
+  const f = new Float64Array(maxn), d = new Float64Array(maxn), z = new Float64Array(maxn + 1);
   const v = new Int32Array(maxn);
   for (let x = 0; x < w; x++) {
-    for (let y = 0; y < h; y++) f[y] = g[y * w + x];
-    edt1d(f, h, d, v, z2);
-    for (let y = 0; y < h; y++) g[y * w + x] = d[y];
+    for (let y2 = 0; y2 < h; y2++) f[y2] = g[y2 * w + x];
+    edt1d(f, h, d, v, z);
+    for (let y2 = 0; y2 < h; y2++) g[y2 * w + x] = d[y2];
   }
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) f[x] = g[y * w + x];
-    edt1d(f, w, d, v, z2);
-    for (let x = 0; x < w; x++) g[y * w + x] = d[x];
+  for (let y2 = 0; y2 < h; y2++) {
+    for (let x = 0; x < w; x++) f[x] = g[y2 * w + x];
+    edt1d(f, w, d, v, z);
+    for (let x = 0; x < w; x++) g[y2 * w + x] = d[x];
   }
   return g;
 }
@@ -7665,9 +7674,9 @@ function buildFontAtlas(opts = {}) {
       continue;
     }
     const sub5 = new Uint8Array(cw * chh);
-    for (let y = 0; y < chh; y++) for (let x = 0; x < cw; x++) sub5[y * cw + x] = alpha[(p.cy + y) * atlasW + (p.cx + x)];
+    for (let y2 = 0; y2 < chh; y2++) for (let x = 0; x < cw; x++) sub5[y2 * cw + x] = alpha[(p.cy + y2) * atlasW + (p.cx + x)];
     const sdf = sdfFromMask(sub5, cw, chh, spread);
-    for (let y = 0; y < chh; y++) for (let x = 0; x < cw; x++) data[(p.cy + y) * atlasW + (p.cx + x)] = sdf[y * cw + x];
+    for (let y2 = 0; y2 < chh; y2++) for (let x = 0; x < cw; x++) data[(p.cy + y2) * atlasW + (p.cx + x)] = sdf[y2 * cw + x];
     const aw = Math.ceil(p.iw) + spread * 2, ah = Math.ceil(p.ih) + spread * 2;
     glyphs.set(p.ch, { advance: p.advance, ax: p.cx, ay: p.cy, aw: Math.min(aw, cw), ah: Math.min(ah, chh), offX: p.offX, offY: p.offY });
   }
@@ -7717,7 +7726,7 @@ function layoutStep(cards, anchorsPx, viewport, dtSec, opts = {}) {
     slotRX = (bnd.maxX - bnd.minX) / 2 + o.ringGap;
     slotRY = (bnd.maxY - bnd.minY) / 2 + o.ringGap;
     const P3 = 2 * (2 * slotRX + 2 * slotRY);
-    const order = Array.from({ length: n }, (_2, i) => i).sort((i, j2) => Math.atan2(anchorsPx[i].y - bcy, anchorsPx[i].x - bcx) - Math.atan2(anchorsPx[j2].y - bcy, anchorsPx[j2].x - bcx));
+    const order = Array.from({ length: n }, (_, i) => i).sort((i, j) => Math.atan2(anchorsPx[i].y - bcy, anchorsPx[i].x - bcx) - Math.atan2(anchorsPx[j].y - bcy, anchorsPx[j].x - bcx));
     const foot = order.map((idx) => Math.max(cards[idx].w, cards[idx].h) + o.gap);
     let total = 0;
     for (const f of foot) total += f;
@@ -7792,9 +7801,9 @@ function layoutStep(cards, anchorsPx, viewport, dtSec, opts = {}) {
       }
       dirx /= dl;
       diry /= dl;
-      const R2 = own.radius + halfDiag + o.ringGap;
-      tx = own.x + dirx * R2;
-      ty = own.y + diry * R2;
+      const R = own.radius + halfDiag + o.ringGap;
+      tx = own.x + dirx * R;
+      ty = own.y + diry * R;
     } else {
       const dx = c.x - a.x, dy = c.y - a.y, d = Math.hypot(dx, dy) || 1;
       tx = a.x + dx / d * o.standoff;
@@ -7817,9 +7826,9 @@ function layoutStep(cards, anchorsPx, viewport, dtSec, opts = {}) {
       const px = (c.w + r.w) / 2 + o.gap - Math.abs(c.x - rcx);
       const py = (c.h + r.h) / 2 + o.gap - Math.abs(c.y - rcy);
       if (px > 0 && py > 0) {
-        const F2 = o.keepOutForce * 2.5;
-        if (px < py) fx[i] += Math.sign(c.x - rcx || 1) * px * F2;
-        else fy[i] += Math.sign(c.y - rcy || 1) * py * F2;
+        const F = o.keepOutForce * 2.5;
+        if (px < py) fx[i] += Math.sign(c.x - rcx || 1) * px * F;
+        else fy[i] += Math.sign(c.y - rcy || 1) * py * F;
       }
     }
     if (kos) for (const k of kos) {
@@ -7839,19 +7848,19 @@ function layoutStep(cards, anchorsPx, viewport, dtSec, opts = {}) {
     }
   }
   for (let i = 0; i < n; i++) {
-    for (let j2 = i + 1; j2 < n; j2++) {
-      const a = cards[i], b = cards[j2];
+    for (let j = i + 1; j < n; j++) {
+      const a = cards[i], b = cards[j];
       const ox = (a.w + b.w) / 2 + o.gap - Math.abs(a.x - b.x);
       const oy = (a.h + b.h) / 2 + o.gap - Math.abs(a.y - b.y);
       if (ox <= 0 || oy <= 0) continue;
       if (ox <= oy) {
-        const s = Math.sign(a.x - b.x || i - j2 || 1), f = o.repulsion * ox;
+        const s = Math.sign(a.x - b.x || i - j || 1), f = o.repulsion * ox;
         fx[i] += s * f;
-        fx[j2] -= s * f;
+        fx[j] -= s * f;
       } else {
-        const s = Math.sign(a.y - b.y || i - j2 || 1), f = o.repulsion * oy;
+        const s = Math.sign(a.y - b.y || i - j || 1), f = o.repulsion * oy;
         fy[i] += s * f;
-        fy[j2] -= s * f;
+        fy[j] -= s * f;
       }
     }
   }
@@ -7885,18 +7894,18 @@ function layoutStep(cards, anchorsPx, viewport, dtSec, opts = {}) {
   for (let iter = 0; iter < 4; iter++) {
     let moved = false;
     for (let i = 0; i < n; i++) {
-      for (let j2 = i + 1; j2 < n; j2++) {
-        const a = cards[i], b = cards[j2];
+      for (let j = i + 1; j < n; j++) {
+        const a = cards[i], b = cards[j];
         const ox = (a.w + b.w) / 2 + o.gap - Math.abs(a.x - b.x);
         const oy = (a.h + b.h) / 2 + o.gap - Math.abs(a.y - b.y);
         if (ox <= 0 || oy <= 0) continue;
         moved = true;
         if (ox <= oy) {
-          const m = Math.sign(a.x - b.x || i - j2 || 1) * ox / 2;
+          const m = Math.sign(a.x - b.x || i - j || 1) * ox / 2;
           a.x += m;
           b.x -= m;
         } else {
-          const m = Math.sign(a.y - b.y || i - j2 || 1) * oy / 2;
+          const m = Math.sign(a.y - b.y || i - j || 1) * oy / 2;
           a.y += m;
           b.y -= m;
         }
@@ -8103,18 +8112,18 @@ var CardOverlay = class {
       const contentW = Math.max(headContentW, ...lineLs.map((l) => l.width), ...btnLabels.map((l) => l.width + btnInnerPad * 2));
       const ew = Math.ceil(contentW + pad * 2), btnW = ew - pad * 2;
       const extra = { runs: [], buttons: [] };
-      let y = headBottom + gap;
+      let y2 = headBottom + gap;
       for (const l of lineLs) {
-        extra.runs.push({ quads: offset(l.quads, pad, y), color: BLACK });
-        y += l.height + gap * 0.6;
+        extra.runs.push({ quads: offset(l.quads, pad, y2), color: BLACK });
+        y2 += l.height + gap * 0.6;
       }
-      y += gap * 0.4;
+      y2 += gap * 0.4;
       for (let k = 0; k < BUTTONS.length; k++) {
-        const lab = btnLabels[k], lx = pad + (btnW - lab.width) / 2, ly = y + (btnH - lab.height) / 2;
-        extra.buttons.push({ x: pad, y, w: btnW, h: btnH, part: BUTTONS[k].part, label: { quads: offset(lab.quads, lx, ly), color: BLACK } });
-        y += btnH + btnGap;
+        const lab = btnLabels[k], lx = pad + (btnW - lab.width) / 2, ly = y2 + (btnH - lab.height) / 2;
+        extra.buttons.push({ x: pad, y: y2, w: btnW, h: btnH, part: BUTTONS[k].part, label: { quads: offset(lab.quads, lx, ly), color: BLACK } });
+        y2 += btnH + btnGap;
       }
-      const eh = Math.ceil(y - btnGap + pad);
+      const eh = Math.ceil(y2 - btnGap + pad);
       return { spec, cw, ch, ew, eh: Math.max(eh, ch), mw, mh, miniHead, head, extra, expanded: false };
     });
     this.seeded = false;
@@ -8209,9 +8218,9 @@ var CardOverlay = class {
     const ako = keepOuts ? active.map((i) => keepOuts[i]) : void 0;
     layoutStep(ab, aa, { w: vp.w, h: vp.h }, dtSec, { keepOuts: ako, boundary: extra?.boundary, reserved: extra?.reserved, ringGap: extra?.ringGap });
     this.perf.layoutMs = performance.now() - _t0;
-    let ms = 0;
-    for (const b of ab) ms = Math.max(ms, Math.hypot(b.vx, b.vy));
-    this.maxSpeed = ms;
+    let ms2 = 0;
+    for (const b of ab) ms2 = Math.max(ms2, Math.hypot(b.vx, b.vy));
+    this.maxSpeed = ms2;
     const _t1 = performance.now();
     const shape = [], text = [];
     const rect = (cx, cy, hw, hh, radius, border, fill, brd) => {
@@ -8301,10 +8310,10 @@ var CardOverlay = class {
   }
   /** Bake ONE card's INK (border + swatch + buttons + text; NO glass fill) into an RGBA texture in
    *  card-local coordinates, for use as a CardField's front-face content. Glass transparent (a=0). */
-  bakeCard(index, ss = 2) {
+  bakeCard(index, ss2 = 2) {
     const c = this.cards[index];
     if (!c) return null;
-    const sz = this.size(c), w = Math.max(2, Math.ceil(sz.w * ss)), h = Math.max(2, Math.ceil(sz.h * ss));
+    const sz = this.size(c), w = Math.max(2, Math.ceil(sz.w * ss2)), h = Math.max(2, Math.ceil(sz.h * ss2));
     const dpr = this.dpr;
     const tex = this.dev.createTexture({ size: [w, h], format: "rgba8unorm", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
     const shape = [], text = [];
@@ -8314,19 +8323,19 @@ var CardOverlay = class {
     };
     const glyphs = (runs, ox, oy) => {
       for (const run of runs) for (const q2 of run.quads) {
-        const x0 = ox + q2.x * ss, x1 = ox + (q2.x + q2.w) * ss, y0 = oy + q2.y * ss, y1 = oy + (q2.y + q2.h) * ss, co2 = run.color;
+        const x0 = ox + q2.x * ss2, x1 = ox + (q2.x + q2.w) * ss2, y0 = oy + q2.y * ss2, y1 = oy + (q2.y + q2.h) * ss2, co2 = run.color;
         for (const [px, py, uu, vv] of [[x0, y0, q2.u0, q2.v0], [x1, y0, q2.u1, q2.v0], [x1, y1, q2.u1, q2.v1], [x0, y0, q2.u0, q2.v0], [x1, y1, q2.u1, q2.v1], [x0, y1, q2.u0, q2.v1]]) text.push(px, py, uu, vv, ...co2);
       }
     };
     const transparent = [0, 0, 0, 0];
-    rect(sz.w / 2 * ss, sz.h / 2 * ss, sz.w / 2 * ss, sz.h / 2 * ss, this.st.radiusPx * dpr * ss, this.st.borderPx * dpr * ss, transparent, this.st.borderRGBA);
+    rect(sz.w / 2 * ss2, sz.h / 2 * ss2, sz.w / 2 * ss2, sz.h / 2 * ss2, this.st.radiusPx * dpr * ss2, this.st.borderPx * dpr * ss2, transparent, this.st.borderRGBA);
     if (c.head.swatch) {
       const w2 = c.head.swatch;
-      rect((w2.x + w2.w / 2) * ss, (w2.y + w2.h / 2) * ss, w2.w / 2 * ss, w2.h / 2 * ss, 2 * dpr * ss, 1.5 * dpr * ss, w2.color, BLACK);
+      rect((w2.x + w2.w / 2) * ss2, (w2.y + w2.h / 2) * ss2, w2.w / 2 * ss2, w2.h / 2 * ss2, 2 * dpr * ss2, 1.5 * dpr * ss2, w2.color, BLACK);
     }
     glyphs(c.head.runs, 0, 0);
     if (c.expanded) {
-      for (const bt2 of c.extra.buttons) rect((bt2.x + bt2.w / 2) * ss, (bt2.y + bt2.h / 2) * ss, bt2.w / 2 * ss, bt2.h / 2 * ss, 4 * dpr * ss, 1 * dpr * ss, this.st.buttonRGBA, BLACK);
+      for (const bt2 of c.extra.buttons) rect((bt2.x + bt2.w / 2) * ss2, (bt2.y + bt2.h / 2) * ss2, bt2.w / 2 * ss2, bt2.h / 2 * ss2, 4 * dpr * ss2, 1 * dpr * ss2, this.st.buttonRGBA, BLACK);
       glyphs(c.extra.runs, 0, 0);
       glyphs(c.extra.buttons.map((bt2) => bt2.label), 0, 0);
     }
@@ -8389,23 +8398,23 @@ function build(ct2, seg, segments, maxCards) {
   const isCT = (ct2.modality ?? "CT") === "CT";
   const wanted = new Set([...segments].sort((a, b) => b.voxels - a.voxels).slice(0, maxCards).map((s) => s.num));
   const acc = /* @__PURE__ */ new Map();
-  for (let k = 0; k < nz; k++) for (let j2 = 0; j2 < ny; j2++) for (let i = 0; i < nx; i++) {
-    const idx = (k * ny + j2) * nx + i, v = seg.lab[idx];
+  for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const idx = (k * ny + j) * nx + i, v = seg.lab[idx];
     if (!v || !wanted.has(v)) continue;
     let e = acc.get(v);
     if (!e) {
-      e = { n: 0, x: 0, y: 0, z: 0, s: 0, s2: 0, lo: [i, j2, k], hi: [i, j2, k] };
+      e = { n: 0, x: 0, y: 0, z: 0, s: 0, s2: 0, lo: [i, j, k], hi: [i, j, k] };
       acc.set(v, e);
     }
     e.n++;
     e.x += i;
-    e.y += j2;
+    e.y += j;
     e.z += k;
     if (i < e.lo[0]) e.lo[0] = i;
-    if (j2 < e.lo[1]) e.lo[1] = j2;
+    if (j < e.lo[1]) e.lo[1] = j;
     if (k < e.lo[2]) e.lo[2] = k;
     if (i > e.hi[0]) e.hi[0] = i;
-    if (j2 > e.hi[1]) e.hi[1] = j2;
+    if (j > e.hi[1]) e.hi[1] = j;
     if (k > e.hi[2]) e.hi[2] = k;
     if (isCT) {
       const hu3 = ct2.vol[idx];
@@ -8414,7 +8423,7 @@ function build(ct2, seg, segments, maxCards) {
     }
   }
   const voxMm3 = Math.abs(M2[0] * (M2[5] * M2[10] - M2[6] * M2[9]) - M2[1] * (M2[4] * M2[10] - M2[6] * M2[8]) + M2[2] * (M2[4] * M2[9] - M2[5] * M2[8]));
-  const ras = (i, j2, k) => [M2[0] * i + M2[1] * j2 + M2[2] * k + M2[3], M2[4] * i + M2[5] * j2 + M2[6] * k + M2[7], M2[8] * i + M2[9] * j2 + M2[10] * k + M2[11]];
+  const ras = (i, j, k) => [M2[0] * i + M2[1] * j + M2[2] * k + M2[3], M2[4] * i + M2[5] * j + M2[6] * k + M2[7], M2[8] * i + M2[9] * j + M2[10] * k + M2[11]];
   const term = seg.terminology ?? {};
   const specs = [], geom = [];
   for (const s of segments) {
@@ -8422,9 +8431,16 @@ function build(ct2, seg, segments, maxCards) {
     if (!e) continue;
     const c = ras(e.x / e.n, e.y / e.n, e.z / e.n);
     const hu3 = isCT ? { mean: e.s / e.n, std: Math.sqrt(Math.max(0, e.s2 / e.n - (e.s / e.n) ** 2)) } : void 0;
-    specs.push({ anchorRAS: c, id: s.num, title: s.name, subtitle: bodyText(term[s.num], s.name), swatch: s.color, stat: { voxels: e.n, volumeCc: e.n * voxMm3 / 1e3, hu: hu3 } });
+    specs.push({
+      anchorRAS: c,
+      id: s.num,
+      title: s.name,
+      subtitle: bodyText(term[s.num], s.englishName ?? s.name),
+      swatch: s.color,
+      stat: { voxels: e.n, volumeCc: e.n * voxMm3 / 1e3, hu: hu3 }
+    });
     const [lx, ly, lz] = e.lo, [hx, hy, hz] = e.hi;
-    geom.push({ corners: [[lx, ly, lz], [hx, ly, lz], [lx, hy, lz], [hx, hy, lz], [lx, ly, hz], [hx, ly, hz], [lx, hy, hz], [hx, hy, hz]].map(([i, j2, k]) => ras(i, j2, k)) });
+    geom.push({ corners: [[lx, ly, lz], [hx, ly, lz], [lx, hy, lz], [hx, hy, lz], [lx, ly, hz], [hx, ly, hz], [lx, hy, hz], [hx, hy, hz]].map(([i, j, k]) => ras(i, j, k)) });
   }
   return { specs, geom };
 }
@@ -8476,8 +8492,8 @@ function mountSegmentCards(gpu, format, font, canvas, camera, hooks) {
       geom = r.geom;
       overlay.setCards(r.specs, dpr, compact);
       const [nx, ny, nz] = ct2.dims, M2 = ct2.ijkToRAS;
-      const ras = (i, j2, k) => [M2[0] * i + M2[1] * j2 + M2[2] * k + M2[3], M2[4] * i + M2[5] * j2 + M2[6] * k + M2[7], M2[8] * i + M2[9] * j2 + M2[10] * k + M2[11]];
-      sceneBox = [[0, 0, 0], [nx, 0, 0], [0, ny, 0], [nx, ny, 0], [0, 0, nz], [nx, 0, nz], [0, ny, nz], [nx, ny, nz]].map(([i, j2, k]) => ras(i, j2, k));
+      const ras = (i, j, k) => [M2[0] * i + M2[1] * j + M2[2] * k + M2[3], M2[4] * i + M2[5] * j + M2[6] * k + M2[7], M2[8] * i + M2[9] * j + M2[10] * k + M2[11]];
+      sceneBox = [[0, 0, 0], [nx, 0, 0], [0, ny, 0], [nx, ny, 0], [0, 0, nz], [nx, 0, nz], [0, ny, nz], [nx, ny, nz]].map(([i, j, k]) => ras(i, j, k));
     },
     draw(view, w, h, _dpr, dt2) {
       if (!geom.length) return false;
@@ -8492,7 +8508,7 @@ function mountSegmentCards(gpu, format, font, canvas, camera, hooks) {
       }
       const reserved = hooks.reserved?.();
       const sv = hooks.segVisible;
-      const shown = sv ? geom.map((_2, i) => {
+      const shown = sv ? geom.map((_, i) => {
         const id = overlay.spec(i)?.id;
         return id == null ? true : sv(id);
       }) : void 0;
@@ -8513,6 +8529,1976 @@ function mountSegmentCards(gpu, format, font, canvas, camera, hooks) {
       return b ? { x: b.x / dpr, y: b.y / dpr } : null;
     }
   };
+}
+
+// ../i18n/storage.ts
+var LOCALE_STORAGE_KEY = "pw46.locale";
+var LEGACY_LOCALE_KEY = "wl-locale";
+var LOCALE_COOKIE = "pw46.locale";
+function isAppLocale(value) {
+  return value === "en" || value === "ar" || value === "fr" || value === "es" || value === "ca" || value === "de" || value === "it" || value === "pt" || value === "ko" || value === "pl" || value === "uk" || value === "cs" || value === "nl" || value === "el" || value === "lv" || value === "hu" || value === "lt" || value === "ro" || value === "no";
+}
+function readCookie(name) {
+  if (typeof document === "undefined") return null;
+  const prefix = `${encodeURIComponent(name)}=`;
+  for (const part of document.cookie.split(";")) {
+    const s = part.trim();
+    if (s.startsWith(prefix)) {
+      try {
+        return decodeURIComponent(s.slice(prefix.length));
+      } catch {
+        return s.slice(prefix.length);
+      }
+    }
+  }
+  return null;
+}
+function writeCookie(name, value) {
+  if (typeof document === "undefined") return;
+  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(
+    value
+  )}; path=/; max-age=31536000; SameSite=Lax`;
+}
+function fromNavigator() {
+  const nav = (typeof navigator !== "undefined" ? navigator.language || "" : "").toLowerCase();
+  if (nav.startsWith("ca")) return "ca";
+  if (nav.startsWith("ar")) return "ar";
+  if (nav.startsWith("es")) return "es";
+  if (nav.startsWith("fr")) return "fr";
+  if (nav.startsWith("de")) return "de";
+  if (nav.startsWith("it")) return "it";
+  if (nav.startsWith("pt")) return "pt";
+  if (nav.startsWith("ko")) return "ko";
+  if (nav.startsWith("pl")) return "pl";
+  if (nav.startsWith("uk")) return "uk";
+  if (nav.startsWith("cs")) return "cs";
+  if (nav.startsWith("nl")) return "nl";
+  if (nav.startsWith("el")) return "el";
+  if (nav.startsWith("lv")) return "lv";
+  if (nav.startsWith("hu")) return "hu";
+  if (nav.startsWith("lt")) return "lt";
+  if (nav.startsWith("ro")) return "ro";
+  if (nav.startsWith("no") || nav.startsWith("nb") || nav.startsWith("nn"))
+    return "no";
+  return "en";
+}
+function resolveStoredLocale() {
+  const cookie = readCookie(LOCALE_COOKIE)?.trim().toLowerCase();
+  if (isAppLocale(cookie)) {
+    try {
+      localStorage.setItem(LOCALE_STORAGE_KEY, cookie);
+      localStorage.removeItem(LEGACY_LOCALE_KEY);
+    } catch {
+    }
+    return cookie;
+  }
+  try {
+    const stored = localStorage.getItem(LOCALE_STORAGE_KEY)?.trim().toLowerCase();
+    if (isAppLocale(stored)) {
+      try {
+        writeCookie(LOCALE_COOKIE, stored);
+      } catch {
+      }
+      return stored;
+    }
+  } catch {
+  }
+  try {
+    const legacy = localStorage.getItem(LEGACY_LOCALE_KEY)?.trim().toLowerCase();
+    if (isAppLocale(legacy)) {
+      persistLocale(legacy);
+      return legacy;
+    }
+  } catch {
+  }
+  return fromNavigator();
+}
+function persistLocale(code2) {
+  try {
+    localStorage.setItem(LOCALE_STORAGE_KEY, code2);
+    localStorage.removeItem(LEGACY_LOCALE_KEY);
+  } catch {
+  }
+  try {
+    writeCookie(LOCALE_COOKIE, code2);
+  } catch {
+  }
+  applyDocumentLocale(code2);
+}
+function applyDocumentLocale(code2) {
+  if (typeof document === "undefined") return;
+  document.documentElement.lang = code2;
+  document.documentElement.dir = code2 === "ar" ? "rtl" : "ltr";
+}
+
+// ../i18n/language-picker.ts
+var APP_LOCALES = [
+  { code: "en", nativeLabel: "English" },
+  { code: "fr", nativeLabel: "Fran\xE7ais" },
+  { code: "ar", nativeLabel: "\u0627\u0644\u0639\u0631\u0628\u064A\u0629" },
+  { code: "es", nativeLabel: "Espa\xF1ol" },
+  { code: "ca", nativeLabel: "Catal\xE0" },
+  { code: "de", nativeLabel: "Deutsch" },
+  { code: "it", nativeLabel: "Italiano" },
+  { code: "pt", nativeLabel: "Portugu\xEAs" },
+  { code: "ko", nativeLabel: "\uD55C\uAD6D\uC5B4" },
+  { code: "pl", nativeLabel: "Polski" },
+  { code: "uk", nativeLabel: "\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430" },
+  { code: "cs", nativeLabel: "\u010Ce\u0161tina" },
+  { code: "nl", nativeLabel: "Nederlands" },
+  { code: "el", nativeLabel: "\u0395\u03BB\u03BB\u03B7\u03BD\u03B9\u03BA\u03AC" },
+  { code: "lv", nativeLabel: "Latvie\u0161u" },
+  { code: "hu", nativeLabel: "Magyar" },
+  { code: "lt", nativeLabel: "Lietuvi\u0173" },
+  { code: "ro", nativeLabel: "Rom\xE2n\u0103" },
+  { code: "no", nativeLabel: "Norsk" }
+];
+function wireLanguagePicker(opts) {
+  const btnId = opts.btnId ?? "langPickerBtn";
+  const menuId = opts.menuId ?? "langPickerMenu";
+  const btn = document.getElementById(btnId);
+  const menu = document.getElementById(menuId);
+  if (!(btn instanceof HTMLButtonElement) || !(menu instanceof HTMLElement)) {
+    return;
+  }
+  const renderMenu = () => {
+    const current = opts.getLocale();
+    menu.replaceChildren();
+    for (const { code: code2, nativeLabel } of APP_LOCALES) {
+      const li2 = document.createElement("li");
+      li2.setAttribute("role", "option");
+      li2.dataset.locale = code2;
+      li2.textContent = nativeLabel;
+      li2.classList.toggle("is-active", code2 === current);
+      li2.setAttribute("aria-selected", code2 === current ? "true" : "false");
+      menu.appendChild(li2);
+    }
+  };
+  const closeMenu = () => {
+    menu.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+  };
+  const openMenu = () => {
+    renderMenu();
+    menu.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+  };
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (menu.hidden) openMenu();
+    else closeMenu();
+  });
+  menu.addEventListener("click", (ev) => {
+    const li2 = ev.target?.closest("li[data-locale]");
+    if (!(li2 instanceof HTMLElement)) return;
+    const code2 = li2.dataset.locale;
+    if (!code2) return;
+    void Promise.resolve(opts.setLocale(code2)).then(() => {
+      closeMenu();
+    });
+  });
+  document.addEventListener("click", (ev) => {
+    if (menu.hidden) return;
+    const target = ev.target;
+    if (btn.contains(target) || menu.contains(target)) return;
+    closeMenu();
+  });
+  renderMenu();
+}
+
+// ../i18n/conference.ts
+var en = {
+  dialogTitle: "Conferencing",
+  close: "Close",
+  closeAria: "Close",
+  createSection: "Create a conference",
+  conferenceTitle: "Conference title",
+  selectConferenceTitle: "Select a conference title",
+  otherTitle: "Other\u2026",
+  customTitle: "Custom title",
+  customTitlePlaceholder: "Enter conference title",
+  users: "Users",
+  loadingUsers: "Loading users\u2026",
+  noUsers: "No users available",
+  createConference: "Create conference",
+  creating: "Creating\u2026",
+  joinSection: "Join a conference",
+  activeConferences: "Active conferences",
+  noConferences: "No conferences available",
+  selectConference: "Select a conference",
+  untitled: "Untitled",
+  joinConference: "Join conference",
+  joining: "Joining\u2026",
+  manageSection: "Manage conference",
+  titleLabel: "Title:",
+  na: "N/A",
+  participants: "Participants",
+  noPlaces: "No places",
+  leaveConference: "Leave conference",
+  endConference: "End conference",
+  ending: "Ending\u2026",
+  leaving: "Leaving\u2026",
+  conferenceEnded: "Conference ended.",
+  leftConference: "Left conference.",
+  connectHubFirst: "Connect to the Cast hub first.",
+  topicRequiredHost: "Cast topic is required to host a conference.",
+  topicRequiredJoin: "Cast topic is required to join a conference.",
+  titleRequired: "Conference title is required.",
+  selectAttendee: "Select at least one attendee topic.",
+  selectConferenceToJoin: "Select a conference to join.",
+  failedCreate: "Failed to create conference.",
+  failedJoin: "Failed to join conference.",
+  failedUpdate: "Failed to update conference.",
+  inviteTitle: "Conference invitation",
+  joinAndFollow: "Join and follow",
+  joinNoFollow: "Join but do not follow",
+  doNotJoin: "Do not join",
+  hostFallback: "host",
+  inviteLeadWithTitle: "{{title}} \u2014 join and follow {{host}}?",
+  inviteLeadNoTitle: "Join conference and follow {{host}}?",
+  joinAndFollowHost: "Join and follow {{host}}",
+  takeoverTitle: "Take over?",
+  takeoverBody: "The host and all participants will be notified that you are taking over. You will lead scene updates for this conference.",
+  cancel: "Cancel",
+  takeOver: "Take over",
+  conferencing: "Conferencing",
+  subscribeHubFirst: "Subscribe to the hub first",
+  stopFollowing: "Stop following",
+  resumeFollowing: "Resume following"
+};
+var de = {
+  dialogTitle: "Konferenz",
+  close: "Schlie\xDFen",
+  closeAria: "Schlie\xDFen",
+  createSection: "Konferenz erstellen",
+  conferenceTitle: "Konferenztitel",
+  selectConferenceTitle: "Titel ausw\xE4hlen",
+  otherTitle: "Andere\u2026",
+  customTitle: "Benutzerdefinierter Titel",
+  customTitlePlaceholder: "Konferenztitel eingeben",
+  users: "Benutzer",
+  loadingUsers: "Benutzer werden geladen\u2026",
+  noUsers: "Keine Benutzer verf\xFCgbar",
+  createConference: "Konferenz erstellen",
+  creating: "Wird erstellt\u2026",
+  joinSection: "An einer Konferenz teilnehmen",
+  activeConferences: "Aktive Konferenzen",
+  noConferences: "Keine Konferenzen verf\xFCgbar",
+  selectConference: "Konferenz ausw\xE4hlen",
+  untitled: "Ohne Titel",
+  joinConference: "Konferenz beitreten",
+  joining: "Beitritt\u2026",
+  manageSection: "Konferenz verwalten",
+  titleLabel: "Titel:",
+  na: "k. A.",
+  participants: "Teilnehmer",
+  noPlaces: "Keine Orte",
+  leaveConference: "Konferenz verlassen",
+  endConference: "Konferenz beenden",
+  ending: "Wird beendet\u2026",
+  leaving: "Verlassen\u2026",
+  conferenceEnded: "Konferenz beendet.",
+  leftConference: "Konferenz verlassen.",
+  connectHubFirst: "Stellen Sie zuerst eine Verbindung zum Cast-Hub her.",
+  topicRequiredHost: "Ein Cast-Topic ist erforderlich, um eine Konferenz zu hosten.",
+  topicRequiredJoin: "Ein Cast-Topic ist erforderlich, um einer Konferenz beizutreten.",
+  titleRequired: "Konferenztitel ist erforderlich.",
+  selectAttendee: "W\xE4hlen Sie mindestens einen Teilnehmer aus.",
+  selectConferenceToJoin: "W\xE4hlen Sie eine Konferenz zum Beitreten aus.",
+  failedCreate: "Konferenz konnte nicht erstellt werden.",
+  failedJoin: "Beitritt zur Konferenz fehlgeschlagen.",
+  failedUpdate: "Aktualisierung der Konferenz fehlgeschlagen.",
+  inviteTitle: "Konferenzeinladung",
+  joinAndFollow: "Beitreten und folgen",
+  joinNoFollow: "Beitreten, aber nicht folgen",
+  doNotJoin: "Nicht beitreten",
+  hostFallback: "Host",
+  inviteLeadWithTitle: "{{title}} \u2014 beitreten und {{host}} folgen?",
+  inviteLeadNoTitle: "Konferenz beitreten und {{host}} folgen?",
+  joinAndFollowHost: "Beitreten und {{host}} folgen",
+  takeoverTitle: "\xDCbernehmen?",
+  takeoverBody: "Der Host und alle Teilnehmer werden benachrichtigt, dass Sie die F\xFChrung \xFCbernehmen. Sie leiten dann die Szenenaktualisierungen f\xFCr diese Konferenz.",
+  cancel: "Abbrechen",
+  takeOver: "\xDCbernehmen",
+  conferencing: "Konferenz",
+  subscribeHubFirst: "Zuerst am Hub anmelden",
+  stopFollowing: "Folgen beenden",
+  resumeFollowing: "Folgen fortsetzen"
+};
+var fr = {
+  dialogTitle: "Conf\xE9rence",
+  close: "Fermer",
+  closeAria: "Fermer",
+  createSection: "Cr\xE9er une conf\xE9rence",
+  conferenceTitle: "Titre de la conf\xE9rence",
+  selectConferenceTitle: "S\xE9lectionner un titre",
+  otherTitle: "Autre\u2026",
+  customTitle: "Titre personnalis\xE9",
+  customTitlePlaceholder: "Saisir le titre de la conf\xE9rence",
+  users: "Utilisateurs",
+  loadingUsers: "Chargement des utilisateurs\u2026",
+  noUsers: "Aucun utilisateur disponible",
+  createConference: "Cr\xE9er la conf\xE9rence",
+  creating: "Cr\xE9ation\u2026",
+  joinSection: "Rejoindre une conf\xE9rence",
+  activeConferences: "Conf\xE9rences actives",
+  noConferences: "Aucune conf\xE9rence disponible",
+  selectConference: "S\xE9lectionner une conf\xE9rence",
+  untitled: "Sans titre",
+  joinConference: "Rejoindre la conf\xE9rence",
+  joining: "Connexion\u2026",
+  manageSection: "G\xE9rer la conf\xE9rence",
+  titleLabel: "Titre :",
+  na: "N/D",
+  participants: "Participants",
+  noPlaces: "Aucun lieu",
+  leaveConference: "Quitter la conf\xE9rence",
+  endConference: "Terminer la conf\xE9rence",
+  ending: "Fin\u2026",
+  leaving: "D\xE9part\u2026",
+  conferenceEnded: "Conf\xE9rence termin\xE9e.",
+  leftConference: "Vous avez quitt\xE9 la conf\xE9rence.",
+  connectHubFirst: "Connectez-vous d\u2019abord au hub Cast.",
+  topicRequiredHost: "Un topic Cast est requis pour animer une conf\xE9rence.",
+  topicRequiredJoin: "Un topic Cast est requis pour rejoindre une conf\xE9rence.",
+  titleRequired: "Le titre de la conf\xE9rence est requis.",
+  selectAttendee: "S\xE9lectionnez au moins un participant.",
+  selectConferenceToJoin: "S\xE9lectionnez une conf\xE9rence \xE0 rejoindre.",
+  failedCreate: "\xC9chec de la cr\xE9ation de la conf\xE9rence.",
+  failedJoin: "\xC9chec de la connexion \xE0 la conf\xE9rence.",
+  failedUpdate: "\xC9chec de la mise \xE0 jour de la conf\xE9rence.",
+  inviteTitle: "Invitation \xE0 la conf\xE9rence",
+  joinAndFollow: "Rejoindre et suivre",
+  joinNoFollow: "Rejoindre sans suivre",
+  doNotJoin: "Ne pas rejoindre",
+  hostFallback: "h\xF4te",
+  inviteLeadWithTitle: "{{title}} \u2014 rejoindre et suivre {{host}} ?",
+  inviteLeadNoTitle: "Rejoindre la conf\xE9rence et suivre {{host}} ?",
+  joinAndFollowHost: "Rejoindre et suivre {{host}}",
+  takeoverTitle: "Prendre la main ?",
+  takeoverBody: "L\u2019h\xF4te et tous les participants seront inform\xE9s que vous prenez la main. Vous dirigerez les mises \xE0 jour de sc\xE8ne pour cette conf\xE9rence.",
+  cancel: "Annuler",
+  takeOver: "Prendre la main",
+  conferencing: "Conf\xE9rence",
+  subscribeHubFirst: "Abonnez-vous d\u2019abord au hub",
+  stopFollowing: "Arr\xEAter de suivre",
+  resumeFollowing: "Reprendre le suivi"
+};
+var es = {
+  dialogTitle: "Conferencia",
+  close: "Cerrar",
+  closeAria: "Cerrar",
+  createSection: "Crear una conferencia",
+  conferenceTitle: "T\xEDtulo de la conferencia",
+  selectConferenceTitle: "Seleccionar un t\xEDtulo",
+  otherTitle: "Otro\u2026",
+  customTitle: "T\xEDtulo personalizado",
+  customTitlePlaceholder: "Introducir el t\xEDtulo de la conferencia",
+  users: "Usuarios",
+  loadingUsers: "Cargando usuarios\u2026",
+  noUsers: "No hay usuarios disponibles",
+  createConference: "Crear conferencia",
+  creating: "Creando\u2026",
+  joinSection: "Unirse a una conferencia",
+  activeConferences: "Conferencias activas",
+  noConferences: "No hay conferencias disponibles",
+  selectConference: "Seleccionar una conferencia",
+  untitled: "Sin t\xEDtulo",
+  joinConference: "Unirse a la conferencia",
+  joining: "Uni\xE9ndose\u2026",
+  manageSection: "Gestionar conferencia",
+  titleLabel: "T\xEDtulo:",
+  na: "N/D",
+  participants: "Participantes",
+  noPlaces: "Sin lugares",
+  leaveConference: "Abandonar la conferencia",
+  endConference: "Terminar la conferencia",
+  ending: "Terminando\u2026",
+  leaving: "Saliendo\u2026",
+  conferenceEnded: "Conferencia terminada.",
+  leftConference: "Has abandonado la conferencia.",
+  connectHubFirst: "Con\xE9ctate primero al hub Cast.",
+  topicRequiredHost: "Se requiere un topic Cast para organizar una conferencia.",
+  topicRequiredJoin: "Se requiere un topic Cast para unirse a una conferencia.",
+  titleRequired: "El t\xEDtulo de la conferencia es obligatorio.",
+  selectAttendee: "Selecciona al menos un participante.",
+  selectConferenceToJoin: "Selecciona una conferencia a la que unirte.",
+  failedCreate: "Error al crear la conferencia.",
+  failedJoin: "Error al unirse a la conferencia.",
+  failedUpdate: "Error al actualizar la conferencia.",
+  inviteTitle: "Invitaci\xF3n a la conferencia",
+  joinAndFollow: "Unirse y seguir",
+  joinNoFollow: "Unirse sin seguir",
+  doNotJoin: "No unirse",
+  hostFallback: "anfitri\xF3n",
+  inviteLeadWithTitle: "{{title}} \u2014 \xBFunirse y seguir a {{host}}?",
+  inviteLeadNoTitle: "\xBFUnirse a la conferencia y seguir a {{host}}?",
+  joinAndFollowHost: "Unirse y seguir a {{host}}",
+  takeoverTitle: "\xBFTomar el control?",
+  takeoverBody: "Se notificar\xE1 al anfitri\xF3n y a todos los participantes de que tomas el control. Dirigir\xE1s las actualizaciones de escena de esta conferencia.",
+  cancel: "Cancelar",
+  takeOver: "Tomar el control",
+  conferencing: "Conferencia",
+  subscribeHubFirst: "Suscr\xEDbete primero al hub",
+  stopFollowing: "Dejar de seguir",
+  resumeFollowing: "Reanudar el seguimiento"
+};
+var ca = {
+  dialogTitle: "Confer\xE8ncia",
+  close: "Tancar",
+  closeAria: "Tancar",
+  createSection: "Crear una confer\xE8ncia",
+  conferenceTitle: "T\xEDtol de la confer\xE8ncia",
+  selectConferenceTitle: "Seleccionar un t\xEDtol",
+  otherTitle: "Altre\u2026",
+  customTitle: "T\xEDtol personalitzat",
+  customTitlePlaceholder: "Introdu\xEFu el t\xEDtol de la confer\xE8ncia",
+  users: "Usuaris",
+  loadingUsers: "S\u2019estan carregant els usuaris\u2026",
+  noUsers: "No hi ha usuaris disponibles",
+  createConference: "Crear la confer\xE8ncia",
+  creating: "S\u2019est\xE0 creant\u2026",
+  joinSection: "Unir-se a una confer\xE8ncia",
+  activeConferences: "Confer\xE8ncies actives",
+  noConferences: "No hi ha confer\xE8ncies disponibles",
+  selectConference: "Seleccionar una confer\xE8ncia",
+  untitled: "Sense t\xEDtol",
+  joinConference: "Unir-se a la confer\xE8ncia",
+  joining: "S\u2019est\xE0 unint\u2026",
+  manageSection: "Gestionar la confer\xE8ncia",
+  titleLabel: "T\xEDtol:",
+  na: "N/D",
+  participants: "Participants",
+  noPlaces: "Sense llocs",
+  leaveConference: "Sortir de la confer\xE8ncia",
+  endConference: "Acabar la confer\xE8ncia",
+  ending: "S\u2019est\xE0 acabant\u2026",
+  leaving: "S\u2019est\xE0 sortint\u2026",
+  conferenceEnded: "Confer\xE8ncia acabada.",
+  leftConference: "Heu sortit de la confer\xE8ncia.",
+  connectHubFirst: "Connecteu-vos primer al hub Cast.",
+  topicRequiredHost: "Cal un topic Cast per organitzar una confer\xE8ncia.",
+  topicRequiredJoin: "Cal un topic Cast per unir-se a una confer\xE8ncia.",
+  titleRequired: "El t\xEDtol de la confer\xE8ncia \xE9s obligatori.",
+  selectAttendee: "Seleccioneu almenys un participant.",
+  selectConferenceToJoin: "Seleccioneu una confer\xE8ncia a la qual unir-vos.",
+  failedCreate: "No s\u2019ha pogut crear la confer\xE8ncia.",
+  failedJoin: "No s\u2019ha pogut unir a la confer\xE8ncia.",
+  failedUpdate: "No s\u2019ha pogut actualitzar la confer\xE8ncia.",
+  inviteTitle: "Invitaci\xF3 a la confer\xE8ncia",
+  joinAndFollow: "Unir-se i seguir",
+  joinNoFollow: "Unir-se sense seguir",
+  doNotJoin: "No unir-se",
+  hostFallback: "amfitri\xF3",
+  inviteLeadWithTitle: "{{title}} \u2014 unir-se i seguir {{host}}?",
+  inviteLeadNoTitle: "Unir-se a la confer\xE8ncia i seguir {{host}}?",
+  joinAndFollowHost: "Unir-se i seguir {{host}}",
+  takeoverTitle: "Prendre el control?",
+  takeoverBody: "Se notificar\xE0 a l\u2019amfitri\xF3 i a tots els participants que preneu el control. Direccioneu les actualitzacions d\u2019escena d\u2019aquesta confer\xE8ncia.",
+  cancel: "Cancel\xB7lar",
+  takeOver: "Prendre el control",
+  conferencing: "Confer\xE8ncia",
+  subscribeHubFirst: "Subscriviu-vos primer al hub",
+  stopFollowing: "Deixar de seguir",
+  resumeFollowing: "Reprendre el seguiment"
+};
+var it = {
+  dialogTitle: "Conferenza",
+  close: "Chiudi",
+  closeAria: "Chiudi",
+  createSection: "Crea una conferenza",
+  conferenceTitle: "Titolo della conferenza",
+  selectConferenceTitle: "Seleziona un titolo",
+  otherTitle: "Altro\u2026",
+  customTitle: "Titolo personalizzato",
+  customTitlePlaceholder: "Inserisci il titolo della conferenza",
+  users: "Utenti",
+  loadingUsers: "Caricamento utenti\u2026",
+  noUsers: "Nessun utente disponibile",
+  createConference: "Crea conferenza",
+  creating: "Creazione\u2026",
+  joinSection: "Partecipa a una conferenza",
+  activeConferences: "Conferenze attive",
+  noConferences: "Nessuna conferenza disponibile",
+  selectConference: "Seleziona una conferenza",
+  untitled: "Senza titolo",
+  joinConference: "Partecipa alla conferenza",
+  joining: "Accesso\u2026",
+  manageSection: "Gestisci conferenza",
+  titleLabel: "Titolo:",
+  na: "N/D",
+  participants: "Partecipanti",
+  noPlaces: "Nessun luogo",
+  leaveConference: "Lascia la conferenza",
+  endConference: "Termina la conferenza",
+  ending: "Chiusura\u2026",
+  leaving: "Uscita\u2026",
+  conferenceEnded: "Conferenza terminata.",
+  leftConference: "Hai lasciato la conferenza.",
+  connectHubFirst: "Connettiti prima all\u2019hub Cast.",
+  topicRequiredHost: "\xC8 richiesto un topic Cast per ospitare una conferenza.",
+  topicRequiredJoin: "\xC8 richiesto un topic Cast per partecipare a una conferenza.",
+  titleRequired: "Il titolo della conferenza \xE8 obbligatorio.",
+  selectAttendee: "Seleziona almeno un partecipante.",
+  selectConferenceToJoin: "Seleziona una conferenza a cui partecipare.",
+  failedCreate: "Creazione della conferenza non riuscita.",
+  failedJoin: "Partecipazione alla conferenza non riuscita.",
+  failedUpdate: "Aggiornamento della conferenza non riuscito.",
+  inviteTitle: "Invito alla conferenza",
+  joinAndFollow: "Partecipa e segui",
+  joinNoFollow: "Partecipa senza seguire",
+  doNotJoin: "Non partecipare",
+  hostFallback: "host",
+  inviteLeadWithTitle: "{{title}} \u2014 partecipare e seguire {{host}}?",
+  inviteLeadNoTitle: "Partecipare alla conferenza e seguire {{host}}?",
+  joinAndFollowHost: "Partecipa e segui {{host}}",
+  takeoverTitle: "Prendere il controllo?",
+  takeoverBody: "L\u2019host e tutti i partecipanti saranno avvisati che stai prendendo il controllo. Dirigerai gli aggiornamenti di scena di questa conferenza.",
+  cancel: "Annulla",
+  takeOver: "Prendi il controllo",
+  conferencing: "Conferenza",
+  subscribeHubFirst: "Iscriviti prima all\u2019hub",
+  stopFollowing: "Smetti di seguire",
+  resumeFollowing: "Riprendi a seguire"
+};
+var pt = {
+  dialogTitle: "Confer\xEAncia",
+  close: "Fechar",
+  closeAria: "Fechar",
+  createSection: "Criar uma confer\xEAncia",
+  conferenceTitle: "T\xEDtulo da confer\xEAncia",
+  selectConferenceTitle: "Selecionar um t\xEDtulo",
+  otherTitle: "Outro\u2026",
+  customTitle: "T\xEDtulo personalizado",
+  customTitlePlaceholder: "Introduza o t\xEDtulo da confer\xEAncia",
+  users: "Utilizadores",
+  loadingUsers: "A carregar utilizadores\u2026",
+  noUsers: "Nenhum utilizador dispon\xEDvel",
+  createConference: "Criar confer\xEAncia",
+  creating: "A criar\u2026",
+  joinSection: "Participar numa confer\xEAncia",
+  activeConferences: "Confer\xEAncias ativas",
+  noConferences: "Nenhuma confer\xEAncia dispon\xEDvel",
+  selectConference: "Selecionar uma confer\xEAncia",
+  untitled: "Sem t\xEDtulo",
+  joinConference: "Participar na confer\xEAncia",
+  joining: "A participar\u2026",
+  manageSection: "Gerir confer\xEAncia",
+  titleLabel: "T\xEDtulo:",
+  na: "N/D",
+  participants: "Participantes",
+  noPlaces: "Sem locais",
+  leaveConference: "Sair da confer\xEAncia",
+  endConference: "Terminar a confer\xEAncia",
+  ending: "A terminar\u2026",
+  leaving: "A sair\u2026",
+  conferenceEnded: "Confer\xEAncia terminada.",
+  leftConference: "Saiu da confer\xEAncia.",
+  connectHubFirst: "Ligue-se primeiro ao hub Cast.",
+  topicRequiredHost: "\xC9 necess\xE1rio um topic Cast para organizar uma confer\xEAncia.",
+  topicRequiredJoin: "\xC9 necess\xE1rio um topic Cast para participar numa confer\xEAncia.",
+  titleRequired: "O t\xEDtulo da confer\xEAncia \xE9 obrigat\xF3rio.",
+  selectAttendee: "Selecione pelo menos um participante.",
+  selectConferenceToJoin: "Selecione uma confer\xEAncia a que participar.",
+  failedCreate: "Falha ao criar a confer\xEAncia.",
+  failedJoin: "Falha ao participar na confer\xEAncia.",
+  failedUpdate: "Falha ao atualizar a confer\xEAncia.",
+  inviteTitle: "Convite para a confer\xEAncia",
+  joinAndFollow: "Participar e seguir",
+  joinNoFollow: "Participar sem seguir",
+  doNotJoin: "N\xE3o participar",
+  hostFallback: "anfitri\xE3o",
+  inviteLeadWithTitle: "{{title}} \u2014 participar e seguir {{host}}?",
+  inviteLeadNoTitle: "Participar na confer\xEAncia e seguir {{host}}?",
+  joinAndFollowHost: "Participar e seguir {{host}}",
+  takeoverTitle: "Assumir o controlo?",
+  takeoverBody: "O anfitri\xE3o e todos os participantes ser\xE3o notificados de que est\xE1 a assumir o controlo. Passar\xE1 a liderar as atualiza\xE7\xF5es de cena desta confer\xEAncia.",
+  cancel: "Cancelar",
+  takeOver: "Assumir o controlo",
+  conferencing: "Confer\xEAncia",
+  subscribeHubFirst: "Subscreva primeiro o hub",
+  stopFollowing: "Parar de seguir",
+  resumeFollowing: "Retomar o seguimento"
+};
+var ko = {
+  dialogTitle: "\uD654\uC0C1\uD68C\uC758",
+  close: "\uB2EB\uAE30",
+  closeAria: "\uB2EB\uAE30",
+  createSection: "\uD68C\uC758 \uB9CC\uB4E4\uAE30",
+  conferenceTitle: "\uD68C\uC758 \uC81C\uBAA9",
+  selectConferenceTitle: "\uC81C\uBAA9 \uC120\uD0DD",
+  otherTitle: "\uAE30\uD0C0\u2026",
+  customTitle: "\uC0AC\uC6A9\uC790 \uC9C0\uC815 \uC81C\uBAA9",
+  customTitlePlaceholder: "\uD68C\uC758 \uC81C\uBAA9 \uC785\uB825",
+  users: "\uC0AC\uC6A9\uC790",
+  loadingUsers: "\uC0AC\uC6A9\uC790 \uBD88\uB7EC\uC624\uB294 \uC911\u2026",
+  noUsers: "\uC0AC\uC6A9 \uAC00\uB2A5\uD55C \uC0AC\uC6A9\uC790 \uC5C6\uC74C",
+  createConference: "\uD68C\uC758 \uB9CC\uB4E4\uAE30",
+  creating: "\uB9CC\uB4DC\uB294 \uC911\u2026",
+  joinSection: "\uD68C\uC758 \uCC38\uAC00",
+  activeConferences: "\uC9C4\uD589 \uC911\uC778 \uD68C\uC758",
+  noConferences: "\uC0AC\uC6A9 \uAC00\uB2A5\uD55C \uD68C\uC758 \uC5C6\uC74C",
+  selectConference: "\uD68C\uC758 \uC120\uD0DD",
+  untitled: "\uC81C\uBAA9 \uC5C6\uC74C",
+  joinConference: "\uD68C\uC758 \uCC38\uAC00",
+  joining: "\uCC38\uAC00 \uC911\u2026",
+  manageSection: "\uD68C\uC758 \uAD00\uB9AC",
+  titleLabel: "\uC81C\uBAA9:",
+  na: "\uD574\uB2F9 \uC5C6\uC74C",
+  participants: "\uCC38\uAC00\uC790",
+  noPlaces: "\uC7A5\uC18C \uC5C6\uC74C",
+  leaveConference: "\uD68C\uC758 \uB098\uAC00\uAE30",
+  endConference: "\uD68C\uC758 \uC885\uB8CC",
+  ending: "\uC885\uB8CC \uC911\u2026",
+  leaving: "\uB098\uAC00\uB294 \uC911\u2026",
+  conferenceEnded: "\uD68C\uC758\uAC00 \uC885\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.",
+  leftConference: "\uD68C\uC758\uC5D0\uC11C \uB098\uAC14\uC2B5\uB2C8\uB2E4.",
+  connectHubFirst: "\uBA3C\uC800 Cast \uD5C8\uBE0C\uC5D0 \uC5F0\uACB0\uD558\uC138\uC694.",
+  topicRequiredHost: "\uD68C\uC758\uB97C \uC8FC\uCD5C\uD558\uB824\uBA74 Cast \uD1A0\uD53D\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.",
+  topicRequiredJoin: "\uD68C\uC758\uC5D0 \uCC38\uAC00\uD558\uB824\uBA74 Cast \uD1A0\uD53D\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.",
+  titleRequired: "\uD68C\uC758 \uC81C\uBAA9\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.",
+  selectAttendee: "\uCC38\uAC00\uC790\uB97C \uD55C \uBA85 \uC774\uC0C1 \uC120\uD0DD\uD558\uC138\uC694.",
+  selectConferenceToJoin: "\uCC38\uAC00\uD560 \uD68C\uC758\uB97C \uC120\uD0DD\uD558\uC138\uC694.",
+  failedCreate: "\uD68C\uC758\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
+  failedJoin: "\uD68C\uC758\uC5D0 \uCC38\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
+  failedUpdate: "\uD68C\uC758\uB97C \uC5C5\uB370\uC774\uD2B8\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
+  inviteTitle: "\uD68C\uC758 \uCD08\uB300",
+  joinAndFollow: "\uCC38\uAC00\uD558\uACE0 \uB530\uB77C\uAC00\uAE30",
+  joinNoFollow: "\uCC38\uAC00\uD558\uB418 \uB530\uB77C\uAC00\uC9C0 \uC54A\uAE30",
+  doNotJoin: "\uCC38\uAC00\uD558\uC9C0 \uC54A\uAE30",
+  hostFallback: "\uD638\uC2A4\uD2B8",
+  inviteLeadWithTitle: "{{title}} \u2014 \uCC38\uAC00\uD558\uACE0 {{host}}\uB97C \uB530\uB77C\uAC08\uAE4C\uC694?",
+  inviteLeadNoTitle: "\uD68C\uC758\uC5D0 \uCC38\uAC00\uD558\uACE0 {{host}}\uB97C \uB530\uB77C\uAC08\uAE4C\uC694?",
+  joinAndFollowHost: "{{host}}\uB97C \uB530\uB77C\uAC00\uBA70 \uCC38\uAC00",
+  takeoverTitle: "\uC8FC\uB3C4\uAD8C\uC744 \uAC00\uC838\uC62C\uAE4C\uC694?",
+  takeoverBody: "\uD638\uC2A4\uD2B8\uC640 \uBAA8\uB4E0 \uCC38\uAC00\uC790\uC5D0\uAC8C \uC8FC\uB3C4\uAD8C\uC744 \uAC00\uC838\uAC04\uB2E4\uB294 \uC54C\uB9BC\uC774 \uAC11\uB2C8\uB2E4. \uC774 \uD68C\uC758\uC758 \uC7A5\uBA74 \uC5C5\uB370\uC774\uD2B8\uB97C \uC774\uB04C\uAC8C \uB429\uB2C8\uB2E4.",
+  cancel: "\uCDE8\uC18C",
+  takeOver: "\uC8FC\uB3C4\uAD8C \uAC00\uC838\uC624\uAE30",
+  conferencing: "\uD654\uC0C1\uD68C\uC758",
+  subscribeHubFirst: "\uBA3C\uC800 \uD5C8\uBE0C\uC5D0 \uAD6C\uB3C5\uD558\uC138\uC694",
+  stopFollowing: "\uB530\uB77C\uAC00\uAE30 \uC911\uC9C0",
+  resumeFollowing: "\uB530\uB77C\uAC00\uAE30 \uC7AC\uAC1C"
+};
+var pl = {
+  dialogTitle: "Konferencja",
+  close: "Zamknij",
+  closeAria: "Zamknij",
+  createSection: "Utw\xF3rz konferencj\u0119",
+  conferenceTitle: "Tytu\u0142 konferencji",
+  selectConferenceTitle: "Wybierz tytu\u0142",
+  otherTitle: "Inny\u2026",
+  customTitle: "Tytu\u0142 niestandardowy",
+  customTitlePlaceholder: "Wpisz tytu\u0142 konferencji",
+  users: "U\u017Cytkownicy",
+  loadingUsers: "\u0141adowanie u\u017Cytkownik\xF3w\u2026",
+  noUsers: "Brak dost\u0119pnych u\u017Cytkownik\xF3w",
+  createConference: "Utw\xF3rz konferencj\u0119",
+  creating: "Tworzenie\u2026",
+  joinSection: "Do\u0142\u0105cz do konferencji",
+  activeConferences: "Aktywne konferencje",
+  noConferences: "Brak dost\u0119pnych konferencji",
+  selectConference: "Wybierz konferencj\u0119",
+  untitled: "Bez tytu\u0142u",
+  joinConference: "Do\u0142\u0105cz do konferencji",
+  joining: "Do\u0142\u0105czanie\u2026",
+  manageSection: "Zarz\u0105dzaj konferencj\u0105",
+  titleLabel: "Tytu\u0142:",
+  na: "nd.",
+  participants: "Uczestnicy",
+  noPlaces: "Brak miejsc",
+  leaveConference: "Opu\u015B\u0107 konferencj\u0119",
+  endConference: "Zako\u0144cz konferencj\u0119",
+  ending: "Ko\u0144czenie\u2026",
+  leaving: "Opuszczanie\u2026",
+  conferenceEnded: "Konferencja zako\u0144czona.",
+  leftConference: "Opuszczono konferencj\u0119.",
+  connectHubFirst: "Najpierw po\u0142\u0105cz si\u0119 z hubem Cast.",
+  topicRequiredHost: "Do prowadzenia konferencji wymagany jest topic Cast.",
+  topicRequiredJoin: "Do do\u0142\u0105czenia do konferencji wymagany jest topic Cast.",
+  titleRequired: "Tytu\u0142 konferencji jest wymagany.",
+  selectAttendee: "Wybierz co najmniej jednego uczestnika.",
+  selectConferenceToJoin: "Wybierz konferencj\u0119, do kt\xF3rej chcesz do\u0142\u0105czy\u0107.",
+  failedCreate: "Nie uda\u0142o si\u0119 utworzy\u0107 konferencji.",
+  failedJoin: "Nie uda\u0142o si\u0119 do\u0142\u0105czy\u0107 do konferencji.",
+  failedUpdate: "Nie uda\u0142o si\u0119 zaktualizowa\u0107 konferencji.",
+  inviteTitle: "Zaproszenie na konferencj\u0119",
+  joinAndFollow: "Do\u0142\u0105cz i \u015Bled\u017A",
+  joinNoFollow: "Do\u0142\u0105cz, ale nie \u015Bled\u017A",
+  doNotJoin: "Nie do\u0142\u0105czaj",
+  hostFallback: "host",
+  inviteLeadWithTitle: "{{title}} \u2014 do\u0142\u0105czy\u0107 i \u015Bledzi\u0107 {{host}}?",
+  inviteLeadNoTitle: "Do\u0142\u0105czy\u0107 do konferencji i \u015Bledzi\u0107 {{host}}?",
+  joinAndFollowHost: "Do\u0142\u0105cz i \u015Bled\u017A {{host}}",
+  takeoverTitle: "Przej\u0105\u0107 prowadzenie?",
+  takeoverBody: "Host i wszyscy uczestnicy zostan\u0105 powiadomieni, \u017Ce przejmujesz prowadzenie. B\u0119dziesz kierowa\u0107 aktualizacjami sceny tej konferencji.",
+  cancel: "Anuluj",
+  takeOver: "Przejmij",
+  conferencing: "Konferencja",
+  subscribeHubFirst: "Najpierw zasubskrybuj hub",
+  stopFollowing: "Przesta\u0144 \u015Bledzi\u0107",
+  resumeFollowing: "Wzn\xF3w \u015Bledzenie"
+};
+var uk = {
+  dialogTitle: "\u041A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044F",
+  close: "\u0417\u0430\u043A\u0440\u0438\u0442\u0438",
+  closeAria: "\u0417\u0430\u043A\u0440\u0438\u0442\u0438",
+  createSection: "\u0421\u0442\u0432\u043E\u0440\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
+  conferenceTitle: "\u041D\u0430\u0437\u0432\u0430 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  selectConferenceTitle: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043D\u0430\u0437\u0432\u0443",
+  otherTitle: "\u0406\u043D\u0448\u0435\u2026",
+  customTitle: "\u0412\u043B\u0430\u0441\u043D\u0430 \u043D\u0430\u0437\u0432\u0430",
+  customTitlePlaceholder: "\u0412\u0432\u0435\u0434\u0456\u0442\u044C \u043D\u0430\u0437\u0432\u0443 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  users: "\u041A\u043E\u0440\u0438\u0441\u0442\u0443\u0432\u0430\u0447\u0456",
+  loadingUsers: "\u0417\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0435\u043D\u043D\u044F \u043A\u043E\u0440\u0438\u0441\u0442\u0443\u0432\u0430\u0447\u0456\u0432\u2026",
+  noUsers: "\u041D\u0435\u043C\u0430\u0454 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0445 \u043A\u043E\u0440\u0438\u0441\u0442\u0443\u0432\u0430\u0447\u0456\u0432",
+  createConference: "\u0421\u0442\u0432\u043E\u0440\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
+  creating: "\u0421\u0442\u0432\u043E\u0440\u0435\u043D\u043D\u044F\u2026",
+  joinSection: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  activeConferences: "\u0410\u043A\u0442\u0438\u0432\u043D\u0456 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  noConferences: "\u041D\u0435\u043C\u0430\u0454 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0445 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0439",
+  selectConference: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
+  untitled: "\u0411\u0435\u0437 \u043D\u0430\u0437\u0432\u0438",
+  joinConference: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  joining: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u043D\u043D\u044F\u2026",
+  manageSection: "\u041A\u0435\u0440\u0443\u0432\u0430\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0454\u044E",
+  titleLabel: "\u041D\u0430\u0437\u0432\u0430:",
+  na: "\u043D/\u0434",
+  participants: "\u0423\u0447\u0430\u0441\u043D\u0438\u043A\u0438",
+  noPlaces: "\u041D\u0435\u043C\u0430\u0454 \u043C\u0456\u0441\u0446\u044C",
+  leaveConference: "\u0412\u0438\u0439\u0442\u0438 \u0437 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
+  endConference: "\u0417\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
+  ending: "\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043D\u044F\u2026",
+  leaving: "\u0412\u0438\u0445\u0456\u0434\u2026",
+  conferenceEnded: "\u041A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E.",
+  leftConference: "\u0412\u0438 \u0432\u0438\u0439\u0448\u043B\u0438 \u0437 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
+  connectHubFirst: "\u0421\u043F\u043E\u0447\u0430\u0442\u043A\u0443 \u043F\u0456\u0434\u043A\u043B\u044E\u0447\u0456\u0442\u044C\u0441\u044F \u0434\u043E Cast-\u0445\u0430\u0431\u0443.",
+  topicRequiredHost: "\u0414\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0434\u0435\u043D\u043D\u044F \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457 \u043F\u043E\u0442\u0440\u0456\u0431\u0435\u043D Cast topic.",
+  topicRequiredJoin: "\u0429\u043E\u0431 \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457, \u043F\u043E\u0442\u0440\u0456\u0431\u0435\u043D Cast topic.",
+  titleRequired: "\u041F\u043E\u0442\u0440\u0456\u0431\u043D\u0430 \u043D\u0430\u0437\u0432\u0430 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
+  selectAttendee: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043F\u0440\u0438\u043D\u0430\u0439\u043C\u043D\u0456 \u043E\u0434\u043D\u043E\u0433\u043E \u0443\u0447\u0430\u0441\u043D\u0438\u043A\u0430.",
+  selectConferenceToJoin: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E, \u0434\u043E \u044F\u043A\u043E\u0457 \u0445\u043E\u0447\u0435\u0442\u0435 \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F.",
+  failedCreate: "\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u0441\u0442\u0432\u043E\u0440\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E.",
+  failedJoin: "\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
+  failedUpdate: "\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u043E\u043D\u043E\u0432\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E.",
+  inviteTitle: "\u0417\u0430\u043F\u0440\u043E\u0448\u0435\u043D\u043D\u044F \u043D\u0430 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
+  joinAndFollow: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438",
+  joinNoFollow: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F, \u0430\u043B\u0435 \u043D\u0435 \u0441\u0442\u0435\u0436\u0438\u0442\u0438",
+  doNotJoin: "\u041D\u0435 \u043F\u0440\u0438\u0454\u0434\u043D\u0443\u0432\u0430\u0442\u0438\u0441\u044F",
+  hostFallback: "\u0432\u0435\u0434\u0443\u0447\u0438\u0439",
+  inviteLeadWithTitle: "{{title}} \u2014 \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438 \u0437\u0430 {{host}}?",
+  inviteLeadNoTitle: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457 \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438 \u0437\u0430 {{host}}?",
+  joinAndFollowHost: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438 \u0437\u0430 {{host}}",
+  takeoverTitle: "\u041F\u0435\u0440\u0435\u0445\u043E\u043F\u0438\u0442\u0438 \u043A\u0435\u0440\u0443\u0432\u0430\u043D\u043D\u044F?",
+  takeoverBody: "\u0412\u0435\u0434\u0443\u0447\u043E\u0433\u043E \u0442\u0430 \u0432\u0441\u0456\u0445 \u0443\u0447\u0430\u0441\u043D\u0438\u043A\u0456\u0432 \u0431\u0443\u0434\u0435 \u043F\u043E\u0432\u0456\u0434\u043E\u043C\u043B\u0435\u043D\u043E, \u0449\u043E \u0432\u0438 \u043F\u0435\u0440\u0435\u0445\u043E\u043F\u043B\u044E\u0454\u0442\u0435 \u043A\u0435\u0440\u0443\u0432\u0430\u043D\u043D\u044F. \u0412\u0438 \u043A\u0435\u0440\u0443\u0432\u0430\u0442\u0438\u043C\u0435\u0442\u0435 \u043E\u043D\u043E\u0432\u043B\u0435\u043D\u043D\u044F\u043C\u0438 \u0441\u0446\u0435\u043D\u0438 \u0446\u0456\u0454\u0457 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
+  cancel: "\u0421\u043A\u0430\u0441\u0443\u0432\u0430\u0442\u0438",
+  takeOver: "\u041F\u0435\u0440\u0435\u0445\u043E\u043F\u0438\u0442\u0438",
+  conferencing: "\u041A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044F",
+  subscribeHubFirst: "\u0421\u043F\u043E\u0447\u0430\u0442\u043A\u0443 \u043F\u0456\u0434\u043F\u0438\u0448\u0456\u0442\u044C\u0441\u044F \u043D\u0430 \u0445\u0430\u0431",
+  stopFollowing: "\u041F\u0440\u0438\u043F\u0438\u043D\u0438\u0442\u0438 \u0441\u0442\u0435\u0436\u0435\u043D\u043D\u044F",
+  resumeFollowing: "\u0412\u0456\u0434\u043D\u043E\u0432\u0438\u0442\u0438 \u0441\u0442\u0435\u0436\u0435\u043D\u043D\u044F"
+};
+var cs = {
+  dialogTitle: "Konference",
+  close: "Zav\u0159\xEDt",
+  closeAria: "Zav\u0159\xEDt",
+  createSection: "Vytvo\u0159it konferenci",
+  conferenceTitle: "N\xE1zev konference",
+  selectConferenceTitle: "Vyberte n\xE1zev",
+  otherTitle: "Jin\xFD\u2026",
+  customTitle: "Vlastn\xED n\xE1zev",
+  customTitlePlaceholder: "Zadejte n\xE1zev konference",
+  users: "U\u017Eivatel\xE9",
+  loadingUsers: "Na\u010D\xEDt\xE1n\xED u\u017Eivatel\u016F\u2026",
+  noUsers: "\u017D\xE1dn\xED dostupn\xED u\u017Eivatel\xE9",
+  createConference: "Vytvo\u0159it konferenci",
+  creating: "Vytv\xE1\u0159en\xED\u2026",
+  joinSection: "P\u0159ipojit se ke konferenci",
+  activeConferences: "Aktivn\xED konference",
+  noConferences: "\u017D\xE1dn\xE9 dostupn\xE9 konference",
+  selectConference: "Vyberte konferenci",
+  untitled: "Bez n\xE1zvu",
+  joinConference: "P\u0159ipojit se ke konferenci",
+  joining: "P\u0159ipojov\xE1n\xED\u2026",
+  manageSection: "Spravovat konferenci",
+  titleLabel: "N\xE1zev:",
+  na: "n/a",
+  participants: "\xDA\u010Dastn\xEDci",
+  noPlaces: "\u017D\xE1dn\xE1 m\xEDsta",
+  leaveConference: "Opustit konferenci",
+  endConference: "Ukon\u010Dit konferenci",
+  ending: "Ukon\u010Dov\xE1n\xED\u2026",
+  leaving: "Opou\u0161t\u011Bn\xED\u2026",
+  conferenceEnded: "Konference ukon\u010Dena.",
+  leftConference: "Opustili jste konferenci.",
+  connectHubFirst: "Nejprve se p\u0159ipojte k Cast hubu.",
+  topicRequiredHost: "Pro po\u0159\xE1d\xE1n\xED konference je vy\u017Eadov\xE1n Cast topic.",
+  topicRequiredJoin: "Pro p\u0159ipojen\xED ke konferenci je vy\u017Eadov\xE1n Cast topic.",
+  titleRequired: "N\xE1zev konference je povinn\xFD.",
+  selectAttendee: "Vyberte alespo\u0148 jednoho \xFA\u010Dastn\xEDka.",
+  selectConferenceToJoin: "Vyberte konferenci, ke kter\xE9 se chcete p\u0159ipojit.",
+  failedCreate: "Vytvo\u0159en\xED konference se nezda\u0159ilo.",
+  failedJoin: "P\u0159ipojen\xED ke konferenci se nezda\u0159ilo.",
+  failedUpdate: "Aktualizace konference se nezda\u0159ila.",
+  inviteTitle: "Pozv\xE1nka na konferenci",
+  joinAndFollow: "P\u0159ipojit se a sledovat",
+  joinNoFollow: "P\u0159ipojit se, ale nesledovat",
+  doNotJoin: "Nep\u0159ipojovat se",
+  hostFallback: "hostitel",
+  inviteLeadWithTitle: "{{title}} \u2014 p\u0159ipojit se a sledovat {{host}}?",
+  inviteLeadNoTitle: "P\u0159ipojit se ke konferenci a sledovat {{host}}?",
+  joinAndFollowHost: "P\u0159ipojit se a sledovat {{host}}",
+  takeoverTitle: "P\u0159evz\xEDt veden\xED?",
+  takeoverBody: "Hostitel a v\u0161ichni \xFA\u010Dastn\xEDci budou upozorn\u011Bni, \u017Ee p\u0159eb\xEDr\xE1te veden\xED. Budete \u0159\xEDdit aktualizace sc\xE9ny t\xE9to konference.",
+  cancel: "Zru\u0161it",
+  takeOver: "P\u0159evz\xEDt",
+  conferencing: "Konference",
+  subscribeHubFirst: "Nejprve se p\u0159ihlaste k hubu",
+  stopFollowing: "P\u0159estat sledovat",
+  resumeFollowing: "Obnovit sledov\xE1n\xED"
+};
+var nl = {
+  dialogTitle: "Conferentie",
+  close: "Sluiten",
+  closeAria: "Sluiten",
+  createSection: "Een conferentie maken",
+  conferenceTitle: "Conferentietitel",
+  selectConferenceTitle: "Selecteer een titel",
+  otherTitle: "Anders\u2026",
+  customTitle: "Aangepaste titel",
+  customTitlePlaceholder: "Voer de conferentietitel in",
+  users: "Gebruikers",
+  loadingUsers: "Gebruikers laden\u2026",
+  noUsers: "Geen gebruikers beschikbaar",
+  createConference: "Conferentie maken",
+  creating: "Bezig met maken\u2026",
+  joinSection: "Deelnemen aan een conferentie",
+  activeConferences: "Actieve conferenties",
+  noConferences: "Geen conferenties beschikbaar",
+  selectConference: "Selecteer een conferentie",
+  untitled: "Zonder titel",
+  joinConference: "Deelnemen aan conferentie",
+  joining: "Bezig met deelnemen\u2026",
+  manageSection: "Conferentie beheren",
+  titleLabel: "Titel:",
+  na: "n.v.t.",
+  participants: "Deelnemers",
+  noPlaces: "Geen plaatsen",
+  leaveConference: "Conferentie verlaten",
+  endConference: "Conferentie be\xEBindigen",
+  ending: "Be\xEBindigen\u2026",
+  leaving: "Verlaten\u2026",
+  conferenceEnded: "Conferentie be\xEBindigd.",
+  leftConference: "U hebt de conferentie verlaten.",
+  connectHubFirst: "Maak eerst verbinding met de Cast-hub.",
+  topicRequiredHost: "Een Cast-topic is vereist om een conferentie te hosten.",
+  topicRequiredJoin: "Een Cast-topic is vereist om aan een conferentie deel te nemen.",
+  titleRequired: "Conferentietitel is verplicht.",
+  selectAttendee: "Selecteer minstens \xE9\xE9n deelnemer.",
+  selectConferenceToJoin: "Selecteer een conferentie om deel te nemen.",
+  failedCreate: "Conferentie maken mislukt.",
+  failedJoin: "Deelnemen aan conferentie mislukt.",
+  failedUpdate: "Conferentie bijwerken mislukt.",
+  inviteTitle: "Conferentie-uitnodiging",
+  joinAndFollow: "Deelnemen en volgen",
+  joinNoFollow: "Deelnemen maar niet volgen",
+  doNotJoin: "Niet deelnemen",
+  hostFallback: "host",
+  inviteLeadWithTitle: "{{title}} \u2014 deelnemen en {{host}} volgen?",
+  inviteLeadNoTitle: "Deelnemen aan de conferentie en {{host}} volgen?",
+  joinAndFollowHost: "Deelnemen en {{host}} volgen",
+  takeoverTitle: "Overname?",
+  takeoverBody: "De host en alle deelnemers worden ge\xEFnformeerd dat u de leiding overneemt. U leidt dan de sc\xE8ne-updates voor deze conferentie.",
+  cancel: "Annuleren",
+  takeOver: "Overnemen",
+  conferencing: "Conferentie",
+  subscribeHubFirst: "Abonneer u eerst op de hub",
+  stopFollowing: "Stoppen met volgen",
+  resumeFollowing: "Volgen hervatten"
+};
+var el = {
+  dialogTitle: "\u0394\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  close: "\u039A\u03BB\u03B5\u03AF\u03C3\u03B9\u03BC\u03BF",
+  closeAria: "\u039A\u03BB\u03B5\u03AF\u03C3\u03B9\u03BC\u03BF",
+  createSection: "\u0394\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  conferenceTitle: "\u03A4\u03AF\u03C4\u03BB\u03BF\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  selectConferenceTitle: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03C4\u03AF\u03C4\u03BB\u03BF",
+  otherTitle: "\u0386\u03BB\u03BB\u03BF\u2026",
+  customTitle: "\u03A0\u03C1\u03BF\u03C3\u03B1\u03C1\u03BC\u03BF\u03C3\u03BC\u03AD\u03BD\u03BF\u03C2 \u03C4\u03AF\u03C4\u03BB\u03BF\u03C2",
+  customTitlePlaceholder: "\u0395\u03B9\u03C3\u03B1\u03B3\u03AC\u03B3\u03B5\u03C4\u03B5 \u03C4\u03BF\u03BD \u03C4\u03AF\u03C4\u03BB\u03BF \u03C4\u03B7\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  users: "\u03A7\u03C1\u03AE\u03C3\u03C4\u03B5\u03C2",
+  loadingUsers: "\u03A6\u03CC\u03C1\u03C4\u03C9\u03C3\u03B7 \u03C7\u03C1\u03B7\u03C3\u03C4\u03CE\u03BD\u2026",
+  noUsers: "\u0394\u03B5\u03BD \u03C5\u03C0\u03AC\u03C1\u03C7\u03BF\u03C5\u03BD \u03B4\u03B9\u03B1\u03B8\u03AD\u03C3\u03B9\u03BC\u03BF\u03B9 \u03C7\u03C1\u03AE\u03C3\u03C4\u03B5\u03C2",
+  createConference: "\u0394\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  creating: "\u0394\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1\u2026",
+  joinSection: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  activeConferences: "\u0395\u03BD\u03B5\u03C1\u03B3\u03AD\u03C2 \u03B4\u03B9\u03B1\u03C3\u03BA\u03AD\u03C8\u03B5\u03B9\u03C2",
+  noConferences: "\u0394\u03B5\u03BD \u03C5\u03C0\u03AC\u03C1\u03C7\u03BF\u03C5\u03BD \u03B4\u03B9\u03B1\u03B8\u03AD\u03C3\u03B9\u03BC\u03B5\u03C2 \u03B4\u03B9\u03B1\u03C3\u03BA\u03AD\u03C8\u03B5\u03B9\u03C2",
+  selectConference: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  untitled: "\u03A7\u03C9\u03C1\u03AF\u03C2 \u03C4\u03AF\u03C4\u03BB\u03BF",
+  joinConference: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  joining: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE\u2026",
+  manageSection: "\u0394\u03B9\u03B1\u03C7\u03B5\u03AF\u03C1\u03B9\u03C3\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  titleLabel: "\u03A4\u03AF\u03C4\u03BB\u03BF\u03C2:",
+  na: "\u0394/\u03A5",
+  participants: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03AD\u03C7\u03BF\u03BD\u03C4\u03B5\u03C2",
+  noPlaces: "\u03A7\u03C9\u03C1\u03AF\u03C2 \u03B8\u03AD\u03C3\u03B5\u03B9\u03C2",
+  leaveConference: "\u0391\u03C0\u03BF\u03C7\u03CE\u03C1\u03B7\u03C3\u03B7 \u03B1\u03C0\u03CC \u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  endConference: "\u03A4\u03B5\u03C1\u03BC\u03B1\u03C4\u03B9\u03C3\u03BC\u03CC\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
+  ending: "\u03A4\u03B5\u03C1\u03BC\u03B1\u03C4\u03B9\u03C3\u03BC\u03CC\u03C2\u2026",
+  leaving: "\u0391\u03C0\u03BF\u03C7\u03CE\u03C1\u03B7\u03C3\u03B7\u2026",
+  conferenceEnded: "\u0397 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7 \u03C4\u03B5\u03C1\u03BC\u03B1\u03C4\u03AF\u03C3\u03C4\u03B7\u03BA\u03B5.",
+  leftConference: "\u0391\u03C0\u03BF\u03C7\u03C9\u03C1\u03AE\u03C3\u03B1\u03C4\u03B5 \u03B1\u03C0\u03CC \u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7.",
+  connectHubFirst: "\u03A3\u03C5\u03BD\u03B4\u03B5\u03B8\u03B5\u03AF\u03C4\u03B5 \u03C0\u03C1\u03CE\u03C4\u03B1 \u03C3\u03C4\u03BF Cast hub.",
+  topicRequiredHost: "\u0391\u03C0\u03B1\u03B9\u03C4\u03B5\u03AF\u03C4\u03B1\u03B9 Cast topic \u03B3\u03B9\u03B1 \u03C6\u03B9\u03BB\u03BF\u03BE\u03B5\u03BD\u03AF\u03B1 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
+  topicRequiredJoin: "\u0391\u03C0\u03B1\u03B9\u03C4\u03B5\u03AF\u03C4\u03B1\u03B9 Cast topic \u03B3\u03B9\u03B1 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7.",
+  titleRequired: "\u0391\u03C0\u03B1\u03B9\u03C4\u03B5\u03AF\u03C4\u03B1\u03B9 \u03C4\u03AF\u03C4\u03BB\u03BF\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
+  selectAttendee: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03C4\u03BF\u03C5\u03BB\u03AC\u03C7\u03B9\u03C3\u03C4\u03BF\u03BD \u03AD\u03BD\u03B1\u03BD \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03AD\u03C7\u03BF\u03BD\u03C4\u03B1.",
+  selectConferenceToJoin: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7 \u03B3\u03B9\u03B1 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE.",
+  failedCreate: "\u0391\u03C0\u03BF\u03C4\u03C5\u03C7\u03AF\u03B1 \u03B4\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
+  failedJoin: "\u0391\u03C0\u03BF\u03C4\u03C5\u03C7\u03AF\u03B1 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE\u03C2 \u03C3\u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7.",
+  failedUpdate: "\u0391\u03C0\u03BF\u03C4\u03C5\u03C7\u03AF\u03B1 \u03B5\u03BD\u03B7\u03BC\u03AD\u03C1\u03C9\u03C3\u03B7\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
+  inviteTitle: "\u03A0\u03C1\u03CC\u03C3\u03BA\u03BB\u03B7\u03C3\u03B7 \u03C3\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  joinAndFollow: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7",
+  joinNoFollow: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C7\u03C9\u03C1\u03AF\u03C2 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7",
+  doNotJoin: "\u038C\u03C7\u03B9 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE",
+  hostFallback: "\u03BF\u03B9\u03BA\u03BF\u03B4\u03B5\u03C3\u03C0\u03CC\u03C4\u03B7\u03C2",
+  inviteLeadWithTitle: "{{title}} \u2014 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7 \u03C4\u03BF\u03C5 {{host}};",
+  inviteLeadNoTitle: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7 \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7 \u03C4\u03BF\u03C5 {{host}};",
+  joinAndFollowHost: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7 \u03C4\u03BF\u03C5 {{host}}",
+  takeoverTitle: "\u0391\u03BD\u03AC\u03BB\u03B7\u03C8\u03B7 \u03B5\u03BB\u03AD\u03B3\u03C7\u03BF\u03C5;",
+  takeoverBody: "\u039F \u03BF\u03B9\u03BA\u03BF\u03B4\u03B5\u03C3\u03C0\u03CC\u03C4\u03B7\u03C2 \u03BA\u03B1\u03B9 \u03CC\u03BB\u03BF\u03B9 \u03BF\u03B9 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03AD\u03C7\u03BF\u03BD\u03C4\u03B5\u03C2 \u03B8\u03B1 \u03B5\u03B9\u03B4\u03BF\u03C0\u03BF\u03B9\u03B7\u03B8\u03BF\u03CD\u03BD \u03CC\u03C4\u03B9 \u03B1\u03BD\u03B1\u03BB\u03B1\u03BC\u03B2\u03AC\u03BD\u03B5\u03C4\u03B5 \u03C4\u03BF\u03BD \u03AD\u03BB\u03B5\u03B3\u03C7\u03BF. \u0398\u03B1 \u03BF\u03B4\u03B7\u03B3\u03B5\u03AF\u03C4\u03B5 \u03C4\u03B9\u03C2 \u03B5\u03BD\u03B7\u03BC\u03B5\u03C1\u03CE\u03C3\u03B5\u03B9\u03C2 \u03C3\u03BA\u03B7\u03BD\u03AE\u03C2 \u03B1\u03C5\u03C4\u03AE\u03C2 \u03C4\u03B7\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
+  cancel: "\u0391\u03BA\u03CD\u03C1\u03C9\u03C3\u03B7",
+  takeOver: "\u0391\u03BD\u03AC\u03BB\u03B7\u03C8\u03B7",
+  conferencing: "\u0394\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
+  subscribeHubFirst: "\u0395\u03B3\u03B3\u03C1\u03B1\u03C6\u03B5\u03AF\u03C4\u03B5 \u03C0\u03C1\u03CE\u03C4\u03B1 \u03C3\u03C4\u03BF hub",
+  stopFollowing: "\u0394\u03B9\u03B1\u03BA\u03BF\u03C0\u03AE \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7\u03C2",
+  resumeFollowing: "\u0395\u03C0\u03B1\u03BD\u03AC\u03BB\u03B7\u03C8\u03B7 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7\u03C2"
+};
+var lv = {
+  dialogTitle: "Konference",
+  close: "Aizv\u0113rt",
+  closeAria: "Aizv\u0113rt",
+  createSection: "Izveidot konferenci",
+  conferenceTitle: "Konferences nosaukums",
+  selectConferenceTitle: "Atlas\u012Bt nosaukumu",
+  otherTitle: "Cits\u2026",
+  customTitle: "Piel\u0101gots nosaukums",
+  customTitlePlaceholder: "Ievadiet konferences nosaukumu",
+  users: "Lietot\u0101ji",
+  loadingUsers: "Iel\u0101d\u0113 lietot\u0101jus\u2026",
+  noUsers: "Nav pieejamu lietot\u0101ju",
+  createConference: "Izveidot konferenci",
+  creating: "Izveido\u2026",
+  joinSection: "Pievienoties konferencei",
+  activeConferences: "Akt\u012Bv\u0101s konferences",
+  noConferences: "Nav pieejamu konferen\u010Du",
+  selectConference: "Atlas\u012Bt konferenci",
+  untitled: "Bez nosaukuma",
+  joinConference: "Pievienoties konferencei",
+  joining: "Pievienojas\u2026",
+  manageSection: "P\u0101rvald\u012Bt konferenci",
+  titleLabel: "Nosaukums:",
+  na: "n/a",
+  participants: "Dal\u012Bbnieki",
+  noPlaces: "Nav vietu",
+  leaveConference: "Atst\u0101t konferenci",
+  endConference: "Beigt konferenci",
+  ending: "Beidz\u2026",
+  leaving: "Atst\u0101j\u2026",
+  conferenceEnded: "Konference beigusies.",
+  leftConference: "J\u016Bs atst\u0101j\u0101t konferenci.",
+  connectHubFirst: "Vispirms piesl\u0113dzieties Cast hub.",
+  topicRequiredHost: "Lai r\u012Bkotu konferenci, nepiecie\u0161ams Cast topic.",
+  topicRequiredJoin: "Lai pievienotos konferencei, nepiecie\u0161ams Cast topic.",
+  titleRequired: "Nepiecie\u0161ams konferences nosaukums.",
+  selectAttendee: "Atlasiet vismaz vienu dal\u012Bbnieku.",
+  selectConferenceToJoin: "Atlasiet konferenci, kurai pievienoties.",
+  failedCreate: "Neizdev\u0101s izveidot konferenci.",
+  failedJoin: "Neizdev\u0101s pievienoties konferencei.",
+  failedUpdate: "Neizdev\u0101s atjaunin\u0101t konferenci.",
+  inviteTitle: "Uzaicin\u0101jums uz konferenci",
+  joinAndFollow: "Pievienoties un sekot",
+  joinNoFollow: "Pievienoties, bet nesekot",
+  doNotJoin: "Nepievienoties",
+  hostFallback: "vad\u012Bt\u0101js",
+  inviteLeadWithTitle: "{{title}} \u2014 pievienoties un sekot {{host}}?",
+  inviteLeadNoTitle: "Pievienoties konferencei un sekot {{host}}?",
+  joinAndFollowHost: "Pievienoties un sekot {{host}}",
+  takeoverTitle: "P\u0101r\u0146emt vad\u012Bbu?",
+  takeoverBody: "Vad\u012Bt\u0101js un visi dal\u012Bbnieki tiks inform\u0113ti, ka j\u016Bs p\u0101r\u0146emat vad\u012Bbu. J\u016Bs vad\u012Bsiet \u0161\u012Bs konferences ainas atjaunin\u0101jumus.",
+  cancel: "Atcelt",
+  takeOver: "P\u0101r\u0146emt",
+  conferencing: "Konference",
+  subscribeHubFirst: "Vispirms abon\u0113jiet hub",
+  stopFollowing: "P\u0101rtraukt seko\u0161anu",
+  resumeFollowing: "Ats\u0101kt seko\u0161anu"
+};
+var hu = {
+  dialogTitle: "Konferencia",
+  close: "Bez\xE1r\xE1s",
+  closeAria: "Bez\xE1r\xE1s",
+  createSection: "Konferencia l\xE9trehoz\xE1sa",
+  conferenceTitle: "Konferencia c\xEDme",
+  selectConferenceTitle: "C\xEDm kiv\xE1laszt\xE1sa",
+  otherTitle: "Egy\xE9b\u2026",
+  customTitle: "Egy\xE9ni c\xEDm",
+  customTitlePlaceholder: "Adja meg a konferencia c\xEDm\xE9t",
+  users: "Felhaszn\xE1l\xF3k",
+  loadingUsers: "Felhaszn\xE1l\xF3k bet\xF6lt\xE9se\u2026",
+  noUsers: "Nincs el\xE9rhet\u0151 felhaszn\xE1l\xF3",
+  createConference: "Konferencia l\xE9trehoz\xE1sa",
+  creating: "L\xE9trehoz\xE1s\u2026",
+  joinSection: "Csatlakoz\xE1s konferenci\xE1hoz",
+  activeConferences: "Akt\xEDv konferenci\xE1k",
+  noConferences: "Nincs el\xE9rhet\u0151 konferencia",
+  selectConference: "Konferencia kiv\xE1laszt\xE1sa",
+  untitled: "N\xE9vtelen",
+  joinConference: "Csatlakoz\xE1s a konferenci\xE1hoz",
+  joining: "Csatlakoz\xE1s\u2026",
+  manageSection: "Konferencia kezel\xE9se",
+  titleLabel: "C\xEDm:",
+  na: "n/a",
+  participants: "R\xE9sztvev\u0151k",
+  noPlaces: "Nincs hely",
+  leaveConference: "Kil\xE9p\xE9s a konferenci\xE1b\xF3l",
+  endConference: "Konferencia befejez\xE9se",
+  ending: "Befejez\xE9s\u2026",
+  leaving: "Kil\xE9p\xE9s\u2026",
+  conferenceEnded: "A konferencia v\xE9get \xE9rt.",
+  leftConference: "Kil\xE9pett a konferenci\xE1b\xF3l.",
+  connectHubFirst: "El\u0151sz\xF6r csatlakozzon a Cast hubhoz.",
+  topicRequiredHost: "Konferencia ind\xEDt\xE1s\xE1hoz Cast topic sz\xFCks\xE9ges.",
+  topicRequiredJoin: "Konferenci\xE1hoz csatlakoz\xE1shoz Cast topic sz\xFCks\xE9ges.",
+  titleRequired: "A konferencia c\xEDme k\xF6telez\u0151.",
+  selectAttendee: "V\xE1lasszon legal\xE1bb egy r\xE9sztvev\u0151t.",
+  selectConferenceToJoin: "V\xE1lasszon konferenci\xE1t a csatlakoz\xE1shoz.",
+  failedCreate: "Nem siker\xFClt l\xE9trehozni a konferenci\xE1t.",
+  failedJoin: "Nem siker\xFClt csatlakozni a konferenci\xE1hoz.",
+  failedUpdate: "Nem siker\xFClt friss\xEDteni a konferenci\xE1t.",
+  inviteTitle: "Konferenciamegh\xEDv\xF3",
+  joinAndFollow: "Csatlakoz\xE1s \xE9s k\xF6vet\xE9s",
+  joinNoFollow: "Csatlakoz\xE1s k\xF6vet\xE9s n\xE9lk\xFCl",
+  doNotJoin: "Nem csatlakozom",
+  hostFallback: "h\xE1zigazda",
+  inviteLeadWithTitle: "{{title}} \u2014 csatlakoz\xE1s \xE9s {{host}} k\xF6vet\xE9se?",
+  inviteLeadNoTitle: "Csatlakoz\xE1s a konferenci\xE1hoz \xE9s {{host}} k\xF6vet\xE9se?",
+  joinAndFollowHost: "Csatlakoz\xE1s \xE9s {{host}} k\xF6vet\xE9se",
+  takeoverTitle: "\xC1tv\xE9tel?",
+  takeoverBody: "A h\xE1zigazda \xE9s minden r\xE9sztvev\u0151 \xE9rtes\xEDt\xE9st kap, hogy \xD6n \xE1tveszi a vezet\xE9st. \xD6n ir\xE1ny\xEDtja majd a konferencia jelenetfriss\xEDt\xE9seit.",
+  cancel: "M\xE9gse",
+  takeOver: "\xC1tv\xE9tel",
+  conferencing: "Konferencia",
+  subscribeHubFirst: "El\u0151sz\xF6r iratkozzon fel a hubra",
+  stopFollowing: "K\xF6vet\xE9s le\xE1ll\xEDt\xE1sa",
+  resumeFollowing: "K\xF6vet\xE9s folytat\xE1sa"
+};
+var lt = {
+  dialogTitle: "Konferencija",
+  close: "U\u017Edaryti",
+  closeAria: "U\u017Edaryti",
+  createSection: "Sukurti konferencij\u0105",
+  conferenceTitle: "Konferencijos pavadinimas",
+  selectConferenceTitle: "Pasirinkite pavadinim\u0105",
+  otherTitle: "Kita\u2026",
+  customTitle: "Pasirinktinis pavadinimas",
+  customTitlePlaceholder: "\u012Eveskite konferencijos pavadinim\u0105",
+  users: "Naudotojai",
+  loadingUsers: "\u012Ekeliami naudotojai\u2026",
+  noUsers: "N\u0117ra galim\u0173 naudotoj\u0173",
+  createConference: "Sukurti konferencij\u0105",
+  creating: "Kuriama\u2026",
+  joinSection: "Prisijungti prie konferencijos",
+  activeConferences: "Aktyvios konferencijos",
+  noConferences: "N\u0117ra galim\u0173 konferencij\u0173",
+  selectConference: "Pasirinkite konferencij\u0105",
+  untitled: "Be pavadinimo",
+  joinConference: "Prisijungti prie konferencijos",
+  joining: "Jungiamasi\u2026",
+  manageSection: "Tvarkyti konferencij\u0105",
+  titleLabel: "Pavadinimas:",
+  na: "n/d",
+  participants: "Dalyviai",
+  noPlaces: "N\u0117ra viet\u0173",
+  leaveConference: "I\u0161eiti i\u0161 konferencijos",
+  endConference: "Baigti konferencij\u0105",
+  ending: "Baigiama\u2026",
+  leaving: "I\u0161einama\u2026",
+  conferenceEnded: "Konferencija baigta.",
+  leftConference: "I\u0161\u0117jote i\u0161 konferencijos.",
+  connectHubFirst: "Pirmiausia prisijunkite prie Cast hub.",
+  topicRequiredHost: "Konferencijai vesti reikalingas Cast topic.",
+  topicRequiredJoin: "Norint prisijungti prie konferencijos, reikalingas Cast topic.",
+  titleRequired: "Reikalingas konferencijos pavadinimas.",
+  selectAttendee: "Pasirinkite bent vien\u0105 dalyv\u012F.",
+  selectConferenceToJoin: "Pasirinkite konferencij\u0105, prie kurios jungtis.",
+  failedCreate: "Nepavyko sukurti konferencijos.",
+  failedJoin: "Nepavyko prisijungti prie konferencijos.",
+  failedUpdate: "Nepavyko atnaujinti konferencijos.",
+  inviteTitle: "Kvietimas \u012F konferencij\u0105",
+  joinAndFollow: "Prisijungti ir sekti",
+  joinNoFollow: "Prisijungti, bet nesekti",
+  doNotJoin: "Neprisijungti",
+  hostFallback: "ved\u0117jas",
+  inviteLeadWithTitle: "{{title}} \u2014 prisijungti ir sekti {{host}}?",
+  inviteLeadNoTitle: "Prisijungti prie konferencijos ir sekti {{host}}?",
+  joinAndFollowHost: "Prisijungti ir sekti {{host}}",
+  takeoverTitle: "Perimti valdym\u0105?",
+  takeoverBody: "Ved\u0117jas ir visi dalyviai bus informuoti, kad perimate valdym\u0105. V\u0117site \u0161ios konferencijos scenos atnaujinimus.",
+  cancel: "At\u0161aukti",
+  takeOver: "Perimti",
+  conferencing: "Konferencija",
+  subscribeHubFirst: "Pirmiausia u\u017Esiprenumeruokite hub",
+  stopFollowing: "Nustoti sekti",
+  resumeFollowing: "T\u0119sti sekim\u0105"
+};
+var ro = {
+  dialogTitle: "Conferin\u021B\u0103",
+  close: "\xCEnchide",
+  closeAria: "\xCEnchide",
+  createSection: "Creeaz\u0103 o conferin\u021B\u0103",
+  conferenceTitle: "Titlul conferin\u021Bei",
+  selectConferenceTitle: "Selecteaz\u0103 un titlu",
+  otherTitle: "Altul\u2026",
+  customTitle: "Titlu personalizat",
+  customTitlePlaceholder: "Introduce\u021Bi titlul conferin\u021Bei",
+  users: "Utilizatori",
+  loadingUsers: "Se \xEEncarc\u0103 utilizatorii\u2026",
+  noUsers: "Nu exist\u0103 utilizatori disponibili",
+  createConference: "Creeaz\u0103 conferin\u021Ba",
+  creating: "Se creeaz\u0103\u2026",
+  joinSection: "Particip\u0103 la o conferin\u021B\u0103",
+  activeConferences: "Conferin\u021Be active",
+  noConferences: "Nu exist\u0103 conferin\u021Be disponibile",
+  selectConference: "Selecteaz\u0103 o conferin\u021B\u0103",
+  untitled: "F\u0103r\u0103 titlu",
+  joinConference: "Particip\u0103 la conferin\u021B\u0103",
+  joining: "Se particip\u0103\u2026",
+  manageSection: "Gestioneaz\u0103 conferin\u021Ba",
+  titleLabel: "Titlu:",
+  na: "N/A",
+  participants: "Participan\u021Bi",
+  noPlaces: "F\u0103r\u0103 locuri",
+  leaveConference: "P\u0103r\u0103se\u0219te conferin\u021Ba",
+  endConference: "\xCEncheie conferin\u021Ba",
+  ending: "Se \xEEncheie\u2026",
+  leaving: "Se p\u0103r\u0103se\u0219te\u2026",
+  conferenceEnded: "Conferin\u021Ba s-a \xEEncheiat.",
+  leftConference: "A\u021Bi p\u0103r\u0103sit conferin\u021Ba.",
+  connectHubFirst: "Conecta\u021Bi-v\u0103 mai \xEEnt\xE2i la hub-ul Cast.",
+  topicRequiredHost: "Este necesar un topic Cast pentru a g\u0103zdui o conferin\u021B\u0103.",
+  topicRequiredJoin: "Este necesar un topic Cast pentru a participa la o conferin\u021B\u0103.",
+  titleRequired: "Titlul conferin\u021Bei este obligatoriu.",
+  selectAttendee: "Selecta\u021Bi cel pu\u021Bin un participant.",
+  selectConferenceToJoin: "Selecta\u021Bi o conferin\u021B\u0103 la care s\u0103 participa\u021Bi.",
+  failedCreate: "Crearea conferin\u021Bei a e\u0219uat.",
+  failedJoin: "Participarea la conferin\u021B\u0103 a e\u0219uat.",
+  failedUpdate: "Actualizarea conferin\u021Bei a e\u0219uat.",
+  inviteTitle: "Invita\u021Bie la conferin\u021B\u0103",
+  joinAndFollow: "Particip\u0103 \u0219i urmeaz\u0103",
+  joinNoFollow: "Particip\u0103, dar nu urma",
+  doNotJoin: "Nu participa",
+  hostFallback: "gazd\u0103",
+  inviteLeadWithTitle: "{{title}} \u2014 participa\u021Bi \u0219i urma\u021Bi pe {{host}}?",
+  inviteLeadNoTitle: "Participa\u021Bi la conferin\u021B\u0103 \u0219i urma\u021Bi pe {{host}}?",
+  joinAndFollowHost: "Particip\u0103 \u0219i urmeaz\u0103 pe {{host}}",
+  takeoverTitle: "Preia controlul?",
+  takeoverBody: "Gazda \u0219i to\u021Bi participan\u021Bii vor fi anun\u021Ba\u021Bi c\u0103 prelua\u021Bi controlul. Ve\u021Bi conduce actualiz\u0103rile de scen\u0103 ale acestei conferin\u021Be.",
+  cancel: "Anuleaz\u0103",
+  takeOver: "Preia",
+  conferencing: "Conferin\u021B\u0103",
+  subscribeHubFirst: "Abona\u021Bi-v\u0103 mai \xEEnt\xE2i la hub",
+  stopFollowing: "Opre\u0219te urm\u0103rirea",
+  resumeFollowing: "Reia urm\u0103rirea"
+};
+var no = {
+  dialogTitle: "Konferanse",
+  close: "Lukk",
+  closeAria: "Lukk",
+  createSection: "Opprett en konferanse",
+  conferenceTitle: "Konferansetittel",
+  selectConferenceTitle: "Velg en tittel",
+  otherTitle: "Annet\u2026",
+  customTitle: "Egendefinert tittel",
+  customTitlePlaceholder: "Skriv inn konferansetittel",
+  users: "Brukere",
+  loadingUsers: "Laster brukere\u2026",
+  noUsers: "Ingen brukere tilgjengelig",
+  createConference: "Opprett konferanse",
+  creating: "Oppretter\u2026",
+  joinSection: "Bli med i en konferanse",
+  activeConferences: "Aktive konferanser",
+  noConferences: "Ingen konferanser tilgjengelig",
+  selectConference: "Velg en konferanse",
+  untitled: "Uten tittel",
+  joinConference: "Bli med i konferansen",
+  joining: "Blir med\u2026",
+  manageSection: "Administrer konferanse",
+  titleLabel: "Tittel:",
+  na: "i/t",
+  participants: "Deltakere",
+  noPlaces: "Ingen steder",
+  leaveConference: "Forlat konferansen",
+  endConference: "Avslutt konferansen",
+  ending: "Avslutter\u2026",
+  leaving: "Forlater\u2026",
+  conferenceEnded: "Konferansen er avsluttet.",
+  leftConference: "Du forlot konferansen.",
+  connectHubFirst: "Koble til Cast-huben f\xF8rst.",
+  topicRequiredHost: "Cast-topic kreves for \xE5 v\xE6re vert for en konferanse.",
+  topicRequiredJoin: "Cast-topic kreves for \xE5 bli med i en konferanse.",
+  titleRequired: "Konferansetittel er p\xE5krevd.",
+  selectAttendee: "Velg minst \xE9n deltaker.",
+  selectConferenceToJoin: "Velg en konferanse \xE5 bli med i.",
+  failedCreate: "Kunne ikke opprette konferansen.",
+  failedJoin: "Kunne ikke bli med i konferansen.",
+  failedUpdate: "Kunne ikke oppdatere konferansen.",
+  inviteTitle: "Konferanseinvitasjon",
+  joinAndFollow: "Bli med og f\xF8lg",
+  joinNoFollow: "Bli med, men ikke f\xF8lg",
+  doNotJoin: "Ikke bli med",
+  hostFallback: "vert",
+  inviteLeadWithTitle: "{{title}} \u2014 bli med og f\xF8lge {{host}}?",
+  inviteLeadNoTitle: "Bli med i konferansen og f\xF8lge {{host}}?",
+  joinAndFollowHost: "Bli med og f\xF8lg {{host}}",
+  takeoverTitle: "Ta over?",
+  takeoverBody: "Verten og alle deltakere blir varslet om at du tar over. Du vil lede sceneoppdateringene for denne konferansen.",
+  cancel: "Avbryt",
+  takeOver: "Ta over",
+  conferencing: "Konferanse",
+  subscribeHubFirst: "Abonner p\xE5 huben f\xF8rst",
+  stopFollowing: "Stopp \xE5 f\xF8lge",
+  resumeFollowing: "Fortsett \xE5 f\xF8lge"
+};
+var ar = {
+  dialogTitle: "\u0627\u0644\u0645\u0624\u062A\u0645\u0631\u0627\u062A",
+  close: "\u0625\u063A\u0644\u0627\u0642",
+  closeAria: "\u0625\u063A\u0644\u0627\u0642",
+  createSection: "\u0625\u0646\u0634\u0627\u0621 \u0645\u0624\u062A\u0645\u0631",
+  conferenceTitle: "\u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0645\u0624\u062A\u0645\u0631",
+  selectConferenceTitle: "\u0627\u062E\u062A\u0631 \u0639\u0646\u0648\u0627\u0646 \u0645\u0624\u062A\u0645\u0631",
+  otherTitle: "\u0623\u062E\u0631\u0649\u2026",
+  customTitle: "\u0639\u0646\u0648\u0627\u0646 \u0645\u062E\u0635\u0635",
+  customTitlePlaceholder: "\u0623\u062F\u062E\u0644 \u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0645\u0624\u062A\u0645\u0631",
+  users: "\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645\u0648\u0646",
+  loadingUsers: "\u062C\u0627\u0631\u064D \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645\u064A\u0646\u2026",
+  noUsers: "\u0644\u0627 \u064A\u0648\u062C\u062F \u0645\u0633\u062A\u062E\u062F\u0645\u0648\u0646",
+  createConference: "\u0625\u0646\u0634\u0627\u0621 \u0645\u0624\u062A\u0645\u0631",
+  creating: "\u062C\u0627\u0631\u064D \u0627\u0644\u0625\u0646\u0634\u0627\u0621\u2026",
+  joinSection: "\u0627\u0644\u0627\u0646\u0636\u0645\u0627\u0645 \u0625\u0644\u0649 \u0645\u0624\u062A\u0645\u0631",
+  activeConferences: "\u0627\u0644\u0645\u0624\u062A\u0645\u0631\u0627\u062A \u0627\u0644\u0646\u0634\u0637\u0629",
+  noConferences: "\u0644\u0627 \u062A\u0648\u062C\u062F \u0645\u0624\u062A\u0645\u0631\u0627\u062A",
+  selectConference: "\u0627\u062E\u062A\u0631 \u0645\u0624\u062A\u0645\u0631\u0627\u064B",
+  untitled: "\u0628\u062F\u0648\u0646 \u0639\u0646\u0648\u0627\u0646",
+  joinConference: "\u0627\u0644\u0627\u0646\u0636\u0645\u0627\u0645 \u0625\u0644\u0649 \u0627\u0644\u0645\u0624\u062A\u0645\u0631",
+  joining: "\u062C\u0627\u0631\u064D \u0627\u0644\u0627\u0646\u0636\u0645\u0627\u0645\u2026",
+  manageSection: "\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u0624\u062A\u0645\u0631",
+  titleLabel: "\u0627\u0644\u0639\u0646\u0648\u0627\u0646:",
+  na: "\u063A\u064A\u0631 \u0645\u062A\u0627\u062D",
+  participants: "\u0627\u0644\u0645\u0634\u0627\u0631\u0643\u0648\u0646",
+  noPlaces: "\u0644\u0627 \u0623\u0645\u0627\u0643\u0646",
+  leaveConference: "\u0645\u063A\u0627\u062F\u0631\u0629 \u0627\u0644\u0645\u0624\u062A\u0645\u0631",
+  endConference: "\u0625\u0646\u0647\u0627\u0621 \u0627\u0644\u0645\u0624\u062A\u0645\u0631",
+  ending: "\u062C\u0627\u0631\u064D \u0627\u0644\u0625\u0646\u0647\u0627\u0621\u2026",
+  leaving: "\u062C\u0627\u0631\u064D \u0627\u0644\u0645\u063A\u0627\u062F\u0631\u0629\u2026",
+  conferenceEnded: "\u0627\u0646\u062A\u0647\u0649 \u0627\u0644\u0645\u0624\u062A\u0645\u0631.",
+  leftConference: "\u063A\u0627\u062F\u0631\u062A \u0627\u0644\u0645\u0624\u062A\u0645\u0631.",
+  connectHubFirst: "\u0627\u062A\u0635\u0644 \u0628\u0645\u0631\u0643\u0632 Cast \u0623\u0648\u0644\u0627\u064B.",
+  topicRequiredHost: "\u0645\u0648\u0636\u0648\u0639 Cast \u0645\u0637\u0644\u0648\u0628 \u0644\u0627\u0633\u062A\u0636\u0627\u0641\u0629 \u0645\u0624\u062A\u0645\u0631.",
+  topicRequiredJoin: "\u0645\u0648\u0636\u0648\u0639 Cast \u0645\u0637\u0644\u0648\u0628 \u0644\u0644\u0627\u0646\u0636\u0645\u0627\u0645 \u0625\u0644\u0649 \u0645\u0624\u062A\u0645\u0631.",
+  titleRequired: "\u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0645\u0624\u062A\u0645\u0631 \u0645\u0637\u0644\u0648\u0628.",
+  selectAttendee: "\u062D\u062F\u062F \u0645\u0648\u0636\u0648\u0639 \u0645\u0634\u0627\u0631\u0643 \u0648\u0627\u062D\u062F \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644.",
+  selectConferenceToJoin: "\u0627\u062E\u062A\u0631 \u0645\u0624\u062A\u0645\u0631\u0627\u064B \u0644\u0644\u0627\u0646\u0636\u0645\u0627\u0645 \u0625\u0644\u064A\u0647.",
+  failedCreate: "\u0641\u0634\u0644 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0645\u0624\u062A\u0645\u0631.",
+  failedJoin: "\u0641\u0634\u0644 \u0627\u0644\u0627\u0646\u0636\u0645\u0627\u0645 \u0625\u0644\u0649 \u0627\u0644\u0645\u0624\u062A\u0645\u0631.",
+  failedUpdate: "\u0641\u0634\u0644 \u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0645\u0624\u062A\u0645\u0631.",
+  inviteTitle: "\u062F\u0639\u0648\u0629 \u0625\u0644\u0649 \u0645\u0624\u062A\u0645\u0631",
+  joinAndFollow: "\u0627\u0646\u0636\u0645 \u0648\u0627\u062A\u0628\u0639",
+  joinNoFollow: "\u0627\u0646\u0636\u0645 \u062F\u0648\u0646 \u0645\u062A\u0627\u0628\u0639\u0629",
+  doNotJoin: "\u0639\u062F\u0645 \u0627\u0644\u0627\u0646\u0636\u0645\u0627\u0645",
+  hostFallback: "\u0627\u0644\u0645\u0636\u064A\u0641",
+  inviteLeadWithTitle: "{{title}} \u2014 \u0627\u0644\u0627\u0646\u0636\u0645\u0627\u0645 \u0648\u0645\u062A\u0627\u0628\u0639\u0629 {{host}}\u061F",
+  inviteLeadNoTitle: "\u0627\u0644\u0627\u0646\u0636\u0645\u0627\u0645 \u0625\u0644\u0649 \u0627\u0644\u0645\u0624\u062A\u0645\u0631 \u0648\u0645\u062A\u0627\u0628\u0639\u0629 {{host}}\u061F",
+  joinAndFollowHost: "\u0627\u0646\u0636\u0645 \u0648\u0627\u062A\u0628\u0639 {{host}}",
+  takeoverTitle: "\u062A\u0648\u0644\u064A \u0627\u0644\u0642\u064A\u0627\u062F\u0629\u061F",
+  takeoverBody: "\u0633\u064A\u062A\u0645 \u0625\u062E\u0637\u0627\u0631 \u0627\u0644\u0645\u0636\u064A\u0641 \u0648\u062C\u0645\u064A\u0639 \u0627\u0644\u0645\u0634\u0627\u0631\u0643\u064A\u0646 \u0628\u0623\u0646\u0643 \u062A\u062A\u0648\u0644\u0649 \u0627\u0644\u0642\u064A\u0627\u062F\u0629. \u0633\u062A\u0642\u0648\u062F \u062A\u062D\u062F\u064A\u062B\u0627\u062A \u0627\u0644\u0645\u0634\u0647\u062F \u0644\u0647\u0630\u0627 \u0627\u0644\u0645\u0624\u062A\u0645\u0631.",
+  cancel: "\u0625\u0644\u063A\u0627\u0621",
+  takeOver: "\u062A\u0648\u0644\u064A \u0627\u0644\u0642\u064A\u0627\u062F\u0629",
+  conferencing: "\u0627\u0644\u0645\u0624\u062A\u0645\u0631\u0627\u062A",
+  subscribeHubFirst: "\u0627\u0634\u062A\u0631\u0643 \u0641\u064A \u0627\u0644\u0645\u0631\u0643\u0632 \u0623\u0648\u0644\u0627\u064B",
+  stopFollowing: "\u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u0645\u062A\u0627\u0628\u0639\u0629",
+  resumeFollowing: "\u0627\u0633\u062A\u0626\u0646\u0627\u0641 \u0627\u0644\u0645\u062A\u0627\u0628\u0639\u0629"
+};
+var CONFERENCE_BY_LOCALE = {
+  en,
+  ar,
+  fr,
+  es,
+  ca,
+  de,
+  it,
+  pt,
+  ko,
+  pl,
+  uk,
+  cs,
+  nl,
+  el,
+  lv,
+  hu,
+  lt,
+  ro,
+  no
+};
+function conferenceStringsFor(locale) {
+  const code2 = locale || resolveStoredLocale();
+  return { ...CONFERENCE_BY_LOCALE[code2] };
+}
+
+// ../i18n/header.ts
+var en2 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Open SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Open DICOM SR Report Creator",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Load study",
+  loadStudyTitle: "Load study",
+  sessionInfo: "Session info",
+  language: "Language"
+};
+var de2 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "SlicerWorklist \xF6ffnen",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "DICOM-SR-Report-Creator \xF6ffnen",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Studie laden",
+  loadStudyTitle: "Studie laden",
+  sessionInfo: "Sitzungsinfo",
+  language: "Sprache"
+};
+var fr2 = {
+  worklistLabel: "Liste de travail :",
+  reportingLabel: "Reporting :",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Ouvrir SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Ouvrir le Report Creator DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Charger une \xE9tude",
+  loadStudyTitle: "Charger une \xE9tude",
+  sessionInfo: "Info session",
+  language: "Langue"
+};
+var es2 = {
+  worklistLabel: "Lista de trabajo:",
+  reportingLabel: "Informes:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Abrir SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Abrir el Report Creator DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Cargar estudio",
+  loadStudyTitle: "Cargar estudio",
+  sessionInfo: "Info de sesi\xF3n",
+  language: "Idioma"
+};
+var ca2 = {
+  worklistLabel: "Llista de treball:",
+  reportingLabel: "Informes:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Obrir SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Obrir el Report Creator DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Carregar estudi",
+  loadStudyTitle: "Carregar estudi",
+  sessionInfo: "Info de sessi\xF3",
+  language: "Idioma"
+};
+var it2 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Apri SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Apri il Report Creator DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Carica studio",
+  loadStudyTitle: "Carica studio",
+  sessionInfo: "Info sessione",
+  language: "Lingua"
+};
+var pt2 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Abrir SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Abrir o Report Creator DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Carregar estudo",
+  loadStudyTitle: "Carregar estudo",
+  sessionInfo: "Info da sess\xE3o",
+  language: "Idioma"
+};
+var ko2 = {
+  worklistLabel: "\uC6CC\uD06C\uB9AC\uC2A4\uD2B8:",
+  reportingLabel: "\uB9AC\uD3EC\uD305:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "SlicerWorklist \uC5F4\uAE30",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "DICOM SR Report Creator \uC5F4\uAE30",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "\uAC80\uC0AC \uBD88\uB7EC\uC624\uAE30",
+  loadStudyTitle: "\uAC80\uC0AC \uBD88\uB7EC\uC624\uAE30",
+  sessionInfo: "\uC138\uC158 \uC815\uBCF4",
+  language: "\uC5B8\uC5B4"
+};
+var pl2 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Otw\xF3rz SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Otw\xF3rz Report Creator DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Wczytaj badanie",
+  loadStudyTitle: "Wczytaj badanie",
+  sessionInfo: "Info o sesji",
+  language: "J\u0119zyk"
+};
+var uk2 = {
+  worklistLabel: "\u0420\u043E\u0431\u043E\u0447\u0438\u0439 \u0441\u043F\u0438\u0441\u043E\u043A:",
+  reportingLabel: "\u0417\u0432\u0456\u0442\u0443\u0432\u0430\u043D\u043D\u044F:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "\u0412\u0456\u0434\u043A\u0440\u0438\u0442\u0438 SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "\u0412\u0456\u0434\u043A\u0440\u0438\u0442\u0438 Report Creator DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "\u0417\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0438\u0442\u0438 \u0434\u043E\u0441\u043B\u0456\u0434\u0436\u0435\u043D\u043D\u044F",
+  loadStudyTitle: "\u0417\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0438\u0442\u0438 \u0434\u043E\u0441\u043B\u0456\u0434\u0436\u0435\u043D\u043D\u044F",
+  sessionInfo: "\u0406\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0456\u044F \u043F\u0440\u043E \u0441\u0435\u0430\u043D\u0441",
+  language: "\u041C\u043E\u0432\u0430"
+};
+var cs2 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Otev\u0159\xEDt SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Otev\u0159\xEDt Report Creator DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Na\u010D\xEDst studii",
+  loadStudyTitle: "Na\u010D\xEDst studii",
+  sessionInfo: "Info o relaci",
+  language: "Jazyk"
+};
+var nl2 = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "SlicerWorklist openen",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "DICOM SR Report Creator openen",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Studie laden",
+  loadStudyTitle: "Studie laden",
+  sessionInfo: "Sessie-info",
+  language: "Taal"
+};
+var el2 = {
+  worklistLabel: "\u039B\u03AF\u03C3\u03C4\u03B1 \u03B5\u03C1\u03B3\u03B1\u03C3\u03AF\u03B1\u03C2:",
+  reportingLabel: "\u0391\u03BD\u03B1\u03C6\u03BF\u03C1\u03AD\u03C2:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "\u0386\u03BD\u03BF\u03B9\u03B3\u03BC\u03B1 SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "\u0386\u03BD\u03BF\u03B9\u03B3\u03BC\u03B1 Report Creator DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "\u03A6\u03CC\u03C1\u03C4\u03C9\u03C3\u03B7 \u03BC\u03B5\u03BB\u03AD\u03C4\u03B7\u03C2",
+  loadStudyTitle: "\u03A6\u03CC\u03C1\u03C4\u03C9\u03C3\u03B7 \u03BC\u03B5\u03BB\u03AD\u03C4\u03B7\u03C2",
+  sessionInfo: "\u03A0\u03BB\u03B7\u03C1\u03BF\u03C6\u03BF\u03C1\u03AF\u03B5\u03C2 \u03C3\u03C5\u03BD\u03B5\u03B4\u03C1\u03AF\u03B1\u03C2",
+  language: "\u0393\u03BB\u03CE\u03C3\u03C3\u03B1"
+};
+var lv2 = {
+  worklistLabel: "Darba saraksts:",
+  reportingLabel: "Zi\u0146o\u0161ana:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Atv\u0113rt SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Atv\u0113rt DICOM SR Report Creator",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Iel\u0101d\u0113t p\u0113t\u012Bjumu",
+  loadStudyTitle: "Iel\u0101d\u0113t p\u0113t\u012Bjumu",
+  sessionInfo: "Sesijas info",
+  language: "Valoda"
+};
+var hu2 = {
+  worklistLabel: "Munkalista:",
+  reportingLabel: "Jelent\xE9s:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "SlicerWorklist megnyit\xE1sa",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "DICOM SR Report Creator megnyit\xE1sa",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Vizsg\xE1lat bet\xF6lt\xE9se",
+  loadStudyTitle: "Vizsg\xE1lat bet\xF6lt\xE9se",
+  sessionInfo: "Munkamenet-inf\xF3",
+  language: "Nyelv"
+};
+var lt2 = {
+  worklistLabel: "Darb\u0173 s\u0105ra\u0161as:",
+  reportingLabel: "Ataskaitos:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Atidaryti SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Atidaryti DICOM SR Report Creator",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "\u012Ekelti tyrim\u0105",
+  loadStudyTitle: "\u012Ekelti tyrim\u0105",
+  sessionInfo: "Sesijos info",
+  language: "Kalba"
+};
+var ro2 = {
+  worklistLabel: "List\u0103 de lucru:",
+  reportingLabel: "Raportare:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "Deschide SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "Deschide Report Creator DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "\xCEncarc\u0103 studiul",
+  loadStudyTitle: "\xCEncarc\u0103 studiul",
+  sessionInfo: "Info sesiune",
+  language: "Limb\u0103"
+};
+var noNb = {
+  worklistLabel: "Worklist:",
+  reportingLabel: "Reporting:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "\xC5pne SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "\xC5pne DICOM SR Report Creator",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "Last studie",
+  loadStudyTitle: "Last studie",
+  sessionInfo: "\xD8ktinfo",
+  language: "Spr\xE5k"
+};
+var ar2 = {
+  worklistLabel: "\u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0639\u0645\u0644:",
+  reportingLabel: "\u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631:",
+  slicerWorklist: "SlicerWorklist",
+  slicerWorklistTitle: "\u0641\u062A\u062D SlicerWorklist",
+  dicomSr: "DICOM SR",
+  dicomSrTitle: "\u0641\u062A\u062D \u0645\u0646\u0634\u0626 \u062A\u0642\u0627\u0631\u064A\u0631 DICOM SR",
+  remoteAi: "Evidence Creators",
+  remoteAiTitle: "Evidence Creators \u2014 inference servers",
+  loadStudy: "\u062A\u062D\u0645\u064A\u0644 \u062F\u0631\u0627\u0633\u0629",
+  loadStudyTitle: "\u062A\u062D\u0645\u064A\u0644 \u062F\u0631\u0627\u0633\u0629",
+  sessionInfo: "\u0645\u0639\u0644\u0648\u0645\u0627\u062A \u0627\u0644\u062C\u0644\u0633\u0629",
+  language: "\u0627\u0644\u0644\u063A\u0629"
+};
+var HEADER_BY_LOCALE = {
+  en: en2,
+  ar: ar2,
+  fr: fr2,
+  es: es2,
+  ca: ca2,
+  de: de2,
+  it: it2,
+  pt: pt2,
+  ko: ko2,
+  pl: pl2,
+  uk: uk2,
+  cs: cs2,
+  nl: nl2,
+  el: el2,
+  lv: lv2,
+  hu: hu2,
+  lt: lt2,
+  ro: ro2,
+  no: noNb
+};
+function headerChromeFor(locale) {
+  const code2 = locale || resolveStoredLocale();
+  return { ...HEADER_BY_LOCALE[code2] };
+}
+function applyHeaderChrome(root = document, locale) {
+  const h = headerChromeFor(locale);
+  root.querySelectorAll("[data-i18n-header]").forEach((el3) => {
+    const key = el3.getAttribute("data-i18n-header");
+    if (!key || !(key in h)) return;
+    el3.textContent = h[key];
+  });
+  root.querySelectorAll("[data-i18n-header-title]").forEach((el3) => {
+    const key = el3.getAttribute(
+      "data-i18n-header-title"
+    );
+    if (!key || !(key in h)) return;
+    el3.title = h[key];
+  });
+  root.querySelectorAll("[data-i18n-header-aria]").forEach((el3) => {
+    const key = el3.getAttribute(
+      "data-i18n-header-aria"
+    );
+    if (!key || !(key in h)) return;
+    el3.setAttribute("aria-label", h[key]);
+  });
+}
+
+// ../i18n/segment-labels/fr.json
+var fr_default = {
+  aorta: "Aorte",
+  "aortic valve": "Valve aortique",
+  "artery (unspecific)": "Art\xE8re (non sp\xE9cifi\xE9e)",
+  "atrioventricular conduction node": "N\u0153ud atrioventriculaire",
+  "bile duct": "Voie biliaire",
+  brain: "Cerveau",
+  "circumflex branch of the coronary artery": "Art\xE8re circonflexe",
+  colon: "C\xF4lon",
+  "coronary artery": "Art\xE8re coronaire",
+  cyst: "Kyste",
+  duodenum: "Duod\xE9num",
+  esophagus: "\u0152sophage",
+  face: "Face",
+  gallbladder: "V\xE9sicule biliaire",
+  heart: "C\u0153ur",
+  "inferior vena cava": "Veine cave inf\xE9rieure",
+  kidney: "Rein",
+  "left adrenal gland": "Glande surr\xE9nale gauche",
+  "left anterior descending coronary artery": "Art\xE8re interventriculaire ant\xE9rieure",
+  "left atrium": "Oreillette gauche",
+  "left autochthonous back muscle": "Muscle autochthone du dos gauche",
+  "left clavicle": "Clavicule gauche",
+  "left coronary artery": "Art\xE8re coronaire gauche",
+  "left femur": "F\xE9mur gauche",
+  "left gluteus maximus": "Grand fessier gauche",
+  "left gluteus medius": "Moyen fessier gauche",
+  "left gluteus minimus": "Petit fessier gauche",
+  "left hip": "Hanche gauche",
+  "left humerus": "Hum\xE9rus gauche",
+  "left iliac artery": "Art\xE8re iliaque gauche",
+  "left iliac vein": "Veine iliaque gauche",
+  "left iliopsoas": "Iliopsoas gauche",
+  "left kidney": "Rein gauche",
+  "left lower lung lobe": "Lobe inf\xE9rieur du poumon gauche",
+  "left lung": "Poumon gauche",
+  "left rib 1": "C\xF4te 1 gauche",
+  "left rib 10": "C\xF4te 10 gauche",
+  "left rib 11": "C\xF4te 11 gauche",
+  "left rib 12": "C\xF4te 12 gauche",
+  "left rib 2": "C\xF4te 2 gauche",
+  "left rib 3": "C\xF4te 3 gauche",
+  "left rib 4": "C\xF4te 4 gauche",
+  "left rib 5": "C\xF4te 5 gauche",
+  "left rib 6": "C\xF4te 6 gauche",
+  "left rib 7": "C\xF4te 7 gauche",
+  "left rib 8": "C\xF4te 8 gauche",
+  "left rib 9": "C\xF4te 9 gauche",
+  "left scapula": "Omoplate gauche",
+  "left upper lung lobe": "Lobe sup\xE9rieur du poumon gauche",
+  "left ventricle": "Ventricule gauche",
+  liver: "Foie",
+  "mitral valve": "Valve mitrale",
+  myocardium: "Myocarde",
+  pancreas: "Pancr\xE9as",
+  "pancreatic duct": "Canal pancr\xE9atique",
+  "pathologic calcification": "Calcification pathologique",
+  "peripheral zone of prostate": "Zone p\xE9riph\xE9rique de la prostate",
+  "portal and splenic vein": "Veine porte et veine spl\xE9nique",
+  "primary malignant neoplasm": "N\xE9oplasie maligne primitive",
+  prostate: "Prostate",
+  "pulmonary artery": "Art\xE8re pulmonaire",
+  "pulmonary valve": "Valve pulmonaire",
+  "renal vein": "Veine r\xE9nale",
+  "right adrenal gland": "Glande surr\xE9nale droite",
+  "right atrium": "Oreillette droite",
+  "right autochthonous back muscle": "Muscle autochthone du dos droit",
+  "right clavicle": "Clavicule droite",
+  "right coronary artery": "Art\xE8re coronaire droite",
+  "right femur": "F\xE9mur droit",
+  "right gluteus maximus": "Grand fessier droit",
+  "right gluteus medius": "Moyen fessier droit",
+  "right gluteus minimus": "Petit fessier droit",
+  "right hip": "Hanche droite",
+  "right humerus": "Hum\xE9rus droit",
+  "right iliac artery": "Art\xE8re iliaque droite",
+  "right iliac vein": "Veine iliaque droite",
+  "right iliopsoas": "Iliopsoas droit",
+  "right kidney": "Rein droit",
+  "right lower lung lobe": "Lobe inf\xE9rieur du poumon droit",
+  "right lung": "Poumon droit",
+  "right middle lung lobe": "Lobe moyen du poumon droit",
+  "right rib 1": "C\xF4te 1 droite",
+  "right rib 10": "C\xF4te 10 droite",
+  "right rib 11": "C\xF4te 11 droite",
+  "right rib 12": "C\xF4te 12 droite",
+  "right rib 2": "C\xF4te 2 droite",
+  "right rib 3": "C\xF4te 3 droite",
+  "right rib 4": "C\xF4te 4 droite",
+  "right rib 5": "C\xF4te 5 droite",
+  "right rib 6": "C\xF4te 6 droite",
+  "right rib 7": "C\xF4te 7 droite",
+  "right rib 8": "C\xF4te 8 droite",
+  "right rib 9": "C\xF4te 9 droite",
+  "right scapula": "Omoplate droite",
+  "right upper lung lobe": "Lobe sup\xE9rieur du poumon droit",
+  "right ventricle": "Ventricule droit",
+  sacrum: "Sacrum",
+  "sinoatrial conduction node": "N\u0153ud sinusal",
+  "small intestine": "Intestin gr\xEAle",
+  "spinal canal": "Canal rachidien",
+  spleen: "Rate",
+  stomach: "Estomac",
+  "superior vena cava": "Veine cave sup\xE9rieure",
+  trachea: "Trach\xE9e",
+  "transition zone of prostate": "Zone de transition de la prostate",
+  "tricuspid valve": "Valve tricuspide",
+  "urinary bladder": "Vessie",
+  "vein (unspecific)": "Veine (non sp\xE9cifi\xE9e)",
+  "vertebrae c1": "Vert\xE8bre C1",
+  "vertebrae c2": "Vert\xE8bre C2",
+  "vertebrae c3": "Vert\xE8bre C3",
+  "vertebrae c4": "Vert\xE8bre C4",
+  "vertebrae c5": "Vert\xE8bre C5",
+  "vertebrae c6": "Vert\xE8bre C6",
+  "vertebrae c7": "Vert\xE8bre C7",
+  "vertebrae disk c2/c3": "Disque intervert\xE9bral C2/C3",
+  "vertebrae disk c3/c4": "Disque intervert\xE9bral C3/C4",
+  "vertebrae disk c4/c5": "Disque intervert\xE9bral C4/C5",
+  "vertebrae disk c5/c6": "Disque intervert\xE9bral C5/C6",
+  "vertebrae disk c6/c7": "Disque intervert\xE9bral C6/C7",
+  "vertebrae disk c7/t1": "Disque intervert\xE9bral C7/T1",
+  "vertebrae disk l1/l2": "Disque intervert\xE9bral L1/L2",
+  "vertebrae disk l2/l3": "Disque intervert\xE9bral L2/L3",
+  "vertebrae disk l3/l4": "Disque intervert\xE9bral L3/L4",
+  "vertebrae disk l4/l5": "Disque intervert\xE9bral L4/L5",
+  "vertebrae disk t1/t2": "Disque intervert\xE9bral T1/T2",
+  "vertebrae disk t10/t11": "Disque intervert\xE9bral T10/T11",
+  "vertebrae disk t11/t12": "Disque intervert\xE9bral T11/T12",
+  "vertebrae disk t12/l1": "Disque intervert\xE9bral T12/L1",
+  "vertebrae disk t2/t3": "Disque intervert\xE9bral T2/T3",
+  "vertebrae disk t3/t4": "Disque intervert\xE9bral T3/T4",
+  "vertebrae disk t4/t5": "Disque intervert\xE9bral T4/T5",
+  "vertebrae disk t5/t6": "Disque intervert\xE9bral T5/T6",
+  "vertebrae disk t6/t7": "Disque intervert\xE9bral T6/T7",
+  "vertebrae disk t7/t8": "Disque intervert\xE9bral T7/T8",
+  "vertebrae disk t8/t9": "Disque intervert\xE9bral T8/T9",
+  "vertebrae disk t9/t10": "Disque intervert\xE9bral T9/T10",
+  "vertebrae l1": "Vert\xE8bre L1",
+  "vertebrae l2": "Vert\xE8bre L2",
+  "vertebrae l3": "Vert\xE8bre L3",
+  "vertebrae l4": "Vert\xE8bre L4",
+  "vertebrae l5": "Vert\xE8bre L5",
+  "vertebrae t1": "Vert\xE8bre T1",
+  "vertebrae t10": "Vert\xE8bre T10",
+  "vertebrae t11": "Vert\xE8bre T11",
+  "vertebrae t12": "Vert\xE8bre T12",
+  "vertebrae t2": "Vert\xE8bre T2",
+  "vertebrae t3": "Vert\xE8bre T3",
+  "vertebrae t4": "Vert\xE8bre T4",
+  "vertebrae t5": "Vert\xE8bre T5",
+  "vertebrae t6": "Vert\xE8bre T6",
+  "vertebrae t7": "Vert\xE8bre T7",
+  "vertebrae t8": "Vert\xE8bre T8",
+  "vertebrae t9": "Vert\xE8bre T9",
+  "vertebrae disk l5/s1": "Disque intervert\xE9bral L5/S1"
+};
+
+// ../i18n/segment-labels.ts
+var CACHE_STORAGE_KEY = "pw46.segmentLabelCache";
+var SEGMENT_LABELS_STATIC = Object.freeze({
+  fr: Object.freeze(fr_default)
+});
+function translateTargetForLocale(locale) {
+  if (locale === "en") return null;
+  const map = {
+    ar: "ar",
+    fr: "fr",
+    es: "es",
+    ca: "ca",
+    de: "de",
+    it: "it",
+    pt: "pt",
+    ko: "ko",
+    pl: "pl",
+    uk: "uk",
+    cs: "cs",
+    nl: "nl",
+    el: "el",
+    lv: "lv",
+    hu: "hu",
+    lt: "lt",
+    ro: "ro",
+    no: "no"
+  };
+  return map[locale] ?? null;
+}
+function normalizeEnglish(label) {
+  return String(label || "").trim().replace(/\s+/g, " ");
+}
+function segmentLabelCacheKey(label, terminology) {
+  const typeVal = String(terminology?.type?.value || "").trim();
+  const modVal = String(terminology?.typeModifier?.value || "").trim();
+  if (typeVal) return modVal ? `${typeVal}|${modVal}` : typeVal;
+  return normalizeEnglish(label).toLowerCase();
+}
+function englishDisplay(label, terminology) {
+  const fromLabel = normalizeEnglish(label);
+  if (fromLabel) return fromLabel;
+  return String(terminology?.type?.meaning || "").trim();
+}
+function loadPersistentCache() {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(CACHE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "string" && v.trim()) out[k] = v.trim();
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+function savePersistentCache(store) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+  }
+}
+var memoryCache = { ...loadPersistentCache() };
+var inflight = /* @__PURE__ */ new Map();
+function cacheGet(locale, key, english) {
+  const full = `${locale}|${key}`;
+  const staticMap = SEGMENT_LABELS_STATIC[locale];
+  if (staticMap?.[key]) return staticMap[key];
+  if (staticMap?.[full]) return staticMap[full];
+  const enKey = normalizeEnglish(english || "").toLowerCase();
+  if (enKey && staticMap?.[enKey]) return staticMap[enKey];
+  return memoryCache[full] || (enKey ? memoryCache[`${locale}|${enKey}`] : void 0);
+}
+function cacheSet(locale, key, value, english) {
+  const full = `${locale}|${key}`;
+  memoryCache[full] = value;
+  const enKey = normalizeEnglish(english || "").toLowerCase();
+  if (enKey && enKey !== key) memoryCache[`${locale}|${enKey}`] = value;
+  savePersistentCache(memoryCache);
+}
+function segmentDisplayNameSync(label, terminology, locale) {
+  const code2 = locale || resolveStoredLocale();
+  const en4 = englishDisplay(label, terminology);
+  if (!en4) return "";
+  if (code2 === "en") return en4;
+  const key = segmentLabelCacheKey(en4, terminology);
+  return cacheGet(code2, key, en4) || en4;
+}
+async function translateViaHub(texts, target, hubOrigin) {
+  const origin = String(hubOrigin || "").replace(/\/$/, "");
+  if (!origin || !texts.length) return texts.map(() => null);
+  const url = `${origin}/api/hub/translate`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts, target, source: "en" })
+  });
+  if (!res.ok) return texts.map(() => null);
+  const data = await res.json();
+  const list = Array.isArray(data.translations) ? data.translations : [];
+  return texts.map((_, i) => {
+    const t = list[i];
+    return typeof t === "string" && t.trim() ? t.trim() : null;
+  });
+}
+async function ensureSegmentLabelsTranslated(items, opts) {
+  const locale = opts.locale || resolveStoredLocale();
+  const out = /* @__PURE__ */ new Map();
+  const target = translateTargetForLocale(locale);
+  const need = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const item of items) {
+    const en4 = englishDisplay(item.label, item.terminology);
+    if (!en4) continue;
+    if (!target) {
+      out.set(en4, en4);
+      continue;
+    }
+    const key = segmentLabelCacheKey(en4, item.terminology);
+    const hit = cacheGet(locale, key, en4);
+    if (hit) {
+      out.set(en4, hit);
+      continue;
+    }
+    if (!seen.has(key)) {
+      seen.add(key);
+      need.push({ en: en4, key });
+    }
+  }
+  if (!target || !need.length) {
+    for (const item of items) {
+      const en4 = englishDisplay(item.label, item.terminology);
+      if (en4 && !out.has(en4)) out.set(en4, en4);
+    }
+    return out;
+  }
+  const batchKey = `${locale}|${need.map((n) => n.key).join(",")}`;
+  let promise = inflight.get(batchKey);
+  if (!promise) {
+    promise = (async () => {
+      const translated = await translateViaHub(
+        need.map((n) => n.en),
+        target,
+        opts.hubOrigin
+      );
+      need.forEach((n, i) => {
+        const t = translated[i];
+        if (t && t !== n.en) cacheSet(locale, n.key, t, n.en);
+      });
+      return "";
+    })();
+    inflight.set(batchKey, promise);
+    try {
+      await promise;
+    } finally {
+      inflight.delete(batchKey);
+    }
+  } else {
+    await promise;
+  }
+  for (const item of items) {
+    const en4 = englishDisplay(item.label, item.terminology);
+    if (!en4) continue;
+    const key = segmentLabelCacheKey(en4, item.terminology);
+    out.set(en4, cacheGet(locale, key, en4) || en4);
+  }
+  return out;
 }
 
 // render/vendor/idc_tools/s3.js
@@ -8771,10 +10757,10 @@ function normalizeColor(color) {
 function asVec3(p) {
   if (!Array.isArray(p) || p.length < 3) return null;
   const x = Number(p[0]);
-  const y = Number(p[1]);
-  const z2 = Number(p[2]);
-  if (![x, y, z2].every(Number.isFinite)) return null;
-  return [x, y, z2];
+  const y2 = Number(p[1]);
+  const z = Number(p[2]);
+  if (![x, y2, z].every(Number.isFinite)) return null;
+  return [x, y2, z];
 }
 function newStrokeId() {
   try {
@@ -9093,7 +11079,7 @@ function mountIra(cfg) {
   let crossRas = null;
   const measurements = [];
   let pending = null;
-  let layout = "fourUp";
+  let layout = "threeOne";
   let markerDraft = null;
   let marker3dActive = false;
   let marker3dPointerId = null;
@@ -9234,12 +11220,12 @@ function mountIra(cfg) {
     ctx.font = "700 15px -apple-system,system-ui,sans-serif";
     ctx.lineJoin = "round";
     ctx.textBaseline = "alphabetic";
-    const label = (text, x, y) => {
+    const label = (text, x, y2) => {
       ctx.lineWidth = 4;
       ctx.strokeStyle = "rgba(6,10,16,.92)";
-      ctx.strokeText(text, x, y);
+      ctx.strokeText(text, x, y2);
       ctx.fillStyle = "#8dffc4";
-      ctx.fillText(text, x, y);
+      ctx.fillText(text, x, y2);
     };
     for (const m of [...measurements.filter(near), ...pending && pending.plane === p ? [pending] : []]) {
       const px = m.pts.map((r) => toPx(p, r, w, h));
@@ -9421,6 +11407,7 @@ function mountIra(cfg) {
   layoutSel.title = "Layout Multiple Viewports \u2014 hanging protocol";
   layoutSel.style.cssText = "font:600 11px -apple-system,system-ui,sans-serif;color:#d6e2f2;background:#11141d;border:1px solid #33507e;border-radius:4px;padding:2px 4px;cursor:pointer;";
   for (const [v, label] of [
+    ["threeOne", "3+1 (MPR | 3D)"],
     ["fourUp", "Four-Up (MPR + 3D)"],
     ["dental", "Dental (MPR + 3D + Oblique)"],
     ["twoUp", "2 side-by-side"],
@@ -9685,8 +11672,8 @@ function mountIra(cfg) {
     disabledTip: "Show Report \u2014 no reports available for this patient"
   });
   btn("help", "help", "Help \u2014 tool guide and keyboard shortcuts \u2014 H / F1", () => showHelp());
-  btn("advanced", "advanced", "Advanced Mode \u2014 toggle IRA basic (single stack) vs MPR Four-Up + 3D \u2014 F10", () => {
-    setLayout(layout === "single" ? "fourUp" : "single");
+  btn("advanced", "advanced", "Advanced Mode \u2014 toggle IRA basic (single stack) vs MPR + 3D \u2014 F10", () => {
+    setLayout(layout === "single" ? "threeOne" : "single");
   });
   if (cfg.extraTools?.length) {
     sep();
@@ -9698,14 +11685,15 @@ function mountIra(cfg) {
     const names = [...cfg.planes, "threeD"];
     if (l === "single") for (const n of names) show[n] = n === selectedPlane;
     else if (l === "twoUp") for (const n of names) show[n] = n === "axial" || n === "sagittal";
-    else if (l === "fourUp") for (const n of names) show[n] = n !== "oblique";
+    else if (l === "fourUp" || l === "threeOne") for (const n of names) show[n] = n !== "oblique";
     else for (const n of names) show[n] = true;
     for (const n of names) {
       const cell = cfg.cellOf(n);
       if (cell) cell.style.display = show[n] ? "" : "none";
     }
     cfg.grid.classList.toggle("layout-dental", l === "dental");
-    if (l === "dental") {
+    cfg.grid.classList.toggle("layout-threeOne", l === "threeOne");
+    if (l === "dental" || l === "threeOne") {
       cfg.grid.style.gridTemplateColumns = "";
       cfg.grid.style.gridTemplateRows = "";
     } else if (l === "fourUp") {
@@ -9719,7 +11707,10 @@ function mountIra(cfg) {
       cfg.grid.style.gridTemplateRows = "1fr";
     }
     layoutSel.value = l;
-    buttons.get("advanced").classList.toggle("active", l === "fourUp" || l === "dental");
+    buttons.get("advanced").classList.toggle(
+      "active",
+      l === "fourUp" || l === "dental" || l === "threeOne"
+    );
     globalThis.dispatchEvent(new Event("resize"));
     cfg.onLayoutChange?.(l);
   };
@@ -9767,7 +11758,7 @@ function mountIra(cfg) {
     stripBtn.classList.remove("active");
     setLayout("single");
   } else {
-    setLayout(cfg.initialLayout ?? "fourUp");
+    setLayout(cfg.initialLayout ?? "threeOne");
   }
   const rgbaToCanvas = (rgba, width, height) => {
     const out = document.createElement("canvas");
@@ -10074,12 +12065,12 @@ function mountIra(cfg) {
     const canvas = cfg.vanishing3d.canvas();
     const r = canvas.getBoundingClientRect();
     const x = e.clientX - r.left;
-    const y = e.clientY - r.top;
+    const y2 = e.clientY - r.top;
     const cw = Math.max(1, r.width);
     const ch = Math.max(1, r.height);
     const ras = cfg.vanishing3d.displayToWorldAtDepth(
       x,
-      y,
+      y2,
       markerDraft.depth,
       cw,
       ch
@@ -10267,7 +12258,7 @@ fn sample_field_slice${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
     out[off + 32] = clim[0] / this.normScale;
     out[off + 33] = clim[1] / this.normScale;
   }
-  bindEntries(_s, base) {
+  bindEntries(_s2, base) {
     return [{ binding: base, resource: this.volTex.createView() }];
   }
 };
@@ -10528,15 +12519,15 @@ function segmentToStl(lab, dims, ijkToRAS, segmentNum) {
   }
   let i0 = nx, j0 = ny, k0 = nz, i1 = -1, j1 = -1, k1 = -1;
   for (let k = 0; k < nz; k++) {
-    for (let j2 = 0; j2 < ny; j2++) {
-      const base = (k * ny + j2) * nx;
+    for (let j = 0; j < ny; j++) {
+      const base = (k * ny + j) * nx;
       for (let i = 0; i < nx; i++) {
         if (lab[base + i] !== segmentNum) continue;
         if (i < i0) i0 = i;
-        if (j2 < j0) j0 = j2;
+        if (j < j0) j0 = j;
         if (k < k0) k0 = k;
         if (i > i1) i1 = i;
-        if (j2 > j1) j1 = j2;
+        if (j > j1) j1 = j;
         if (k > k1) k1 = k;
       }
     }
@@ -10548,12 +12539,12 @@ function segmentToStl(lab, dims, ijkToRAS, segmentNum) {
   const mask = new Uint8Array(sx * sy * sz);
   for (let k = 0; k < sz; k++) {
     const gk = k + z0;
-    for (let j2 = 0; j2 < sy; j2++) {
-      const gj = j2 + y0;
+    for (let j = 0; j < sy; j++) {
+      const gj = j + y0;
       for (let i = 0; i < sx; i++) {
         const gi2 = i + x0;
         if (gi2 < 0 || gj < 0 || gk < 0 || gi2 >= nx || gj >= ny || gk >= nz) continue;
-        if (lab[(gk * ny + gj) * nx + gi2] === segmentNum) mask[(k * sy + j2) * sx + i] = 1;
+        if (lab[(gk * ny + gj) * nx + gi2] === segmentNum) mask[(k * sy + j) * sx + i] = 1;
       }
     }
   }
@@ -10563,10 +12554,10 @@ function segmentToStl(lab, dims, ijkToRAS, segmentNum) {
   const lps = new Array(tris.length);
   for (let t = 0; t < tris.length; t += 9) {
     for (let v = 0; v < 3; v++) {
-      const i = tris[t + v * 3], j2 = tris[t + v * 3 + 1], k = tris[t + v * 3 + 2];
-      const rx = M2[0] * i + M2[1] * j2 + M2[2] * k + M2[3];
-      const ry = M2[4] * i + M2[5] * j2 + M2[6] * k + M2[7];
-      const rz = M2[8] * i + M2[9] * j2 + M2[10] * k + M2[11];
+      const i = tris[t + v * 3], j = tris[t + v * 3 + 1], k = tris[t + v * 3 + 2];
+      const rx = M2[0] * i + M2[1] * j + M2[2] * k + M2[3];
+      const ry = M2[4] * i + M2[5] * j + M2[6] * k + M2[7];
+      const rz = M2[8] * i + M2[9] * j + M2[10] * k + M2[11];
       lps[t + v * 3] = -rx;
       lps[t + v * 3 + 1] = -ry;
       lps[t + v * 3 + 2] = rz;
@@ -11157,15 +13148,15 @@ var EDGES = [
 ];
 function marchingCubes(mask, sx, sy, sz, ox, oy, oz) {
   const out = [];
-  const vert = (i, j2, k) => mask[(k * sy + j2) * sx + i] ? 1 : 0;
+  const vert = (i, j, k) => mask[(k * sy + j) * sx + i] ? 1 : 0;
   const edgePos = new Float32Array(12 * 3);
   for (let k = 0; k < sz - 1; k++) {
-    for (let j2 = 0; j2 < sy - 1; j2++) {
+    for (let j = 0; j < sy - 1; j++) {
       for (let i = 0; i < sx - 1; i++) {
         let cube = 0;
         for (let c = 0; c < 8; c++) {
           const [di2, dj, dk] = CORNER[c];
-          if (vert(i + di2, j2 + dj, k + dk)) cube |= 1 << c;
+          if (vert(i + di2, j + dj, k + dk)) cube |= 1 << c;
         }
         const edges = EDGE_TABLE[cube];
         if (!edges) continue;
@@ -11175,7 +13166,7 @@ function marchingCubes(mask, sx, sy, sz, ox, oy, oz) {
           const [ai2, aj, ak] = CORNER[a];
           const [bi2, bj, bk] = CORNER[b];
           edgePos[e * 3] = i + (ai2 + bi2) * 0.5;
-          edgePos[e * 3 + 1] = j2 + (aj + bj) * 0.5;
+          edgePos[e * 3 + 1] = j + (aj + bj) * 0.5;
           edgePos[e * 3 + 2] = k + (ak + bk) * 0.5;
         }
         const tri = TRI_TABLE[cube];
@@ -11343,48 +13334,48 @@ function openVrPresetMenu(opts) {
 }
 
 // ../../cast-interface/cast-js-client/dist/cast-client.js
-function Xn(e, t) {
+function dr(e, t) {
   t.classHierarchy || (t.classHierarchy = []), e.getClassName = () => t.classHierarchy[t.classHierarchy.length - 1] || "CastClient", e.isA = (n) => t.classHierarchy.includes(n), typeof e.delete != "function" && (e.delete = () => {
   });
 }
-function Qn(e, t, n) {
-  n.forEach((i) => {
-    const r = `get${i.charAt(0).toUpperCase()}${i.slice(1)}`;
-    e[r] = () => t[i];
+function hr(e, t, n) {
+  n.forEach((r) => {
+    const i = `get${r.charAt(0).toUpperCase()}${r.slice(1)}`;
+    e[i] = () => t[r];
   });
 }
-function er(e, t) {
+function br(e, t) {
   return () => {
     e(), typeof t == "function" && t();
   };
 }
-function tr(e, t) {
-  return function(i = {}) {
-    const r = {};
-    return e(r, { classHierarchy: [t] }, i), r;
+function mr(e, t) {
+  return function(r = {}) {
+    const i = {};
+    return e(i, { classHierarchy: [t] }, r), i;
   };
 }
-var at = "CAST";
-var Ut = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-function Gt(e, t = at) {
+var ht = "CAST";
+var Bt = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function en3(e, t = ht) {
   return String(e || t).trim().replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "") || t;
 }
-function nr(e) {
-  return `${Gt(e)}-`;
+function pr(e) {
+  return `${en3(e)}-`;
 }
-function Ee(e) {
+function Le(e) {
   return typeof crypto < "u" && crypto.randomUUID ? e + crypto.randomUUID().replace(/-/g, "").slice(0, 16) : e + Math.random().toString(36).substring(2, 18);
 }
-function ct(e = at) {
-  const t = Gt(e);
+function bt(e = ht) {
+  const t = en3(e);
   let n = "";
-  for (let i = 0; i < 6; i++) {
-    const r = Math.floor(Math.random() * Ut.length);
-    n += Ut[r];
+  for (let r = 0; r < 6; r++) {
+    const i = Math.floor(Math.random() * Bt.length);
+    n += Bt[i];
   }
   return `${t}-${n}`;
 }
-var Mt = [
+var jt = [
   "dicom",
   "nifti",
   "jpg",
@@ -11394,26 +13385,26 @@ var Mt = [
   "scene"
   // scene-update (LiveSync HubBlobs multipart)
 ];
-function ut(e) {
+function mt(e) {
   if (typeof e != "string") return false;
   const t = e.trim().toLowerCase();
   if (!t) return false;
-  for (let n = 0; n < Mt.length; n++) {
-    const i = Mt[n];
-    if (t === i || t.startsWith(`${i}-`) || t.startsWith(`${i}_`))
+  for (let n = 0; n < jt.length; n++) {
+    const r = jt[n];
+    if (t === r || t.startsWith(`${r}-`) || t.startsWith(`${r}_`))
       return true;
   }
   return false;
 }
-function rr(e) {
+function gr(e) {
   return typeof ArrayBuffer < "u" && ArrayBuffer.isView(e);
 }
-async function Ae(e) {
+async function ke(e) {
   if (e instanceof ArrayBuffer)
     return e;
-  if (rr(e)) {
-    const { buffer: t, byteOffset: n, byteLength: i } = e;
-    return t.slice(n, n + i);
+  if (gr(e)) {
+    const { buffer: t, byteOffset: n, byteLength: r } = e;
+    return t.slice(n, n + r);
   }
   if (typeof Blob < "u" && e instanceof Blob && typeof e.arrayBuffer == "function")
     return e.arrayBuffer();
@@ -11421,105 +13412,105 @@ async function Ae(e) {
     "CastClient: binary resource.data must be ArrayBuffer, TypedArray, DataView, Blob, or File"
   );
 }
-function de(e) {
+function Se(e) {
   const t = e && e.context;
   if (!t || typeof t != "object" || Array.isArray(t))
     return [];
   const n = t.files;
-  return Array.isArray(n) ? n.filter((i) => i && typeof i == "object") : [];
+  return Array.isArray(n) ? n.filter((r) => r && typeof r == "object") : [];
 }
-function lt(e) {
+function pt3(e) {
   if (!e || typeof e != "object" || e.data != null)
     return { payloadIds: [], chunkByteLengths: [] };
   const t = e.payloadIds;
   if (Array.isArray(t) && t.length) {
-    const i = t.map((s) => typeof s == "string" ? s.trim() : "").filter(Boolean), r = Array.isArray(e.chunkByteLengths) ? e.chunkByteLengths.filter((s) => typeof s == "number" && s >= 0) : [];
-    if (r.length === i.length)
-      return { payloadIds: i, chunkByteLengths: r };
-    if (i.length === 1) {
-      const s = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
+    const r = t.map((o) => typeof o == "string" ? o.trim() : "").filter(Boolean), i = Array.isArray(e.chunkByteLengths) ? e.chunkByteLengths.filter((o) => typeof o == "number" && o >= 0) : [];
+    if (i.length === r.length)
+      return { payloadIds: r, chunkByteLengths: i };
+    if (r.length === 1) {
+      const o = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
       return {
-        payloadIds: i,
-        chunkByteLengths: s != null ? [s] : []
+        payloadIds: r,
+        chunkByteLengths: o != null ? [o] : []
       };
     }
   }
   const n = typeof e.payloadId == "string" ? e.payloadId.trim() : "";
   if (n) {
-    const i = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
+    const r = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
     return {
       payloadIds: [n],
-      chunkByteLengths: i != null ? [i] : []
+      chunkByteLengths: r != null ? [r] : []
     };
   }
   return { payloadIds: [], chunkByteLengths: [] };
 }
-function ir(e) {
-  const t = de(e);
+function yr(e) {
+  const t = Se(e);
   for (let n = 0; n < t.length; n++) {
-    const i = t[n];
-    if (i.data == null) {
-      const r = lt(i);
-      if (r.payloadIds.length)
+    const r = t[n];
+    if (r.data == null) {
+      const i = pt3(r);
+      if (i.payloadIds.length)
         return {
           kind: "files",
           index: n,
           chunkIndex: 0,
-          payloadId: r.payloadIds[0],
-          expectedChunkBytes: r.chunkByteLengths[0] ?? null
+          payloadId: i.payloadIds[0],
+          expectedChunkBytes: i.chunkByteLengths[0] ?? null
         };
     }
   }
   return null;
 }
-function Vt(e) {
-  return ir(e);
+function tn(e) {
+  return yr(e);
 }
-function Ye(e) {
-  return !!Vt(e);
+function nt(e) {
+  return !!tn(e);
 }
-function Ke(e, t) {
+function rt(e, t) {
   return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? t === 0 ? "nifti-send.nii.gz" : `nifti-send-${t + 1}.nii.gz` : t === 0 ? "dicom-send.dcm" : `dicom-send-${t + 1}.dcm`;
 }
-function Xe(e) {
+function it3(e) {
   return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? "application/octet-stream" : "application/dicom";
 }
-function Ze(e) {
+function tt(e) {
   const t = e && e.event;
-  if (!t || !ut(t["hub.event"]) || de(t).length)
+  if (!t || !mt(t["hub.event"]) || Se(t).length)
     return e;
-  const n = t["hub.event"], i = t.context;
-  let r = [];
-  Array.isArray(i) ? r = i : i != null && (r = [i]);
-  const s = [];
-  for (let o = 0; o < r.length; o++) {
-    const c = r[o];
+  const n = t["hub.event"], r = t.context;
+  let i = [];
+  Array.isArray(r) ? i = r : r != null && (i = [r]);
+  const o = [];
+  for (let s = 0; s < i.length; s++) {
+    const c = i[s];
     if (c && typeof c == "object") {
       const l = c.resource;
       if (l && typeof l == "object" && l.data != null) {
         const h = { ...l };
-        (typeof h.fileName != "string" || !h.fileName.trim()) && (h.fileName = Ke(n, o)), (typeof h.mimeType != "string" || !h.mimeType.trim()) && (h.mimeType = Xe(n)), s.push(h);
+        (typeof h.fileName != "string" || !h.fileName.trim()) && (h.fileName = rt(n, s)), (typeof h.mimeType != "string" || !h.mimeType.trim()) && (h.mimeType = it3(n)), o.push(h);
       }
     }
   }
-  return s.length ? {
+  return o.length ? {
     ...e,
     event: {
       ...t,
       context: {
-        files: s
+        files: o
       }
     }
   } : e;
 }
-function or(e, t) {
-  const n = e && e.event, i = n && n.context;
-  let r = [];
-  Array.isArray(i) ? r = i : i != null && (r = [i]);
-  for (let s = 0; s < r.length; s++) {
-    const o = r[s];
-    if (o && typeof o == "object") {
-      const c = o.resource;
+function Cr(e, t) {
+  const n = e && e.event, r = n && n.context;
+  let i = [];
+  Array.isArray(r) ? i = r : r != null && (i = [r]);
+  for (let o = 0; o < i.length; o++) {
+    const s = i[o];
+    if (s && typeof s == "object") {
+      const c = s.resource;
       if (c && typeof c == "object") {
         const l = typeof c.fileName == "string" ? c.fileName.trim() : "";
         if (l)
@@ -11529,7 +13520,7 @@ function or(e, t) {
   }
   return t;
 }
-function Ne(e) {
+function $e(e) {
   if (!e || typeof e != "object")
     return false;
   const t = typeof e.url == "string" ? e.url.trim() : "";
@@ -11538,65 +13529,65 @@ function Ne(e) {
   const n = t.toLowerCase();
   return n.startsWith("http://") || n.startsWith("https://");
 }
-function sr(e) {
+function Sr(e) {
   const t = [];
   for (let n = 0; n < e.length; n += 1)
-    Ne(e[n]) || t.push(n);
+    $e(e[n]) || t.push(n);
   return t;
 }
-function ar(e) {
+function wr(e) {
   const t = e && e.event;
-  if (!t || !ut(t["hub.event"]))
+  if (!t || !mt(t["hub.event"]))
     return false;
-  const n = de(t);
+  const n = Se(t);
   return n.length ? n.some(
-    (i) => i.data != null && !Ne(i)
+    (r) => r.data != null && !$e(r)
   ) : false;
 }
-async function cr(e, t = "", n = 0) {
+async function Tr(e, t = "", n = 0) {
   if (!e || typeof e != "object")
     throw new Error(
       "CastClient: binary batch publish files[] entries must be objects"
     );
-  const i = Ne(e);
-  let r = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
+  const r = $e(e);
+  let i = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
   if ("data" in e && e.data != null) {
     if (typeof e.data == "string")
       throw new Error(
         "CastClient: binary batch publish string payloads are not supported; pass binary input instead"
       );
-    r = (await Ae(e.data)).byteLength;
+    i = (await ke(e.data)).byteLength;
   }
-  if (r == null && i) {
-    const o = { ...e };
-    return delete o.data, delete o.binaryTransfer, delete o.payloadId, delete o.payloadIds, delete o.chunkByteLengths, delete o.expiresAt, (typeof o.fileName != "string" || !o.fileName.trim()) && (o.fileName = Ke(t, n)), (typeof o.mimeType != "string" || !o.mimeType.trim()) && (o.mimeType = Xe(t)), o;
+  if (i == null && r) {
+    const s = { ...e };
+    return delete s.data, delete s.binaryTransfer, delete s.payloadId, delete s.payloadIds, delete s.chunkByteLengths, delete s.expiresAt, (typeof s.fileName != "string" || !s.fileName.trim()) && (s.fileName = rt(t, n)), (typeof s.mimeType != "string" || !s.mimeType.trim()) && (s.mimeType = it3(t)), s;
   }
-  if (r == null)
+  if (i == null)
     throw new Error(
       "CastClient: binary batch publish requires files[].data or files[].byteLength"
     );
-  const s = { ...e };
-  return delete s.data, delete s.binaryTransfer, i || delete s.url, delete s.payloadId, delete s.payloadIds, delete s.chunkByteLengths, delete s.expiresAt, s.byteLength = r, (typeof s.fileName != "string" || !s.fileName.trim()) && (s.fileName = Ke(t, n)), (typeof s.mimeType != "string" || !s.mimeType.trim()) && (s.mimeType = Xe(t)), s;
+  const o = { ...e };
+  return delete o.data, delete o.binaryTransfer, r || delete o.url, delete o.payloadId, delete o.payloadIds, delete o.chunkByteLengths, delete o.expiresAt, o.byteLength = i, (typeof o.fileName != "string" || !o.fileName.trim()) && (o.fileName = rt(t, n)), (typeof o.mimeType != "string" || !o.mimeType.trim()) && (o.mimeType = it3(t)), o;
 }
-async function ur(e) {
+async function Er(e) {
   if (!e.event || typeof e.event != "object")
     throw new Error("CastClient: binary batch publish requires event object");
   const t = e.event;
-  if (!ut(t["hub.event"]))
+  if (!mt(t["hub.event"]))
     return e;
   const n = t.context;
   if (!n || typeof n != "object" || Array.isArray(n))
     throw new Error(
       "CastClient: binary batch publish requires event.context object"
     );
-  const i = n.files;
-  if (!Array.isArray(i) || !i.length)
+  const r = n.files;
+  if (!Array.isArray(r) || !r.length)
     throw new Error(
       "CastClient: binary batch publish requires non-empty event.context.files[]"
     );
-  const r = t["hub.event"], s = await Promise.all(
-    i.map(
-      (o, c) => cr(o, r, c)
+  const i = t["hub.event"], o = await Promise.all(
+    r.map(
+      (s, c) => Tr(s, i, c)
     )
   );
   return {
@@ -11605,26 +13596,26 @@ async function ur(e) {
       ...t,
       context: {
         ...n,
-        files: s
+        files: o
       }
     }
   };
 }
-async function Pt(e) {
+async function qt(e) {
   const t = e && e.event;
   if (!t)
     return [];
-  const i = de(t).filter(
-    (r) => r && typeof r == "object" && r.data != null && !Ne(r)
+  const r = Se(t).filter(
+    (i) => i && typeof i == "object" && i.data != null && !$e(i)
   );
-  return Promise.all(i.map((r) => Ae(r.data)));
+  return Promise.all(r.map((i) => ke(i.data)));
 }
-function lr(e, t, n) {
-  const i = new TextEncoder(), r = i.encode(`\r
-`), s = [], o = (c) => {
-    s.push(i.encode(c));
+function Ar(e, t, n) {
+  const r = new TextEncoder(), i = r.encode(`\r
+`), o = [], s = (c) => {
+    o.push(r.encode(c));
   };
-  o(
+  s(
     `--${e}\r
 Content-Type: application/dicom+json\r
 \r
@@ -11633,36 +13624,36 @@ ${t}\r
   );
   for (let c = 0; c < n.length; c++) {
     const l = n[c], h = l && l.mimeType && String(l.mimeType).trim() || "application/octet-stream";
-    o(`--${e}\r
+    s(`--${e}\r
 Content-Type: ${h}\r
 \r
-`), s.push(new Uint8Array(l.buffer)), s.push(r);
+`), o.push(new Uint8Array(l.buffer)), o.push(i);
   }
-  return o(`--${e}--\r
-`), new Blob(s);
+  return s(`--${e}--\r
+`), new Blob(o);
 }
-async function fr({
+async function vr({
   msg: e,
   fileBytesList: t,
   hub: n,
-  messageIdPrefix: i
+  messageIdPrefix: r
 }) {
-  const r = await ur(e), s = await Promise.all(
-    (t || []).map((u) => Ae(u))
-  ), o = de(r.event), c = sr(o);
-  if (s.length !== c.length)
+  const i = await Er(e), o = await Promise.all(
+    (t || []).map((f) => ke(f))
+  ), s = Se(i.event), c = Sr(s);
+  if (o.length !== c.length)
     throw new Error(
-      `CastClient: binary batch publish expected ${c.length} file part(s), got ${s.length}`
+      `CastClient: binary batch publish expected ${c.length} file part(s), got ${o.length}`
     );
-  const l = s.map((u, f) => {
-    const d = c[f];
+  const l = o.map((f, u) => {
+    const d = c[u];
     return {
-      buffer: u,
-      mimeType: o[d] && o[d].mimeType || "application/octet-stream"
+      buffer: f,
+      mimeType: s[d] && s[d].mimeType || "application/octet-stream"
     };
-  }), h = `cast-batch-${Ee(i())}`, a = lr(
+  }), h = `cast-batch-${Le(r())}`, a = Ar(
     h,
-    JSON.stringify(r),
+    JSON.stringify(i),
     l
   );
   try {
@@ -11674,12 +13665,12 @@ async function fr({
       },
       body: a
     });
-  } catch (u) {
-    const f = u instanceof Error ? u.message : String(u);
-    return console.debug("CastClient:", f), null;
+  } catch (f) {
+    const u = f instanceof Error ? f.message : String(f);
+    return console.debug("CastClient:", u), null;
   }
 }
-function xe(e) {
+function _e(e) {
   const t = {
     responses: [],
     expected: [],
@@ -11695,11 +13686,11 @@ function xe(e) {
   const n = (
     /** @type {Record<string, unknown>} */
     e
-  ), i = Array.isArray(n.responses) ? n.responses.filter((o) => o && typeof o == "object") : [], r = Array.isArray(n.expected) ? n.expected.map((o) => String(o)) : [], s = Array.isArray(n.missing) ? n.missing.map((o) => String(o)) : [];
+  ), r = Array.isArray(n.responses) ? n.responses.filter((s) => s && typeof s == "object") : [], i = Array.isArray(n.expected) ? n.expected.map((s) => String(s)) : [], o = Array.isArray(n.missing) ? n.missing.map((s) => String(s)) : [];
   return {
-    responses: i,
-    expected: r,
-    missing: s,
+    responses: r,
+    expected: i,
+    missing: o,
     timedOut: !!n.timedOut,
     ok: !!n.ok,
     id: n.id != null ? String(n.id) : null,
@@ -11707,78 +13698,78 @@ function xe(e) {
     productName: n.productName != null ? String(n.productName) : null
   };
 }
-function dr(e) {
-  return xe(e).responses;
+function Lr(e) {
+  return _e(e).responses;
 }
-function Jt(e, t) {
+function nn(e, t) {
   if (t === "file:")
     return true;
   const n = String(e || "").toLowerCase();
   return !!(n === "localhost" || n === "127.0.0.1" || n === "[::1]" || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(n) || /^192\.168\.\d{1,3}\.\d{1,3}$/.test(n) || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(n));
 }
-function Zt(e = typeof window < "u" ? window.location : null) {
-  return e ? !Jt(e.hostname, e.protocol) : false;
+function rn(e = typeof window < "u" ? window.location : null) {
+  return e ? !nn(e.hostname, e.protocol) : false;
 }
-function Yt(e) {
+function on(e) {
   try {
     const t = new URL(e);
-    return !Jt(t.hostname, t.protocol);
+    return !nn(t.hostname, t.protocol);
   } catch {
     return false;
   }
 }
-function hr(e, t, n = Zt()) {
-  const i = t.find((s) => {
+function Nr(e, t, n = rn()) {
+  const r = t.find((o) => {
     var c;
-    const o = (c = e[s]) == null ? void 0 : c.hubEndpoint;
-    return o && Yt(o) === n;
+    const s = (c = e[o]) == null ? void 0 : c.hubEndpoint;
+    return s && on(s) === n;
   });
-  if (i)
-    return i;
-  const r = n ? "cloud" : "local";
-  return e[r] ? r : t[0];
+  if (r)
+    return r;
+  const i = n ? "cloud" : "local";
+  return e[i] ? i : t[0];
 }
-var oe = "-request";
-var se = "-response";
-function ft(e) {
+var he = "-request";
+var be = "-response";
+function gt(e) {
   return typeof e != "string" ? "" : e.trim().toLowerCase();
 }
-function ke(e) {
-  const t = ft(e);
-  return t ? `${t}${oe}` : "";
+function Ue(e) {
+  const t = gt(e);
+  return t ? `${t}${he}` : "";
 }
-function Kt(e) {
-  const t = ft(e);
-  return t ? `${t}${se}` : "";
+function sn(e) {
+  const t = gt(e);
+  return t ? `${t}${be}` : "";
 }
-function br(e) {
-  return typeof e != "string" ? false : e.endsWith(oe);
+function xr(e) {
+  return typeof e != "string" ? false : e.endsWith(he);
 }
-function mr(e) {
-  return typeof e != "string" ? false : e.endsWith(se);
+function Ir(e) {
+  return typeof e != "string" ? false : e.endsWith(be);
 }
-function pr(e) {
-  return typeof e != "string" ? "" : e.endsWith(oe) ? e.slice(0, -oe.length) : e.endsWith(se) ? e.slice(0, -se.length) : "";
+function kr(e) {
+  return typeof e != "string" ? "" : e.endsWith(he) ? e.slice(0, -he.length) : e.endsWith(be) ? e.slice(0, -be.length) : "";
 }
-function gr(e) {
+function $r(e) {
   if (!(e != null && e.length))
     return ["*"];
-  if (e.some((r) => String(r).trim() === "*"))
+  if (e.some((i) => String(i).trim() === "*"))
     return ["*"];
-  const t = ke("STATUS"), n = new Set(
-    e.map((r) => String(r).trim().toLowerCase()).filter(Boolean)
-  ), i = [];
-  return t && !n.has(t.toLowerCase()) && (i.push(t), n.add(t.toLowerCase())), n.has("status-update") || i.push("status-update"), i.length ? [...e, ...i] : [...e];
+  const t = Ue("STATUS"), n = new Set(
+    e.map((i) => String(i).trim().toLowerCase()).filter(Boolean)
+  ), r = [];
+  return t && !n.has(t.toLowerCase()) && (r.push(t), n.add(t.toLowerCase())), n.has("status-update") || r.push("status-update"), r.length ? [...e, ...r] : [...e];
 }
-var Xt = "cast-radio-icon";
-var Qt = `<svg class="${Xt}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>`;
-var en = "cast-radio-status-icon";
-var tn = "cast-radio-slash";
-function yr(e = {}) {
+var an = "cast-radio-icon";
+var cn = `<svg class="${an}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>`;
+var ln = "cast-radio-status-icon";
+var un = "cast-radio-slash";
+function _r(e = {}) {
   const t = e.slashId || "castRadioSlash";
-  return `<span class="${en}">${Qt}<span id="${t}" class="${tn}" aria-hidden="true" hidden></span></span>`;
+  return `<span class="${ln}">${cn}<span id="${t}" class="${un}" aria-hidden="true" hidden></span></span>`;
 }
-function Cr(e, t = {}) {
+function Ur(e, t = {}) {
   return t == null || t.conferenceActive, e === "connected" ? {
     tone: "connected",
     showSlash: false,
@@ -11801,7 +13792,7 @@ function Cr(e, t = {}) {
     conferencePulse: false
   };
 }
-function Sr() {
+function Rr() {
   return {
     name: "",
     friendlyName: "",
@@ -11813,7 +13804,7 @@ function Sr() {
     client_secret: ""
   };
 }
-function wr() {
+function Mr() {
   return {
     subscriberName: "",
     productName: "",
@@ -11826,21 +13817,21 @@ function wr() {
     defaultTargetActor: ""
   };
 }
-function Te(e) {
+function Ne(e) {
   if (e == null)
     return;
   const t = String(e).trim();
   if (!(!t || t === "*"))
     return t;
 }
-function nn(e) {
+function fn(e) {
   if (e == null)
     return;
   const t = String(e).trim();
   if (!(!t || t === "*"))
     return t;
 }
-function Er() {
+function Or() {
   return {
     token: "",
     lastIdToken: "",
@@ -11850,7 +13841,7 @@ function Er() {
     websocket: null
   };
 }
-function Tr() {
+function Pr() {
   if (typeof navigator > "u")
     return null;
   const e = {};
@@ -11862,22 +13853,22 @@ function Tr() {
   }
   return Object.keys(e).length ? e : null;
 }
-function Rt(e) {
+function zt(e) {
   return e || (typeof window < "u" ? `${window.location.origin}/castCallback` : "");
 }
-function Ft(e, t, n, i = "") {
-  const r = new URLSearchParams();
-  r.append("hub.mode", e), r.append("hub.channel.type", "websocket"), r.append("hub.callback", n), r.append("hub.events", (t.events || []).toString()), r.append("hub.topic", t.topic || ""), r.append("hub.lease", String(t.lease || 999)), r.append("subscriber.name", t.subscriberName || ""), r.append("subscriber.product.name", t.productName || ""), r.append(
+function Wt(e, t, n, r = "") {
+  const i = new URLSearchParams();
+  i.append("hub.mode", e), i.append("hub.channel.type", "websocket"), i.append("hub.callback", n), i.append("hub.events", (t.events || []).toString()), i.append("hub.topic", t.topic || ""), i.append("hub.lease", String(t.lease || 999)), i.append("subscriber.name", t.subscriberName || ""), i.append("subscriber.product.name", t.productName || ""), i.append(
     "subscriber.product.version",
-    t.productVersion || i || ""
+    t.productVersion || r || ""
   );
-  const s = (t.actors || []).map((c) => c.trim()).filter(Boolean);
-  s.length && r.append("subscriber.actors", JSON.stringify(s));
-  const o = Tr();
-  return o && r.append("subscriber.client_info", JSON.stringify(o)), r;
+  const o = (t.actors || []).map((c) => c.trim()).filter(Boolean);
+  o.length && i.append("subscriber.actors", JSON.stringify(o));
+  const s = Pr();
+  return s && i.append("subscriber.client_info", JSON.stringify(s)), i;
 }
-var Z = 25;
-function vr(e) {
+var te = 25;
+function Fr(e) {
   try {
     const t = new URL(e);
     return t.hostname.toLowerCase() === "localhost" && (t.hostname = "127.0.0.1"), t.toString();
@@ -11885,52 +13876,52 @@ function vr(e) {
     return e;
   }
 }
-function Lr(e) {
+function Dr(e) {
   if (!(e instanceof Error))
     return false;
   const t = e.name || "";
   return t === "TypeError" || t === "NetworkError";
 }
-function Ar(e, t) {
+function Hr(e, t) {
   if (!e)
     return "";
   try {
     const n = `/api/hub/payloads/${encodeURIComponent(e)}`;
-    return vr(new URL(n, t).toString());
+    return Fr(new URL(n, t).toString());
   } catch (n) {
     return console.warn("CastClient: invalid payloadId url", e, n), "";
   }
 }
-function Nr(e) {
+function Br(e) {
   delete e.binaryTransfer, delete e.url, delete e.payloadId, delete e.payloadIds, delete e.chunkByteLengths, delete e.expiresAt;
 }
-function rn(e, t) {
-  const n = e.reduce((s, o) => s + o.byteLength, 0);
+function dn(e, t) {
+  const n = e.reduce((o, s) => o + s.byteLength, 0);
   if (typeof t == "number" && t >= 0 && n !== t)
     throw new Error(
       `CastClient: payload size mismatch expected=${t} received=${n}`
     );
-  const i = new Uint8Array(n);
-  let r = 0;
-  for (let s = 0; s < e.length; s++)
-    i.set(new Uint8Array(e[s]), r), r += e[s].byteLength;
-  return i.buffer;
+  const r = new Uint8Array(n);
+  let i = 0;
+  for (let o = 0; o < e.length; o++)
+    r.set(new Uint8Array(e[o]), i), i += e[o].byteLength;
+  return r.buffer;
 }
-function Ot(e, t, n) {
-  const i = e && e.event, r = i && i.context, s = r && r.files, o = s && s[t];
-  return !o || typeof o != "object" ? false : (Nr(o), o.data = n, o.byteLength = n.byteLength, true);
+function Vt(e, t, n) {
+  const r = e && e.event, i = r && r.context, o = i && i.files, s = o && o[t];
+  return !s || typeof s != "object" ? false : (Br(s), s.data = n, s.byteLength = n.byteLength, true);
 }
-async function on(e, t, { hubEndpoint: n, accessToken: i }) {
-  const r = Ar(e, n);
-  if (!r)
+async function hn(e, t, { hubEndpoint: n, accessToken: r }) {
+  const i = Hr(e, n);
+  if (!i)
     throw new Error("CastClient.fetchPayload: missing or invalid payloadId");
-  const s = {};
-  i && (s.Authorization = `Bearer ${i}`);
-  async function o() {
-    const c = await fetch(r, {
+  const o = {};
+  r && (o.Authorization = `Bearer ${r}`);
+  async function s() {
+    const c = await fetch(i, {
       method: "GET",
       credentials: "omit",
-      headers: s
+      headers: o
     });
     if (!c.ok)
       throw new Error(
@@ -11947,46 +13938,46 @@ async function on(e, t, { hubEndpoint: n, accessToken: i }) {
     return l;
   }
   try {
-    return await o();
+    return await s();
   } catch (c) {
-    if (Lr(c))
-      return o();
+    if (Dr(c))
+      return s();
     throw c;
   }
 }
-async function xr(e, t) {
-  const n = lt(e);
+async function jr(e, t) {
+  const n = pt3(e);
   if (!n.payloadIds.length)
     throw new Error("CastClient.fetchPayload: no payloadIds on file entry");
-  const i = [];
-  for (let r = 0; r < n.payloadIds.length; r += Z) {
-    const s = n.payloadIds.slice(
-      r,
-      r + Z
-    ), o = n.chunkByteLengths.slice(
-      r,
-      r + Z
+  const r = [];
+  for (let i = 0; i < n.payloadIds.length; i += te) {
+    const o = n.payloadIds.slice(
+      i,
+      i + te
+    ), s = n.chunkByteLengths.slice(
+      i,
+      i + te
     ), c = await Promise.all(
-      s.map(
-        (l, h) => on(l, o[h] ?? null, t)
+      o.map(
+        (l, h) => hn(l, s[h] ?? null, t)
       )
     );
-    i.push(...c);
+    r.push(...c);
   }
-  return rn(
-    i,
+  return dn(
+    r,
     typeof e.byteLength == "number" ? e.byteLength : null
   );
 }
-async function kr(e, t, n = Z) {
+async function qr(e, t, n = te) {
   if (!e.length)
     return [];
-  const i = Math.max(1, n | 0), r = new Array(e.length);
-  let s = 0;
-  async function o() {
-    for (; s < e.length; ) {
-      const l = s++, h = e[l];
-      r[l] = await on(
+  const r = Math.max(1, n | 0), i = new Array(e.length);
+  let o = 0;
+  async function s() {
+    for (; o < e.length; ) {
+      const l = o++, h = e[l];
+      i[l] = await hn(
         h.payloadId,
         h.expectedLength ?? null,
         t
@@ -11994,78 +13985,78 @@ async function kr(e, t, n = Z) {
     }
   }
   const c = Array.from(
-    { length: Math.min(i, e.length) },
-    () => o()
+    { length: Math.min(r, e.length) },
+    () => s()
   );
-  return await Promise.all(c), r;
+  return await Promise.all(c), i;
 }
-function Dt(e) {
+function Gt(e) {
   return JSON.parse(JSON.stringify(e));
 }
-function Ir(e) {
+function zr(e) {
   const t = () => e();
   return {
     hasPendingPayload(n) {
-      const i = n && n.event;
-      return !!(i && Ye(i));
+      const r = n && n.event;
+      return !!(r && nt(r));
     },
     async fetchPayload(n) {
-      const i = n && n.event;
-      if (!i || !Ye(i))
+      const r = n && n.event;
+      if (!r || !nt(r))
         return n;
-      const r = Vt(i);
-      if (!r)
+      const i = tn(r);
+      if (!i)
         return n;
-      const s = typeof performance < "u" && performance.now ? performance.now() : Date.now(), o = i.context.files[r.index], c = await xr(o, t()), l = Dt(n);
-      if (!Ot(l, r.index, c))
+      const o = typeof performance < "u" && performance.now ? performance.now() : Date.now(), s = r.context.files[i.index], c = await jr(s, t()), l = Gt(n);
+      if (!Vt(l, i.index, c))
         throw new Error("CastClient.fetchPayload: no payload slot on message");
-      const a = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - s;
+      const a = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - o;
       return console.debug(
-        `CastClient: payload fetched fileIndex=${r.index} bytes=${c.byteLength} elapsed=${(a / 1e3).toFixed(2)}s`
+        `CastClient: payload fetched fileIndex=${i.index} bytes=${c.byteLength} elapsed=${(a / 1e3).toFixed(2)}s`
       ), l;
     },
     async fetchAllPayloads(n) {
-      const i = n && n.event, r = i && i.context, s = r && typeof r == "object" && !Array.isArray(r) && Array.isArray(r.files) ? r.files : [], o = [];
-      for (let d = 0; d < s.length; d++) {
-        const b = s[d];
+      const r = n && n.event, i = r && r.context, o = i && typeof i == "object" && !Array.isArray(i) && Array.isArray(i.files) ? i.files : [], s = [];
+      for (let d = 0; d < o.length; d++) {
+        const b = o[d];
         if (!b || typeof b != "object" || b.data != null)
           continue;
-        const m = lt(b);
-        if (m.payloadIds.length)
-          for (let g = 0; g < m.payloadIds.length; g++)
-            o.push({
+        const p = pt3(b);
+        if (p.payloadIds.length)
+          for (let g = 0; g < p.payloadIds.length; g++)
+            s.push({
               fileIndex: d,
               chunkIndex: g,
-              payloadId: m.payloadIds[g],
-              expectedLength: typeof m.chunkByteLengths[g] == "number" ? m.chunkByteLengths[g] : null
+              payloadId: p.payloadIds[g],
+              expectedLength: typeof p.chunkByteLengths[g] == "number" ? p.chunkByteLengths[g] : null
             });
       }
-      if (!o.length)
+      if (!s.length)
         return n;
-      const c = typeof performance < "u" && performance.now ? performance.now() : Date.now(), l = t(), h = await kr(
-        o,
+      const c = typeof performance < "u" && performance.now ? performance.now() : Date.now(), l = t(), h = await qr(
+        s,
         l,
-        Z
+        te
       ), a = /* @__PURE__ */ new Map();
-      for (let d = 0; d < o.length; d++) {
-        const { fileIndex: b, chunkIndex: m } = o[d];
+      for (let d = 0; d < s.length; d++) {
+        const { fileIndex: b, chunkIndex: p } = s[d];
         let g = a.get(b);
-        g || (g = [], a.set(b, g)), g[m] = h[d];
+        g || (g = [], a.set(b, g)), g[p] = h[d];
       }
-      const u = Dt(n);
+      const f = Gt(n);
       for (const [d, b] of a) {
-        const m = u.event.context.files[d], g = typeof m.byteLength == "number" ? m.byteLength : null, y = rn(b, g);
-        if (!Ot(u, d, y))
+        const p = f.event.context.files[d], g = typeof p.byteLength == "number" ? p.byteLength : null, C = dn(b, g);
+        if (!Vt(f, d, C))
           throw new Error("CastClient.fetchAllPayloads: attach failed");
       }
-      const f = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - c;
+      const u = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - c;
       return console.debug(
-        `CastClient: fetchAllPayloads files=${a.size} chunks=${o.length} concurrent=${Z} elapsed=${(f / 1e3).toFixed(2)}s`
-      ), u;
+        `CastClient: fetchAllPayloads files=${a.size} chunks=${s.length} concurrent=${te} elapsed=${(u / 1e3).toFixed(2)}s`
+      ), f;
     }
   };
 }
-function he(e) {
+function we(e) {
   const t = String(e ?? "").trim();
   if (!t)
     return null;
@@ -12076,40 +14067,41 @@ function he(e) {
     return null;
   }
 }
-function $r(e) {
-  const t = he(e);
+function Wr(e) {
+  const t = we(e);
   if (!t)
     return "";
   const n = t.href.endsWith("/") ? t.href : `${t.href}/`;
   return new URL("admin", n).href;
 }
-function _r(e, t = {}) {
-  var l, h, a, u;
-  const n = he(e);
+function Vr(e, t = {}) {
+  var l, h, a, f;
+  const n = we(e);
   if (!n)
     return "";
-  const i = new URL("/api/hub/conference-client", n.origin), r = (l = t.subscriberName) == null ? void 0 : l.trim(), s = (h = t.topic) == null ? void 0 : h.trim(), o = ((a = t.theme) == null ? void 0 : a.trim()) || "volview", c = ((u = t.mode) == null ? void 0 : u.trim().toLowerCase()) === "light" ? "light" : "dark";
-  return r && i.searchParams.set("subscriberName", r), s && i.searchParams.set("topic", s), i.searchParams.set("theme", o), i.searchParams.set("mode", c), i.href;
+  const r = new URL("/api/hub/conference-client", n.origin), i = (l = t.subscriberName) == null ? void 0 : l.trim(), o = (h = t.topic) == null ? void 0 : h.trim(), s = ((a = t.theme) == null ? void 0 : a.trim()) || "volview", c = ((f = t.mode) == null ? void 0 : f.trim().toLowerCase()) === "light" ? "light" : "dark";
+  return i && r.searchParams.set("subscriberName", i), o && r.searchParams.set("topic", o), r.searchParams.set("theme", s), r.searchParams.set("mode", c), r.href;
 }
-var Ur = { width: 336, height: 288 };
-var Mr = "castViewer-reporting";
-var Pr = "castViewer-worklist";
-function Rr(e = null) {
-  const t = typeof globalThis < "u" ? globalThis.screen : null, n = typeof globalThis < "u" && globalThis.window ? globalThis.window : null, i = Number(t == null ? void 0 : t.availLeft) || 0, r = Number(t == null ? void 0 : t.availTop) || 0, s = (t == null ? void 0 : t.availWidth) || (t == null ? void 0 : t.width) || 1200, o = (t == null ? void 0 : t.availHeight) || (t == null ? void 0 : t.height) || 800, c = (e == null ? void 0 : e.left) ?? (n == null ? void 0 : n.screenX) ?? (n == null ? void 0 : n.screenLeft) ?? 0, l = (e == null ? void 0 : e.top) ?? (n == null ? void 0 : n.screenY) ?? (n == null ? void 0 : n.screenTop) ?? 0, h = Math.max(
+var Gr = { width: 336, height: 288 };
+var Jr = "castViewer-reporting";
+var Xr = "castViewer-classroom";
+var Yr = "castViewer-worklist";
+function Zr(e = null) {
+  const t = typeof globalThis < "u" ? globalThis.screen : null, n = typeof globalThis < "u" && globalThis.window ? globalThis.window : null, r = Number(t == null ? void 0 : t.availLeft) || 0, i = Number(t == null ? void 0 : t.availTop) || 0, o = (t == null ? void 0 : t.availWidth) || (t == null ? void 0 : t.width) || 1200, s = (t == null ? void 0 : t.availHeight) || (t == null ? void 0 : t.height) || 800, c = (e == null ? void 0 : e.left) ?? (n == null ? void 0 : n.screenX) ?? (n == null ? void 0 : n.screenLeft) ?? 0, l = (e == null ? void 0 : e.top) ?? (n == null ? void 0 : n.screenY) ?? (n == null ? void 0 : n.screenTop) ?? 0, h = Math.max(
     1,
     Number(
-      (e == null ? void 0 : e.width) ?? (n == null ? void 0 : n.outerWidth) ?? Math.floor(s * 0.5)
-    ) || Math.floor(s * 0.5)
-  ), a = Math.min(756, Math.max(600, Math.floor(s * 0.444))), u = Math.min(784, Math.max(624, Math.floor(o * 0.688))), f = Math.max(0, Math.floor(h * 0.1));
-  let d = c + h - f, b = l;
-  return d + a > i + s && (d = Math.max(i, i + s - a)), b + u > r + o && (b = Math.max(r, r + o - u)), d = Math.max(i, Math.min(d, i + s - a)), b = Math.max(r, Math.min(b, r + o - u)), {
+      (e == null ? void 0 : e.width) ?? (n == null ? void 0 : n.outerWidth) ?? Math.floor(o * 0.5)
+    ) || Math.floor(o * 0.5)
+  ), a = Math.min(756, Math.max(600, Math.floor(o * 0.444))), f = Math.min(784, Math.max(624, Math.floor(s * 0.688))), u = Math.max(0, Math.floor(h * 0.1));
+  let d = c + h - u, b = l;
+  return d + a > r + o && (d = Math.max(r, r + o - a)), b + f > i + s && (b = Math.max(i, i + s - f)), d = Math.max(r, Math.min(d, r + o - a)), b = Math.max(i, Math.min(b, i + s - f)), {
     width: a,
-    height: u,
+    height: f,
     left: Math.floor(d),
     top: Math.floor(b)
   };
 }
-function Fr(e) {
+function Kr(e) {
   return [
     "popup",
     `width=${e.width}`,
@@ -12118,167 +14110,183 @@ function Fr(e) {
     `top=${e.top}`
   ].join(",");
 }
-function Or(e, t) {
+function Qr(e, t) {
   if (!(!e || !t))
     try {
       e.resizeTo(t.width, t.height), e.moveTo(t.left, t.top), e.focus();
     } catch {
     }
 }
-function Dr(e, t, n = { width: 800, height: 600 }) {
+function ei(e, t, n = { width: 800, height: 600 }) {
   if (!e || typeof window > "u")
     return;
-  const i = n.width, r = n.height, s = Math.max(0, Math.floor((window.screen.width - i) / 2)), o = Math.max(0, Math.floor((window.screen.height - r) / 2)), c = [
+  const r = n.width, i = n.height, o = Math.max(0, Math.floor((window.screen.width - r) / 2)), s = Math.max(0, Math.floor((window.screen.height - i) / 2)), c = [
     "popup",
-    `width=${i}`,
-    `height=${r}`,
-    `left=${s}`,
-    `top=${o}`,
+    `width=${r}`,
+    `height=${i}`,
+    `left=${o}`,
+    `top=${s}`,
     "noopener",
     "noreferrer"
   ].join(",");
   window.open(e, t, c);
 }
-var Br = 3e4;
-var sn = 1200;
-var an = [
+var ti = 3e4;
+var bn = 1200;
+var mn = [
   "ST-444 \xB7 Anatomie humaine",
   "US annotations",
   "Tumor Board",
   "Case discussion",
   "Pedicle screw"
 ];
-function be(e, t) {
-  const n = he(e);
+function Te(e, t) {
+  const n = we(e);
   return n ? new URL(t, n.origin).href : null;
 }
-function dt(e) {
+function yt(e) {
   if (!Array.isArray(e))
     return [];
   const t = /* @__PURE__ */ new Set();
   return e.map((n) => String(n ?? "").trim()).filter((n) => !n || t.has(n) ? false : (t.add(n), true));
 }
-function D(e) {
+function V(e) {
   return String((e == null ? void 0 : e.hostTopic) ?? (e == null ? void 0 : e.user) ?? "").trim();
 }
-function ht(e) {
-  const t = D(e);
+function Ct(e) {
+  const t = V(e);
   return String((e == null ? void 0 : e.sceneLeaderTopic) ?? "").trim() || t;
 }
-function bt(e, t) {
-  const n = D(t), i = String(e ?? "").trim();
-  return !i || !n ? false : i === n || i.toLowerCase() === n.toLowerCase();
+function St(e, t) {
+  const n = V(t), r = String(e ?? "").trim();
+  return !r || !n ? false : r === n || r.toLowerCase() === n.toLowerCase();
 }
-function cn(e, t) {
-  const n = ht(t), i = String(e ?? "").trim();
-  return !i || !n ? false : i === n || i.toLowerCase() === n.toLowerCase();
+function pn(e, t) {
+  const n = Ct(t), r = String(e ?? "").trim();
+  return !r || !n ? false : r === n || r.toLowerCase() === n.toLowerCase();
 }
-function mt(e, t, n) {
-  const i = String(e ?? "").trim(), r = String(t ?? "").trim(), s = D(n), o = Array.isArray(n == null ? void 0 : n.topics) ? n.topics.map((c) => String(c).trim()).filter(Boolean) : [];
-  return !!(i && (i === s || o.includes(i)) || r && r === s);
+function wt(e, t, n) {
+  const r = String(e ?? "").trim(), i = String(t ?? "").trim(), o = V(n), s = Array.isArray(n == null ? void 0 : n.topics) ? n.topics.map((c) => String(c).trim()).filter(Boolean) : [];
+  return !!(r && (r === o || s.includes(r)) || i && i === o);
 }
-function ae(e, t, n) {
+function me(e, t, n) {
   return n.find(
-    (i) => mt(e, t, i)
+    (r) => wt(e, t, r)
   ) || null;
 }
-async function un(e) {
-  const t = be(e, "/api/hub/conference-topics");
+async function gn(e) {
+  const t = Te(e, "/api/hub/conference-topics");
   if (!t)
     return [];
   try {
     const n = await fetch(t);
     if (!n.ok)
       return [];
-    const i = await n.json();
-    return Array.isArray(i) ? i.map((r) => String(r).trim()).filter((r) => r && r !== "*") : [];
+    const r = await n.json();
+    if (!Array.isArray(r))
+      return [];
+    const i = [];
+    for (const o of r) {
+      if (o && typeof o == "object") {
+        const c = String(o.topic ?? "").trim();
+        if (!c || c === "*") continue;
+        i.push({
+          topic: c,
+          timezone: String(o.timezone ?? "").trim()
+        });
+        continue;
+      }
+      const s = String(o ?? "").trim();
+      !s || s === "*" || i.push({ topic: s, timezone: "" });
+    }
+    return i;
   } catch {
     return [];
   }
 }
-async function ce(e) {
-  const t = he(e);
+async function pe(e) {
+  const t = we(e);
   if (!t)
     return [];
   const n = new URL("/api/hub/conference", t.origin).href;
   try {
-    const i = await fetch(n);
-    if (!i.ok)
+    const r = await fetch(n);
+    if (!r.ok)
       return [];
-    const r = await i.json();
-    return Array.isArray(r) ? r : [];
+    const i = await r.json();
+    return Array.isArray(i) ? i : [];
   } catch {
     return [];
   }
 }
-async function ln(e, t, n, i, r) {
-  const s = be(e, "/api/hub/conference");
-  if (!s)
+async function yn(e, t, n, r, i) {
+  const o = Te(e, "/api/hub/conference");
+  if (!o)
     throw new Error("Invalid hub endpoint");
-  const o = {
+  const s = {
     hostTopic: String(t).trim(),
     title: String(n).trim(),
-    topics: i
-  }, c = String(r ?? "").trim();
-  c && (o.hostUserName = c);
-  const l = await fetch(s, {
+    topics: r
+  }, c = String(i ?? "").trim();
+  c && (s.hostUserName = c);
+  const l = await fetch(o, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(o)
+    body: JSON.stringify(s)
   });
   if (!l.ok) {
     const h = await l.text();
     throw new Error(h || `HTTP ${l.status}`);
   }
 }
-async function fn(e, t, n, i) {
-  const r = be(e, "/api/hub/conference/join");
-  if (!r)
+async function Cn(e, t, n, r) {
+  const i = Te(e, "/api/hub/conference/join");
+  if (!i)
     throw new Error("Invalid hub endpoint");
-  const s = {
+  const o = {
     hostTopic: String(t).trim(),
     joinTopic: String(n).trim()
-  }, o = String(i ?? "").trim();
-  o && (s.joinUserName = o);
-  const c = await fetch(r, {
+  }, s = String(r ?? "").trim();
+  s && (o.joinUserName = s);
+  const c = await fetch(i, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(s)
+    body: JSON.stringify(o)
   });
   if (!c.ok) {
     const l = await c.text();
     throw new Error(l || `HTTP ${c.status}`);
   }
 }
-async function pt(e, t, n) {
-  const i = be(e, "/api/hub/conference");
-  if (!i)
-    throw new Error("Invalid hub endpoint");
-  const r = { hostTopic: String(t).trim() }, s = n == null ? void 0 : n.trim();
-  s && (r.leaveTopic = s);
-  const o = await fetch(i, {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(r)
-  });
-  if (!o.ok) {
-    const c = await o.text();
-    throw new Error(c || `HTTP ${o.status}`);
-  }
-}
-async function jr(e, t, n, i) {
-  const r = be(e, "/api/hub/conference/lead");
+async function Tt(e, t, n) {
+  const r = Te(e, "/api/hub/conference");
   if (!r)
     throw new Error("Invalid hub endpoint");
-  const s = {
+  const i = { hostTopic: String(t).trim() }, o = n == null ? void 0 : n.trim();
+  o && (i.leaveTopic = o);
+  const s = await fetch(r, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(i)
+  });
+  if (!s.ok) {
+    const c = await s.text();
+    throw new Error(c || `HTTP ${s.status}`);
+  }
+}
+async function ni(e, t, n, r) {
+  const i = Te(e, "/api/hub/conference/lead");
+  if (!i)
+    throw new Error("Invalid hub endpoint");
+  const o = {
     hostTopic: String(t).trim(),
     sceneLeaderTopic: String(n).trim()
-  }, o = String(i ?? "").trim();
-  o && (s.leaderUserName = o);
-  const c = await fetch(r, {
+  }, s = String(r ?? "").trim();
+  s && (o.leaderUserName = s);
+  const c = await fetch(i, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(s)
+    body: JSON.stringify(o)
   });
   if (!c.ok) {
     const l = await c.text();
@@ -12290,32 +14298,32 @@ async function jr(e, t, n, i) {
     return { status: "updated" };
   }
 }
-async function Hr(e, t, n) {
-  const i = await ce(e), r = ae(t, n, i);
+async function ri(e, t, n) {
+  const r = await pe(e), i = me(t, n, r);
   return {
-    active: !!r,
-    title: String((r == null ? void 0 : r.title) ?? "").trim(),
-    participants: dt(r == null ? void 0 : r.participants)
+    active: !!i,
+    title: String((i == null ? void 0 : i.title) ?? "").trim(),
+    participants: yt(i == null ? void 0 : i.participants)
   };
 }
-function gt(e, t) {
+function Et(e, t) {
   if (!t)
     return null;
-  const n = String((e == null ? void 0 : e.topic) ?? "").trim(), i = String((e == null ? void 0 : e.subscriberName) ?? "").trim(), r = String((e == null ? void 0 : e.userName) ?? "").trim(), s = D(t);
-  if (!s || !mt(n, i, t))
+  const n = String((e == null ? void 0 : e.topic) ?? "").trim(), r = String((e == null ? void 0 : e.subscriberName) ?? "").trim(), i = String((e == null ? void 0 : e.userName) ?? "").trim(), o = V(t);
+  if (!o || !wt(n, r, t))
     return null;
-  const o = Array.isArray(t.topics) ? t.topics.map((b) => String(b).trim()).filter(Boolean) : [], c = dt(t.participants), l = [], h = /* @__PURE__ */ new Set();
-  for (const b of [n, s, ...o])
+  const s = Array.isArray(t.topics) ? t.topics.map((b) => String(b).trim()).filter(Boolean) : [], c = yt(t.participants), l = [], h = /* @__PURE__ */ new Set();
+  for (const b of [n, o, ...s])
     !b || h.has(b) || (h.add(b), l.push(b));
-  const a = ht(t), u = bt(n, t), f = cn(n, t) ? "leading" : "following", d = l.map((b) => {
-    const m = !!n && (b === n || b.toLowerCase() === n.toLowerCase()), g = b === a || b.toLowerCase() === a.toLowerCase(), y = g && f === "following";
+  const a = Ct(t), f = St(n, t), u = pn(n, t) ? "leading" : "following", d = l.map((b) => {
+    const p = !!n && (b === n || b.toLowerCase() === n.toLowerCase()), g = b === a || b.toLowerCase() === a.toLowerCase(), C = g && u === "following";
     let N = "";
-    return m ? N = f === "leading" ? "You \xB7 leading" : "You" : y ? N = "Following" : f === "leading" && (N = "Following you"), {
+    return p ? N = u === "leading" ? "You \xB7 leading" : "You" : C ? N = "Following" : u === "leading" && (N = "Following you"), {
       placeId: b,
-      label: m && r ? r : b,
-      isSelf: m,
+      label: p && i ? i : b,
+      isSelf: p,
       isLeading: g,
-      isFollowing: y,
+      isFollowing: C,
       statusLabel: N
     };
   });
@@ -12324,23 +14332,27 @@ function gt(e, t) {
     places: d,
     selfPlaceId: n,
     leadingPlaceId: a,
-    selfRole: f,
-    isConferenceOwner: u,
-    hostTopic: s,
+    selfRole: u,
+    isConferenceOwner: f,
+    hostTopic: o,
     sceneLeaderTopic: a,
-    attendeeTopics: o,
+    attendeeTopics: s,
     participants: c
   };
 }
-async function dn(e, t, n, i) {
-  const r = await ce(e), s = ae(t, n, r);
-  return gt({ topic: t, subscriberName: n, userName: i }, s);
+async function Sn(e, t, n, r) {
+  const i = await pe(e), o = me(t, n, i);
+  return Et({ topic: t, subscriberName: n, userName: r }, o);
 }
-var Qe = Object.freeze({
+var ot = Object.freeze({
   // Dialog shell
   dialogTitle: "Conferencing",
   close: "Close",
   closeAria: "Close",
+  // Session (user / topic)
+  sessionSection: "User / topic",
+  sessionInfo: "Session info",
+  participantsAria: "Participants",
   // Create
   createSection: "Create a conference",
   conferenceTitle: "Conference title",
@@ -12406,165 +14418,166 @@ var Qe = Object.freeze({
   stopFollowing: "Stop following",
   resumeFollowing: "Resume following"
 });
-function ie(e, t = {}) {
+function de3(e, t = {}) {
   return String(e || "").replace(
     /\{\{(\w+)\}\}/g,
-    (n, i) => t[i] != null ? String(t[i]) : ""
+    (n, r) => t[r] != null ? String(t[r]) : ""
   );
 }
-function W(e) {
-  return !e || typeof e != "object" ? { ...Qe } : { ...Qe, ...e };
+function Z(e) {
+  return !e || typeof e != "object" ? { ...ot } : { ...ot, ...e };
 }
-function M(e, t) {
+function P(e, t) {
   return `${e}-${t}`;
 }
-function yt(e) {
-  var i;
-  if (!((i = e == null ? void 0 : e.places) != null && i.length)) return null;
-  const t = e.places.find((r) => r && r.isLeading);
+function At(e) {
+  var r;
+  if (!((r = e == null ? void 0 : e.places) != null && r.length)) return null;
+  const t = e.places.find((i) => i && i.isLeading);
   if (t) return t;
   const n = String(e.leadingPlaceId || "").trim();
   return n && e.places.find(
-    (r) => r && (r.placeId === n || r.placeId.toLowerCase() === n.toLowerCase())
+    (i) => i && (i.placeId === n || i.placeId.toLowerCase() === n.toLowerCase())
   ) || null;
 }
-function hn(e, t = true) {
+function wn(e, t = true) {
   return e != null && e.isFollowing ? t ? "Following" : "Skipping" : String((e == null ? void 0 : e.statusLabel) || "").trim();
 }
-function Ct(e, t, n = "short", i = true, r = "") {
+function vt(e, t, n = "short", r = true, i = "") {
   if ((t === "leading" || t === "following" ? t : e != null && e.isLeading ? "leading" : "following") === "leading")
     return n === "full" ? "You \xB7 leading" : "Leading";
-  const o = String(r || "").trim();
-  if (!i)
-    return o ? `Skipping ${o}` : n === "full" ? "You \xB7 skipping" : "Skipping";
-  if (o) return `Following ${o}`;
+  const s = String(i || "").trim();
+  if (!r)
+    return s ? `Skipping ${s}` : n === "full" ? "You \xB7 skipping" : "Skipping";
+  if (s) return `Following ${s}`;
   if (n === "full") {
     const c = String((e == null ? void 0 : e.statusLabel) || "").trim();
     return c || "You";
   }
   return "Following";
 }
-function bn(e, t, n = true) {
+function Tn(e, t, n = true) {
   if (!e) return "";
   if (e.isSelf) {
-    const i = yt(t);
-    return Ct(
+    const r = At(t);
+    return vt(
       e,
       t == null ? void 0 : t.selfRole,
       "short",
       n,
-      i && !i.isSelf ? i.label : ""
+      r && !r.isSelf ? r.label : ""
     );
   }
-  return hn(e, n);
+  return wn(e, n);
 }
-function qr(e, t) {
+function ii(e, t) {
   e.classList.remove(t, `${t}-leading`);
   const n = e.querySelector("[data-cast-conference-role]");
   n instanceof HTMLElement && (n.hidden = true, n.textContent = "");
 }
-function mn(e, t, n, i, r) {
-  const s = (t.places || []).filter((o) => o && (r || !o.isSelf));
-  for (const o of s) {
+function En(e, t, n, r, i) {
+  const o = (t.places || []).filter((s) => s && (i || !s.isSelf));
+  for (const s of o) {
     const c = document.createElement("div");
-    c.className = M(n, "chip"), c.setAttribute("role", "listitem"), o.isSelf && c.classList.add(M(n, "chip-self")), o.isLeading && c.classList.add(M(n, "chip-leading")), o.isFollowing && (c.classList.add(M(n, "chip-following")), i || c.classList.add(M(n, "chip-skipping")));
-    const l = bn(
-      o,
+    c.className = P(n, "chip"), c.setAttribute("role", "listitem"), s.isSelf && c.classList.add(P(n, "chip-self")), s.isLeading && c.classList.add(P(n, "chip-leading")), s.isFollowing && (c.classList.add(P(n, "chip-following")), r || c.classList.add(P(n, "chip-skipping")));
+    const l = Tn(
+      s,
       t,
-      i
+      r
     ), h = document.createElement("span");
-    h.className = M(n, "chip-name"), h.textContent = o.label;
-    const a = [o.label, l, o.placeId].map((u) => String(u || "").trim()).filter(Boolean).join(" \u2014 ");
+    h.className = P(n, "chip-name"), h.textContent = s.label;
+    const a = [s.label, l, s.placeId].map((f) => String(f || "").trim()).filter(Boolean).join(" \u2014 ");
     if (h.title = a, c.title = a, c.append(h), l) {
-      const u = document.createElement("span");
-      u.className = M(n, "chip-status"), u.textContent = l, c.append(u);
+      const f = document.createElement("span");
+      f.className = P(n, "chip-status"), f.textContent = l, c.append(f);
     }
     e.append(c);
   }
 }
-function zr(e) {
+function oi(e) {
   var g;
-  const t = (e == null ? void 0 : e.view) ?? null, n = e == null ? void 0 : e.statusControl, i = (e == null ? void 0 : e.chipsHost) instanceof HTMLElement ? e.chipsHost : null, r = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim() || "cast-conference", s = String((e == null ? void 0 : e.statusClassPrefix) || M(r, "user")).trim() || M(r, "user"), o = (e == null ? void 0 : e.selfStatusMode) === "full" ? "full" : "short", c = (e == null ? void 0 : e.followHost) !== false, l = M(r, "chip-status");
+  const t = (e == null ? void 0 : e.view) ?? null, n = e == null ? void 0 : e.statusControl, r = (e == null ? void 0 : e.chipsHost) instanceof HTMLElement ? e.chipsHost : null, i = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim() || "cast-conference", o = String((e == null ? void 0 : e.statusClassPrefix) || P(i, "user")).trim() || P(i, "user"), s = (e == null ? void 0 : e.selfStatusMode) === "full" ? "full" : "short", c = (e == null ? void 0 : e.followHost) !== false, l = P(i, "chip-status");
   if (!(n instanceof HTMLElement))
     return;
   if (!!!((g = t == null ? void 0 : t.places) != null && g.length)) {
-    qr(n, s), i && (i.replaceChildren(), i.hidden = true), O();
+    ii(n, o), r && (r.replaceChildren(), r.hidden = true), q();
     return;
   }
-  const a = t.places.find((y) => y && y.isSelf) || null, u = yt(t), f = t.selfRole === "leading" || !!(a != null && a.isLeading), d = u && !u.isSelf ? String(u.label || "").trim() : "";
-  n.classList.add(s), n.classList.toggle(`${s}-leading`, f);
+  const a = t.places.find((C) => C && C.isSelf) || null, f = At(t), u = t.selfRole === "leading" || !!(a != null && a.isLeading), d = f && !f.isSelf ? String(f.label || "").trim() : "";
+  n.classList.add(o), n.classList.toggle(`${o}-leading`, u);
   let b = n.querySelector("[data-cast-conference-role]");
-  if (b instanceof HTMLElement || (b = document.createElement("span"), b.dataset.castConferenceRole = "1", n.append(b)), b.className = l, b.hidden = false, b.textContent = Ct(
+  if (b instanceof HTMLElement || (b = document.createElement("span"), b.dataset.castConferenceRole = "1", n.append(b)), b.className = l, b.hidden = false, b.textContent = vt(
     a,
     t.selfRole,
-    o,
+    s,
     c,
     d
-  ), !i)
+  ), !r)
     return;
-  if (i.replaceChildren(), !t.places.filter((y) => y && !y.isSelf).length) {
-    i.hidden = true;
+  if (r.replaceChildren(), !t.places.filter((C) => C && !C.isSelf).length) {
+    r.hidden = true;
     return;
   }
-  i.hidden = false, mn(i, t, r, c, false);
+  r.hidden = false, En(r, t, i, c, false);
 }
-var H = null;
-function O() {
-  H && (H.cleanup(), H = null);
+var X = null;
+function q() {
+  X && (X.cleanup(), X = null);
 }
-function Wr() {
-  return !!H;
+function si() {
+  return !!X;
 }
-function Gr(e) {
-  var m;
-  const t = e == null ? void 0 : e.anchor, n = (e == null ? void 0 : e.view) ?? null, i = (e == null ? void 0 : e.followHost) !== false, r = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim() || "cast-conference", s = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
-  if (!(t instanceof HTMLElement) || !s || !((m = n == null ? void 0 : n.places) != null && m.length))
-    return O(), { close: O, open: false };
-  if (H) {
-    const g = H.panel.__castAnchor === t;
-    if (O(), g)
-      return { close: O, open: false };
+function ai(e) {
+  var p;
+  const t = e == null ? void 0 : e.anchor, n = (e == null ? void 0 : e.view) ?? null, r = (e == null ? void 0 : e.followHost) !== false, i = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim() || "cast-conference", o = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
+  if (!(t instanceof HTMLElement) || !o || !((p = n == null ? void 0 : n.places) != null && p.length))
+    return q(), { close: q, open: false };
+  if (X) {
+    const g = X.panel.__castAnchor === t;
+    if (q(), g)
+      return { close: q, open: false };
   }
-  const o = document.createElement("div");
-  o.className = M(r, "participants-popup"), o.setAttribute("role", "dialog"), o.setAttribute("aria-label", "Conference participants"), o.dataset.castParticipantsPopup = "1", o.__castAnchor = t;
+  const s = document.createElement("div");
+  s.className = P(i, "participants-popup"), s.setAttribute("role", "dialog"), s.setAttribute("aria-label", "Conference participants"), s.dataset.castParticipantsPopup = "1", s.__castAnchor = t;
   const c = document.createElement("div");
-  c.className = M(r, "participants-popup-title"), c.textContent = "Participants", o.append(c);
+  c.className = P(i, "participants-popup-title"), c.textContent = "Participants", s.append(c);
   const l = document.createElement("div");
-  l.className = M(r, "participants-popup-list"), l.setAttribute("role", "list"), mn(l, n, r, i, true), o.append(l), s.appendChild(o);
+  l.className = P(i, "participants-popup-list"), l.setAttribute("role", "list"), En(l, n, i, r, true), s.append(l), o.appendChild(s);
   const h = () => {
-    const g = t.getBoundingClientRect(), y = 6, N = Math.max(220, Math.min(320, o.offsetWidth || 260));
-    let T = g.left, L = g.bottom + y;
-    const A = window.innerWidth - N - 8;
-    T > A && (T = Math.max(8, A)), L + o.offsetHeight > window.innerHeight - 8 && (L = Math.max(8, g.top - o.offsetHeight - y)), o.style.position = "fixed", o.style.left = `${Math.round(T)}px`, o.style.top = `${Math.round(L)}px`, o.style.zIndex = "10030", o.style.minWidth = "220px", o.style.maxWidth = "320px";
+    const g = t.getBoundingClientRect(), C = 6, N = Math.max(220, Math.min(320, s.offsetWidth || 260));
+    let $2 = g.left, A = g.bottom + C;
+    const E = window.innerWidth - N - 8;
+    $2 > E && ($2 = Math.max(8, E)), A + s.offsetHeight > window.innerHeight - 8 && (A = Math.max(8, g.top - s.offsetHeight - C)), s.style.position = "fixed", s.style.left = `${Math.round($2)}px`, s.style.top = `${Math.round(A)}px`, s.style.zIndex = "10030", s.style.minWidth = "220px", s.style.maxWidth = "320px";
   };
   h();
   const a = (g) => {
-    const y = g.target;
-    y instanceof Node && (o.contains(y) || t.contains(y) || O());
-  }, u = (g) => {
-    g.key === "Escape" && O();
-  }, f = () => h(), d = window.setTimeout(() => {
+    const C = g.target;
+    C instanceof Node && (s.contains(C) || t.contains(C) || q());
+  }, f = (g) => {
+    g.key === "Escape" && q();
+  }, u = () => h(), d = window.setTimeout(() => {
     document.addEventListener("pointerdown", a, true);
   }, 0);
-  return document.addEventListener("keydown", u, true), window.addEventListener("resize", f), H = { panel: o, cleanup: () => {
-    window.clearTimeout(d), document.removeEventListener("pointerdown", a, true), document.removeEventListener("keydown", u, true), window.removeEventListener("resize", f), o.remove();
-  } }, requestAnimationFrame(h), { close: O, open: true };
+  return document.addEventListener("keydown", f, true), window.addEventListener("resize", u), X = { panel: s, cleanup: () => {
+    window.clearTimeout(d), document.removeEventListener("pointerdown", a, true), document.removeEventListener("keydown", f, true), window.removeEventListener("resize", u), s.remove();
+  } }, requestAnimationFrame(h), { close: q, open: true };
 }
-function pn(e = {}) {
-  var f;
-  const t = W(e.strings), n = e.view ?? null, i = !!e.followHost, r = !!e.connected, s = !!((f = n == null ? void 0 : n.places) != null && f.length), o = (n == null ? void 0 : n.selfRole) === "leading", l = !!(n != null && n.isConferenceOwner) ? t.endConference : t.leaveConference, h = s && !o && i, a = s && !o && !i, u = r ? t.conferencing : t.subscribeHubFirst;
+function An(e = {}) {
+  var u;
+  const t = Z(e.strings), n = e.view ?? null, r = !!e.followHost, i = !!e.connected, o = !!((u = n == null ? void 0 : n.places) != null && u.length), s = (n == null ? void 0 : n.selfRole) === "leading", l = !!(n != null && n.isConferenceOwner) ? t.endConference : t.leaveConference, h = o && !s && r, a = o && !s && !r, f = i ? t.conferencing : t.subscribeHubFirst;
   return {
-    active: s,
+    active: o,
     start: {
-      hidden: s,
-      disabled: !r || s,
+      // Keep Conferencing available while active so User/topic + Manage stay reachable.
+      hidden: false,
+      disabled: !i,
       label: t.conferencing,
-      title: u,
+      title: f,
       ariaLabel: t.conferencing
     },
     leave: {
-      hidden: !s,
-      disabled: !r || !s,
+      hidden: !o,
+      disabled: !i || !o,
       label: l,
       title: l,
       ariaLabel: l
@@ -12583,418 +14596,516 @@ function pn(e = {}) {
     },
     takeOver: {
       hidden: !a,
-      disabled: !r || !a,
+      disabled: !i || !a,
       label: t.takeOver,
       title: t.takeOver,
       ariaLabel: t.takeOver
     }
   };
 }
-function re(e, t) {
+function fe(e, t) {
   e instanceof HTMLElement && (typeof t.hidden == "boolean" && (e.hidden = t.hidden), typeof t.disabled == "boolean" && "disabled" in e && (e.disabled = t.disabled, t.disabled || e.removeAttribute("disabled")), typeof t.label == "string" && (e.textContent = t.label), typeof t.title == "string" && (e.title = t.title), typeof t.ariaLabel == "string" && e.setAttribute("aria-label", t.ariaLabel));
 }
-function Vr(e = {}) {
-  const t = pn({
+function ci(e = {}) {
+  const t = An({
     view: e.view,
     followHost: e.followHost,
     connected: e.connected,
     strings: e.strings
   });
-  return re(e.startBtn, t.start), re(e.endBtn, t.leave), re(e.stopFollowBtn, t.stopFollowing), re(e.resumeFollowBtn, t.resumeFollowing), re(e.takeOverBtn, t.takeOver), t;
+  return fe(e.startBtn, t.start), fe(e.endBtn, t.leave), fe(e.stopFollowBtn, t.stopFollowing), fe(e.resumeFollowBtn, t.resumeFollowing), fe(e.takeOverBtn, t.takeOver), t;
 }
-function C(e, t) {
+function Lt(e, t, n = "cast-dialog-anchored") {
+  e instanceof HTMLElement && e.classList.remove(n), t instanceof HTMLElement && (t.style.top = "", t.style.left = "", t.style.right = "", t.style.bottom = "", t.style.maxWidth = "", t.style.position = "", t.style.margin = "");
+}
+function vn(e) {
+  const t = e == null ? void 0 : e.overlay, n = e == null ? void 0 : e.dialog, r = e == null ? void 0 : e.anchor, i = String((e == null ? void 0 : e.anchoredClass) || "cast-dialog-anchored").trim(), o = Number.isFinite(e == null ? void 0 : e.gap) ? Number(e.gap) : 6, s = Number.isFinite(e == null ? void 0 : e.pad) ? Number(e.pad) : 8, c = (e == null ? void 0 : e.align) === "end";
+  if (!(t instanceof HTMLElement) || !(n instanceof HTMLElement))
+    return;
+  if (!(r instanceof HTMLElement)) {
+    Lt(t, n, i);
+    return;
+  }
+  const l = r.getBoundingClientRect();
+  t.classList.add(i), n.style.position = "absolute", n.style.margin = "0";
+  const h = Math.max(
+    280,
+    Math.min(n.offsetWidth || 480, window.innerWidth - s * 2)
+  );
+  let a = c ? l.right - h : l.left, f = l.bottom + o;
+  const u = window.innerWidth - h - s;
+  a > u && (a = Math.max(s, u)), a < s && (a = s);
+  const d = n.offsetHeight || 280;
+  f + d > window.innerHeight - s && (f = Math.max(s, l.top - d - o)), n.style.left = `${Math.round(a)}px`, n.style.top = `${Math.round(f)}px`, n.style.maxWidth = `${Math.round(h)}px`;
+}
+function y(e, t) {
   return `${e}-${t}`;
 }
-function j(e) {
+function J(e) {
   return String(e ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function Jr(e, t) {
+function li(e, t) {
   const n = String(e || "").trim();
   if (!n) return false;
-  const i = D(t);
-  return i && (i === n || i.toLowerCase() === n.toLowerCase()) ? true : (Array.isArray(t == null ? void 0 : t.topics) ? t.topics : []).some((s) => {
-    const o = String(s || "").trim();
-    return o === n || o.toLowerCase() === n.toLowerCase();
+  const r = V(t);
+  return r && (r === n || r.toLowerCase() === n.toLowerCase()) ? true : (Array.isArray(t == null ? void 0 : t.topics) ? t.topics : []).some((o) => {
+    const s = String(o || "").trim();
+    return s === n || s.toLowerCase() === n.toLowerCase();
   });
 }
-function Zr(e) {
-  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, i = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, r = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim(), s = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
-  if (!s)
+function ui(e) {
+  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, r = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, i = typeof (e == null ? void 0 : e.onSessionControlClick) == "function" ? e.onSessionControlClick : null, o = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim(), s = (e == null ? void 0 : e.anchorAlign) === "end" ? "end" : "start", c = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
+  if (!c)
     throw new Error("createCastConferenceDialog requires a DOM root");
-  let o = W(e == null ? void 0 : e.strings), c = null, l = false, h = null;
-  const a = document.createElement("div");
-  a.className = C(r, "overlay"), a.hidden = true, a.innerHTML = `
-    <div class="${C(r, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${C(r, "title")}" tabindex="-1">
-      <div class="${C(r, "header")}">
-        <h2 id="${C(r, "title")}" class="${C(r, "title")}" data-cast-conference-dialog-title></h2>
-        <button type="button" class="${C(r, "close")}" data-cast-conference-close aria-label="">\xD7</button>
+  let l = Z(e == null ? void 0 : e.strings), h = null, a = false, f = null;
+  const u = document.createElement("div");
+  u.className = y(o, "overlay"), u.hidden = true, u.innerHTML = `
+    <div class="${y(o, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${y(o, "title")}" tabindex="-1">
+      <div class="${y(o, "header")}">
+        <h2 id="${y(o, "title")}" class="${y(o, "title")}" data-cast-conference-dialog-title></h2>
+        <button type="button" class="${y(o, "close")}" data-cast-conference-close aria-label="">\xD7</button>
       </div>
-      <div class="${C(r, "body")}">
-        <p class="${C(r, "status")}" data-cast-conference-status role="alert" hidden></p>
+      <div class="${y(o, "body")}">
+        <p class="${y(o, "status")}" data-cast-conference-status role="alert" hidden></p>
         <div data-cast-conference-create>
-          <div class="${C(r, "section")}">
-            <div class="${C(r, "section-title")}" data-cast-conference-create-section></div>
-            <div class="${C(r, "field")}">
-              <label class="${C(r, "label")}" for="${C(r, "title-select")}" data-cast-conference-title-label></label>
-              <select id="${C(r, "title-select")}" class="${C(r, "select")}" data-cast-conference-title-select>
+          <div class="${y(o, "section")}" data-cast-conference-create-form>
+            <div class="${y(o, "section-title")}" data-cast-conference-create-section></div>
+            <div class="${y(o, "field")}">
+              <label class="${y(o, "label")}" for="${y(o, "title-select")}" data-cast-conference-title-label></label>
+              <select id="${y(o, "title-select")}" class="${y(o, "select")}" data-cast-conference-title-select>
               </select>
             </div>
-            <div class="${C(r, "field")}" data-cast-conference-custom-group hidden>
-              <label class="${C(r, "label")}" for="${C(r, "custom-title")}" data-cast-conference-custom-label></label>
-              <input id="${C(r, "custom-title")}" class="${C(r, "input")}" type="text" data-cast-conference-custom-title />
+            <div class="${y(o, "field")}" data-cast-conference-custom-group hidden>
+              <label class="${y(o, "label")}" for="${y(o, "custom-title")}" data-cast-conference-custom-label></label>
+              <input id="${y(o, "custom-title")}" class="${y(o, "input")}" type="text" data-cast-conference-custom-title />
             </div>
-            <div class="${C(r, "field")}">
-              <span class="${C(r, "label")}" data-cast-conference-users-label></span>
-              <div class="${C(r, "topics")}" data-cast-conference-topics>
-                <p class="${C(r, "muted")}" data-cast-conference-loading-users></p>
+            <div class="${y(o, "field")}">
+              <span class="${y(o, "label")}" data-cast-conference-users-label></span>
+              <div class="${y(o, "topics")}" data-cast-conference-topics>
+                <p class="${y(o, "muted")}" data-cast-conference-loading-users></p>
               </div>
             </div>
-            <button type="button" class="${C(r, "primary")}" data-cast-conference-create-btn></button>
+            <button type="button" class="${y(o, "primary")}" data-cast-conference-create-btn></button>
           </div>
-          <div class="${C(r, "section")}" data-cast-conference-join-section>
-            <div class="${C(r, "section-title")}" data-cast-conference-join-section-title></div>
-            <div class="${C(r, "field")}">
-              <label class="${C(r, "label")}" for="${C(r, "join-select")}" data-cast-conference-active-label></label>
-              <select id="${C(r, "join-select")}" class="${C(r, "select")}" data-cast-conference-join-select>
+          <div class="${y(o, "section")}" data-cast-conference-join-section>
+            <div class="${y(o, "section-title")}" data-cast-conference-join-section-title></div>
+            <div class="${y(o, "field")}">
+              <label class="${y(o, "label")}" for="${y(o, "join-select")}" data-cast-conference-active-label></label>
+              <select id="${y(o, "join-select")}" class="${y(o, "select")}" data-cast-conference-join-select>
               </select>
             </div>
-            <button type="button" class="${C(r, "primary")}" data-cast-conference-join-btn disabled></button>
+            <button type="button" class="${y(o, "primary")}" data-cast-conference-join-btn disabled></button>
           </div>
         </div>
         <div data-cast-conference-manage hidden>
-          <div class="${C(r, "label")}" data-cast-conference-manage-label></div>
-          <div class="${C(r, "info")}" data-cast-conference-info></div>
-          <button type="button" class="${C(r, "primary")}" data-cast-conference-exit-btn></button>
+          <div class="${y(o, "label")}" data-cast-conference-manage-label></div>
+          <div class="${y(o, "info")}" data-cast-conference-info></div>
+          <button type="button" class="${y(o, "primary")}" data-cast-conference-exit-btn></button>
         </div>
       </div>
-      <div class="${C(r, "actions")}">
-        <button type="button" class="${C(r, "secondary")}" data-cast-conference-close data-cast-conference-close-label></button>
+      <div class="${y(o, "section")} ${y(o, "section-session")}" data-cast-conference-session>
+        <div class="${y(o, "session-row")}">
+          <button
+            type="button"
+            class="${y(o, "topic-btn")}"
+            data-cast-conference-topic-btn
+            aria-label="Session info"
+            title="Session info"
+          >
+            <span class="${y(o, "session-label")}" data-cast-conference-topic-label>\u2014</span>
+          </button>
+          <div class="${y(o, "lang-wrap")}">
+            <button
+              type="button"
+              id="langPickerBtn"
+              class="${y(o, "lang-btn")}"
+              aria-label="Language"
+              title="Language"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.25"/>
+                <path fill="none" stroke="currentColor" stroke-width="1.25" d="M2 8h12M8 2c1.8 1.8 2.7 3.7 2.7 6S9.8 12.2 8 14C6.2 12.2 5.3 10.3 5.3 8S6.2 3.8 8 2z"/>
+              </svg>
+            </button>
+            <ul id="langPickerMenu" class="${y(o, "lang-menu")}" role="listbox" hidden></ul>
+          </div>
+          <button
+            type="button"
+            class="${y(o, "secondary")} ${y(o, "session-close")}"
+            data-cast-conference-close
+            data-cast-conference-close-label
+          ></button>
+        </div>
       </div>
     </div>
-  `, s.appendChild(a);
-  const u = a.querySelector(`.${C(r, "dialog")}`), f = a.querySelector("[data-cast-conference-status]"), d = a.querySelector("[data-cast-conference-create]"), b = a.querySelector("[data-cast-conference-manage]");
-  a.querySelector("[data-cast-conference-join-section]");
-  const m = a.querySelector("[data-cast-conference-title-select]"), g = a.querySelector("[data-cast-conference-custom-group]"), y = a.querySelector("[data-cast-conference-custom-title]"), N = a.querySelector("[data-cast-conference-topics]"), T = a.querySelector("[data-cast-conference-join-select]"), L = a.querySelector("[data-cast-conference-info]"), A = a.querySelector("[data-cast-conference-create-btn]"), S = a.querySelector("[data-cast-conference-join-btn]"), x = a.querySelector("[data-cast-conference-exit-btn]");
-  function U() {
-    if (!(m instanceof HTMLSelectElement)) return;
-    const p = String(m.value || "");
-    m.replaceChildren();
-    const E = document.createElement("option");
-    E.value = "", E.textContent = o.selectConferenceTitle, m.appendChild(E);
-    for (const v of an) {
-      const k = document.createElement("option");
-      k.value = v, k.textContent = v, v === "ST-444 \xB7 Anatomie humaine" && (k.selected = true), m.appendChild(k);
-    }
+  `, c.appendChild(u);
+  const d = u.querySelector(`.${y(o, "dialog")}`), b = u.querySelector("[data-cast-conference-status]"), p = u.querySelector("[data-cast-conference-topic-btn]"), g = u.querySelector("[data-cast-conference-topic-label]"), C = u.querySelector("[data-cast-conference-create]"), N = u.querySelector(
+    "[data-cast-conference-create-form]"
+  ), $2 = u.querySelector("[data-cast-conference-manage]"), A = u.querySelector("[data-cast-conference-join-section]"), E = u.querySelector("[data-cast-conference-title-select]"), T = u.querySelector("[data-cast-conference-custom-group]"), I2 = u.querySelector("[data-cast-conference-custom-title]"), k = u.querySelector("[data-cast-conference-topics]"), x = u.querySelector("[data-cast-conference-join-select]"), Ot = u.querySelector("[data-cast-conference-info]"), F = u.querySelector("[data-cast-conference-create-btn]"), U = u.querySelector("[data-cast-conference-join-btn]"), O = u.querySelector("[data-cast-conference-exit-btn]");
+  function Pt(m) {
+    !C || !N || !A || (m ? C.insertBefore(A, N) : C.insertBefore(N, A));
+  }
+  function er() {
+    if (!(E instanceof HTMLSelectElement)) return;
+    const m = String(E.value || "");
+    E.replaceChildren();
     const w = document.createElement("option");
-    w.value = "other", w.textContent = o.otherTitle, m.appendChild(w), p && [...m.options].some((v) => v.value === p) && (m.value = p);
+    w.value = "", w.textContent = l.selectConferenceTitle, E.appendChild(w);
+    for (const L of mn) {
+      const v = document.createElement("option");
+      v.value = L, v.textContent = L, L === "ST-444 \xB7 Anatomie humaine" && (v.selected = true), E.appendChild(v);
+    }
+    const S = document.createElement("option");
+    S.value = "other", S.textContent = l.otherTitle, E.appendChild(S), m && [...E.options].some((L) => L.value === m) && (E.value = m);
   }
-  function kt() {
-    const p = (E, w) => {
-      const v = a.querySelector(E);
-      v && (v.textContent = w);
+  function Ft() {
+    var w;
+    const m = (S, L) => {
+      const v = u.querySelector(S);
+      v && (v.textContent = L);
     };
-    p("[data-cast-conference-dialog-title]", o.dialogTitle), p("[data-cast-conference-create-section]", o.createSection), p("[data-cast-conference-title-label]", o.conferenceTitle), p("[data-cast-conference-custom-label]", o.customTitle), p("[data-cast-conference-users-label]", o.users), p("[data-cast-conference-loading-users]", o.loadingUsers), p("[data-cast-conference-join-section-title]", o.joinSection), p("[data-cast-conference-active-label]", o.activeConferences), p("[data-cast-conference-manage-label]", o.manageSection), A && (A.textContent = o.createConference), S && (S.textContent = o.joinConference), x && (x.textContent = c != null && c.isConferenceOwner ? o.endConference : o.leaveConference), a.querySelectorAll("[data-cast-conference-close]").forEach((E) => {
-      E instanceof HTMLElement && (E.setAttribute("aria-label", o.closeAria), E.hasAttribute("data-cast-conference-close-label") && (E.textContent = o.close));
-    }), y instanceof HTMLInputElement && (y.placeholder = o.customTitlePlaceholder), U();
+    if (m("[data-cast-conference-dialog-title]", l.dialogTitle), m("[data-cast-conference-create-section]", l.createSection), m("[data-cast-conference-title-label]", l.conferenceTitle), m("[data-cast-conference-custom-label]", l.customTitle), m("[data-cast-conference-users-label]", l.users), m("[data-cast-conference-loading-users]", l.loadingUsers), m("[data-cast-conference-join-section-title]", l.joinSection), m("[data-cast-conference-active-label]", l.activeConferences), m("[data-cast-conference-manage-label]", l.manageSection), F && (F.textContent = l.createConference), U && (U.textContent = l.joinConference), O && (O.textContent = h != null && h.isConferenceOwner ? l.endConference : l.leaveConference), u.querySelectorAll("[data-cast-conference-close]").forEach((S) => {
+      S instanceof HTMLElement && (S.setAttribute("aria-label", l.closeAria), S.hasAttribute("data-cast-conference-close-label") && (S.textContent = l.close));
+    }), I2 instanceof HTMLInputElement && (I2.placeholder = l.customTitlePlaceholder), p instanceof HTMLElement) {
+      const S = (w = h == null ? void 0 : h.places) != null && w.length ? l.participantsAria : l.sessionInfo;
+      p.setAttribute("aria-label", S), p.title = S;
+    }
+    er();
   }
-  kt();
-  function $2(p, E) {
-    if (!f)
+  function Ye() {
+    var w;
+    const m = ce();
+    if (g instanceof HTMLElement && (g.textContent = m.topic || "\u2014"), p instanceof HTMLElement) {
+      const S = (w = h == null ? void 0 : h.places) != null && w.length ? l.participantsAria : l.sessionInfo, L = m.topic ? `${S} \u2014 ${m.topic}` : S;
+      p.setAttribute("aria-label", L), p.title = L;
+    }
+  }
+  Ft();
+  function R(m, w) {
+    if (!b)
       return;
-    const w = String(E || "").trim();
-    if (f.classList.remove(
-      C(r, "status-success"),
-      C(r, "status-error")
-    ), !w) {
-      f.hidden = true, f.textContent = "";
+    const S = String(w || "").trim();
+    if (b.classList.remove(
+      y(o, "status-success"),
+      y(o, "status-error")
+    ), !S) {
+      b.hidden = true, b.textContent = "";
       return;
     }
-    f.hidden = false, f.textContent = w, p === "success" ? f.classList.add(C(r, "status-success")) : p === "error" && f.classList.add(C(r, "status-error"));
+    b.hidden = false, b.textContent = S, m === "success" ? b.classList.add(y(o, "status-success")) : m === "error" && b.classList.add(y(o, "status-error"));
   }
-  function We(p) {
-    c = p, n && n(p);
+  function Ze(m) {
+    h = m, n && n(m);
   }
-  function Se() {
-    const p = t() || {};
+  function ce() {
+    const m = t() || {};
     return {
-      hubEndpoint: String(p.hubEndpoint ?? "").trim(),
-      topic: String(p.topic ?? "").trim(),
-      subscriberName: String(p.subscriberName ?? "").trim(),
-      userName: String(p.userName ?? "").trim(),
-      connected: !!p.connected
+      hubEndpoint: String(m.hubEndpoint ?? "").trim(),
+      topic: String(m.topic ?? "").trim(),
+      subscriberName: String(m.subscriberName ?? "").trim(),
+      userName: String(m.userName ?? "").trim(),
+      connected: !!m.connected
     };
   }
-  function zn() {
-    const p = String((m == null ? void 0 : m.value) || "").trim();
-    return p === "other" ? String((y == null ? void 0 : y.value) || "").trim() : p;
+  function tr() {
+    const m = String((E == null ? void 0 : E.value) || "").trim();
+    return m === "other" ? String((I2 == null ? void 0 : I2.value) || "").trim() : m;
   }
-  function Wn() {
-    return N ? Array.from(
-      N.querySelectorAll(
+  function nr() {
+    return k ? Array.from(
+      k.querySelectorAll(
         'input[type="checkbox"][data-cast-conference-topic]:checked'
       )
-    ).map((p) => String(p.value || "").trim()).filter(Boolean) : [];
+    ).map((m) => String(m.value || "").trim()).filter(Boolean) : [];
   }
-  function It(p) {
-    if (N) {
-      if (N.replaceChildren(), !p.length) {
-        const E = document.createElement("p");
-        E.className = C(r, "muted"), E.textContent = o.noUsers, N.appendChild(E);
+  function rr(m) {
+    var S;
+    const w = String(m || "").trim();
+    if (!w) return "";
+    try {
+      const v = (S = new Intl.DateTimeFormat("en", {
+        timeZone: w,
+        timeZoneName: "shortOffset"
+      }).formatToParts(/* @__PURE__ */ new Date()).find((_) => _.type === "timeZoneName")) == null ? void 0 : S.value;
+      return v ? `${w} (${v})` : w;
+    } catch {
+      return w;
+    }
+  }
+  function Dt(m) {
+    if (k) {
+      if (k.replaceChildren(), !m.length) {
+        const w = document.createElement("p");
+        w.className = y(o, "muted"), w.textContent = l.noUsers, k.appendChild(w);
         return;
       }
-      for (const E of p) {
-        const w = document.createElement("label");
-        w.className = C(r, "topic-row");
-        const v = document.createElement("input");
-        v.type = "checkbox", v.dataset.castConferenceTopic = "1", v.value = E, v.checked = true;
-        const k = document.createElement("span");
-        k.textContent = E, w.appendChild(v), w.appendChild(k), N.appendChild(w);
+      for (const w of m) {
+        const S = typeof w == "string" ? String(w).trim() : String((w == null ? void 0 : w.topic) ?? "").trim();
+        if (!S) continue;
+        const L = typeof w == "string" ? "" : String((w == null ? void 0 : w.timezone) ?? "").trim(), v = document.createElement("label");
+        v.className = y(o, "topic-row");
+        const _ = document.createElement("input");
+        _.type = "checkbox", _.dataset.castConferenceTopic = "1", _.value = S, _.checked = true;
+        const j = document.createElement("span");
+        j.className = y(o, "topic-label"), j.textContent = S, v.appendChild(_), v.appendChild(j);
+        const ue = rr(L);
+        if (ue) {
+          const z = document.createElement("span");
+          z.className = y(o, "topic-timezone"), z.textContent = ue, v.appendChild(z);
+        }
+        k.appendChild(v);
       }
     }
   }
-  function $t(p, E) {
-    if (!T || !S) return;
-    const w = (Array.isArray(p) ? p : []).filter(
-      (I2) => I2 && typeof I2 == "object" && !Jr(
-        E,
-        /** @type {Record<string, unknown>} */
-        I2
-      )
-    ), v = String(T.value || "");
-    if (T.replaceChildren(), !w.length) {
-      const I2 = document.createElement("option");
-      I2.value = "", I2.textContent = o.noConferences, T.appendChild(I2), T.disabled = true, S.disabled = true;
-      return;
-    }
-    const k = document.createElement("option");
-    k.value = "", k.textContent = o.selectConference, T.appendChild(k);
-    for (const I2 of w) {
-      const G = (
-        /** @type {Record<string, unknown>} */
-        I2
-      ), ne = D(G), we = String(G.title || "").trim() || o.untitled, Je = document.createElement("option");
-      Je.value = ne, Je.textContent = `${we} \u2014 ${ne}`, T.appendChild(Je);
-    }
-    T.disabled = false, v && w.some((I2) => D(
-      /** @type {Record<string, unknown>} */
-      I2
-    ) === v) && (T.value = v), S.disabled = !String(T.value || "").trim();
-  }
-  function Ge(p) {
-    if (d && (d.hidden = !!p), b && (b.hidden = !p), p && L) {
-      const E = p.places.length ? `<div class="${C(r, "places")}">${p.places.map((w) => {
-        const v = [C(r, "place")];
-        w.isSelf && v.push(C(r, "place-self")), w.isLeading && v.push(C(r, "place-leading")), w.isFollowing && v.push(C(r, "place-following"));
-        const k = w.statusLabel ? `<span class="${C(r, "place-status")}">${j(
-          w.statusLabel
-        )}</span>` : "";
-        return `<span class="${v.join(
-          " "
-        )}" title="${j(w.placeId)}"><span class="${C(
-          r,
-          "place-name"
-        )}">${j(w.label)}</span>${k}</span>`;
-      }).join("")}</div>` : `<div class="${C(r, "muted")}">${j(o.noPlaces)}</div>`;
-      L.innerHTML = `<div><strong>${j(o.titleLabel)}</strong> ${j(
-        p.title || o.na
-      )}</div><div class="${C(r, "places-label")}">${j(
-        o.participants
-      )}</div>${E}`;
-    }
-    x && (x.textContent = p != null && p.isConferenceOwner ? o.endConference : o.leaveConference);
-  }
-  async function te() {
-    const p = Se();
-    if (!p.hubEndpoint || !p.connected)
-      return It([]), $t([], p.topic), Ge(null), We(null), null;
-    const [E, w] = await Promise.all([
-      un(p.hubEndpoint),
-      ce(p.hubEndpoint)
-    ]), v = ae(
-      p.topic,
-      p.subscriberName,
-      w
-    ), k = gt(p, v);
-    return v || (It(E), $t(w, p.topic)), Ge(k), We(k), k;
-  }
-  async function Gn() {
-    if (l)
-      return;
-    const p = Se(), E = zn(), w = Wn();
-    if (!p.connected) {
-      $2("error", o.connectHubFirst);
-      return;
-    }
-    if (!p.topic) {
-      $2("error", o.topicRequiredHost);
-      return;
-    }
-    if (!E) {
-      $2("error", o.titleRequired);
-      return;
-    }
-    if (!w.length) {
-      $2("error", o.selectAttendee);
-      return;
-    }
-    l = true, A && (A.disabled = true, A.textContent = o.creating), $2("", "");
-    try {
-      await ln(
-        p.hubEndpoint,
-        p.topic,
-        E,
+  function Ht(m, w) {
+    if (!x || !U) return;
+    const S = (Array.isArray(m) ? m : []).filter(
+      (j) => j && typeof j == "object" && !li(
         w,
-        p.userName
-      ), await te(), B();
-    } catch (v) {
-      $2(
-        "error",
-        v instanceof Error ? v.message : o.failedCreate
-      );
-    } finally {
-      l = false, A && (A.disabled = false, A.textContent = o.createConference);
+        /** @type {Record<string, unknown>} */
+        j
+      )
+    ), L = String(x.value || "");
+    if (x.replaceChildren(), !S.length) {
+      x.replaceChildren(), x.disabled = true, U.disabled = true, A instanceof HTMLElement && (A.hidden = true), Pt(false);
+      return;
     }
+    A instanceof HTMLElement && (A.hidden = false);
+    const v = document.createElement("option");
+    v.value = "", v.textContent = l.selectConference, x.appendChild(v);
+    const _ = [];
+    for (const j of S) {
+      const ue = (
+        /** @type {Record<string, unknown>} */
+        j
+      ), z = V(ue);
+      if (!z) continue;
+      _.push(z);
+      const fr3 = String(ue.title || "").trim() || l.untitled, et = document.createElement("option");
+      et.value = z, et.textContent = `${fr3} \u2014 ${z}`, x.appendChild(et);
+    }
+    x.disabled = false, L && _.includes(L) ? x.value = L : _.length && (x.value = _[0]), U.disabled = !String(x.value || "").trim(), Pt(true);
   }
-  async function Vn() {
-    if (l) return;
-    const p = Se(), E = String((T == null ? void 0 : T.value) || "").trim();
-    if (!p.connected) {
-      $2("error", o.connectHubFirst);
-      return;
+  function Ke(m) {
+    if (Ye(), C && (C.hidden = !!m), $2 && ($2.hidden = !m), m && Ot) {
+      const w = m.places.length ? `<div class="${y(o, "places")}">${m.places.map((S) => {
+        const L = [y(o, "place")];
+        S.isSelf && L.push(y(o, "place-self")), S.isLeading && L.push(y(o, "place-leading")), S.isFollowing && L.push(y(o, "place-following"));
+        const v = S.statusLabel ? `<span class="${y(o, "place-status")}">${J(
+          S.statusLabel
+        )}</span>` : "";
+        return `<span class="${L.join(
+          " "
+        )}" title="${J(S.placeId)}"><span class="${y(
+          o,
+          "place-name"
+        )}">${J(S.label)}</span>${v}</span>`;
+      }).join("")}</div>` : `<div class="${y(o, "muted")}">${J(l.noPlaces)}</div>`;
+      Ot.innerHTML = `<div><strong>${J(l.titleLabel)}</strong> ${J(
+        m.title || l.na
+      )}</div><div class="${y(o, "places-label")}">${J(
+        l.participants
+      )}</div>${w}`;
     }
-    if (!p.topic) {
-      $2("error", o.topicRequiredJoin);
-      return;
-    }
-    if (!E) {
-      $2("error", o.selectConferenceToJoin);
-      return;
-    }
-    l = true, S && (S.disabled = true, S.textContent = o.joining), $2("", "");
-    try {
-      await fn(
-        p.hubEndpoint,
-        E,
-        p.topic,
-        p.userName
-      ), i == null || i(true), await te(), B();
-    } catch (w) {
-      $2(
-        "error",
-        w instanceof Error ? w.message : o.failedJoin
-      );
-    } finally {
-      l = false, S && (S.textContent = o.joinConference, S.disabled = !String((T == null ? void 0 : T.value) || "").trim());
-    }
+    O && (O.textContent = m != null && m.isConferenceOwner ? l.endConference : l.leaveConference);
   }
-  async function Jn() {
-    if (l)
+  async function le() {
+    const m = ce();
+    if (!m.hubEndpoint || !m.connected)
+      return Dt([]), Ht([], m.topic), Ke(null), Ze(null), null;
+    const [w, S] = await Promise.all([
+      gn(m.hubEndpoint),
+      pe(m.hubEndpoint)
+    ]), L = me(
+      m.topic,
+      m.subscriberName,
+      S
+    ), v = Et(m, L);
+    return L || (Dt(w), Ht(S, m.topic)), Ke(v), Ze(v), v;
+  }
+  async function ir() {
+    if (a)
       return;
-    const p = Se(), E = await ce(p.hubEndpoint), w = ae(
-      p.topic,
-      p.subscriberName,
-      E
-    );
+    const m = ce(), w = tr(), S = nr();
+    if (!m.connected) {
+      R("error", l.connectHubFirst);
+      return;
+    }
+    if (!m.topic) {
+      R("error", l.topicRequiredHost);
+      return;
+    }
     if (!w) {
-      await te();
+      R("error", l.titleRequired);
       return;
     }
-    const v = D(w), k = bt(p.topic, w);
-    l = true, x && (x.disabled = true, x.textContent = k ? o.ending : o.leaving), $2("", "");
+    if (!S.length) {
+      R("error", l.selectAttendee);
+      return;
+    }
+    a = true, F && (F.disabled = true, F.textContent = l.creating), R("", "");
     try {
-      await pt(
-        p.hubEndpoint,
-        v,
-        k ? void 0 : p.topic
-      ), We(null), $2(
-        "success",
-        k ? o.conferenceEnded : o.leftConference
-      ), await new Promise((I2) => {
-        setTimeout(I2, sn);
-      }), B();
-    } catch (I2) {
-      $2(
+      await yn(
+        m.hubEndpoint,
+        m.topic,
+        w,
+        S,
+        m.userName
+      ), await le(), G();
+    } catch (L) {
+      R(
         "error",
-        I2 instanceof Error ? I2.message : o.failedUpdate
+        L instanceof Error ? L.message : l.failedCreate
       );
     } finally {
-      l = false, x && (x.disabled = false, x.textContent = k ? o.endConference : o.leaveConference);
+      a = false, F && (F.disabled = false, F.textContent = l.createConference);
     }
   }
-  function _t() {
-    a.classList.remove(C(r, "overlay-anchored")), u instanceof HTMLElement && (u.style.top = "", u.style.left = "", u.style.right = "", u.style.bottom = "", u.style.maxWidth = "");
-  }
-  function Ve(p) {
-    if (!(u instanceof HTMLElement) || !(p instanceof HTMLElement)) {
-      _t();
+  async function or() {
+    if (a) return;
+    const m = ce(), w = String((x == null ? void 0 : x.value) || "").trim();
+    if (!m.connected) {
+      R("error", l.connectHubFirst);
       return;
     }
-    const E = p.getBoundingClientRect(), w = 8, v = 6;
-    a.classList.add(C(r, "overlay-anchored"));
-    const k = Math.max(
-      280,
-      Math.min(u.offsetWidth || 336, window.innerWidth - w * 2)
+    if (!m.topic) {
+      R("error", l.topicRequiredJoin);
+      return;
+    }
+    if (!w) {
+      R("error", l.selectConferenceToJoin);
+      return;
+    }
+    a = true, U && (U.disabled = true, U.textContent = l.joining), R("", "");
+    try {
+      await Cn(
+        m.hubEndpoint,
+        w,
+        m.topic,
+        m.userName
+      ), r == null || r(true), await le(), G();
+    } catch (S) {
+      R(
+        "error",
+        S instanceof Error ? S.message : l.failedJoin
+      );
+    } finally {
+      a = false, U && (U.textContent = l.joinConference, U.disabled = !String((x == null ? void 0 : x.value) || "").trim());
+    }
+  }
+  async function sr() {
+    if (a)
+      return;
+    const m = ce(), w = await pe(m.hubEndpoint), S = me(
+      m.topic,
+      m.subscriberName,
+      w
     );
-    let I2 = E.left, G = E.bottom + v;
-    const ne = window.innerWidth - k - w;
-    I2 > ne && (I2 = Math.max(w, ne)), I2 < w && (I2 = w);
-    const we = u.offsetHeight || 360;
-    G + we > window.innerHeight - w && (G = Math.max(w, E.top - we - v)), u.style.left = `${Math.round(I2)}px`, u.style.top = `${Math.round(G)}px`, u.style.maxWidth = `${Math.round(k)}px`;
+    if (!S) {
+      await le();
+      return;
+    }
+    const L = V(S), v = St(m.topic, S);
+    a = true, O && (O.disabled = true, O.textContent = v ? l.ending : l.leaving), R("", "");
+    try {
+      await Tt(
+        m.hubEndpoint,
+        L,
+        v ? void 0 : m.topic
+      ), Ze(null), R(
+        "success",
+        v ? l.conferenceEnded : l.leftConference
+      ), await new Promise((_) => {
+        setTimeout(_, bn);
+      }), G();
+    } catch (_) {
+      R(
+        "error",
+        _ instanceof Error ? _.message : l.failedUpdate
+      );
+    } finally {
+      a = false, O && (O.disabled = false, O.textContent = v ? l.endConference : l.leaveConference);
+    }
   }
-  function Zn(p) {
-    $2("", ""), m && (m.value = "ST-444 \xB7 Anatomie humaine"), y && (y.value = ""), g && (g.hidden = true), h = p instanceof HTMLElement ? p : null, a.hidden = false, Ve(h), u instanceof HTMLElement && u.focus({ preventScroll: true }), te().then(() => Ve(h)).catch(() => {
+  function ar3() {
+    Lt(
+      u,
+      d instanceof HTMLElement ? d : null,
+      y(o, "overlay-anchored")
+    );
+  }
+  function Qe(m) {
+    vn({
+      overlay: u,
+      dialog: d instanceof HTMLElement ? d : null,
+      anchor: m,
+      anchoredClass: y(o, "overlay-anchored"),
+      align: s
     });
   }
-  function B() {
-    a.hidden = true, $2("", ""), _t(), h = null;
-  }
-  function Yn() {
-    B(), a.remove();
-  }
-  function Kn(p) {
-    o = W(p), kt(), c && Ge(c);
-  }
-  return m == null || m.addEventListener("change", () => {
-    g && (g.hidden = String(m.value || "") !== "other");
-  }), T == null || T.addEventListener("change", () => {
-    S && (S.disabled = !String(T.value || "").trim() || l);
-  }), A == null || A.addEventListener("click", () => {
-    Gn().catch(() => {
+  function cr(m) {
+    R("", ""), Ye(), E && (E.value = "ST-444 \xB7 Anatomie humaine"), I2 && (I2.value = ""), T && (T.hidden = true), f = m instanceof HTMLElement ? m : null, u.hidden = false, Qe(f), d instanceof HTMLElement && d.focus({ preventScroll: true }), le().then(() => Qe(f)).catch(() => {
     });
-  }), S == null || S.addEventListener("click", () => {
-    Vn().catch(() => {
+  }
+  function G() {
+    u.hidden = true, R("", ""), ar3(), f = null;
+  }
+  function lr() {
+    G(), u.remove();
+  }
+  function ur(m) {
+    l = Z(m), Ft(), h && Ke(h);
+  }
+  return E == null || E.addEventListener("change", () => {
+    T && (T.hidden = String(E.value || "") !== "other");
+  }), x == null || x.addEventListener("change", () => {
+    U && (U.disabled = !String(x.value || "").trim() || a);
+  }), F == null || F.addEventListener("click", () => {
+    ir().catch(() => {
     });
-  }), x == null || x.addEventListener("click", () => {
-    Jn().catch(() => {
+  }), U == null || U.addEventListener("click", () => {
+    or().catch(() => {
     });
-  }), a.querySelectorAll("[data-cast-conference-close]").forEach((p) => {
-    p.addEventListener("click", () => B());
-  }), a.addEventListener("click", (p) => {
-    p.target === a && B();
+  }), O == null || O.addEventListener("click", () => {
+    sr().catch(() => {
+    });
+  }), p == null || p.addEventListener("click", (m) => {
+    m.stopPropagation(), p instanceof HTMLElement && i && i(p);
+  }), u.querySelectorAll("[data-cast-conference-close]").forEach((m) => {
+    m.addEventListener("click", () => G());
+  }), u.addEventListener("click", (m) => {
+    m.target === u && G();
   }), window.addEventListener("resize", () => {
-    a.hidden || Ve(h);
+    u.hidden || Qe(f);
   }), {
-    open: Zn,
-    close: B,
-    destroy: Yn,
-    refresh: te,
-    setStrings: Kn,
-    getView: () => c,
+    open: cr,
+    close: G,
+    destroy: lr,
+    refresh: le,
+    setStrings: ur,
+    syncSessionControl: Ye,
+    getSessionControl: () => ({
+      button: p instanceof HTMLElement ? p : null,
+      label: g instanceof HTMLElement ? g : null
+    }),
+    getView: () => h,
     get element() {
-      return a;
+      return u;
     }
   };
 }
-var et = "ID";
-function Yr(e = {}) {
-  const t = Array.isArray(e.selfActors) ? e.selfActors.map((s) => String(s || "").trim()).filter(Boolean) : [], n = Array.isArray(e.connectedActors) ? e.connectedActors.map((s) => String(s || "").trim()).filter(Boolean) : [];
+var st = "ID";
+function fi(e = {}) {
+  const t = Array.isArray(e.selfActors) ? e.selfActors.map((o) => String(o || "").trim()).filter(Boolean) : [], n = Array.isArray(e.connectedActors) ? e.connectedActors.map((o) => String(o || "").trim()).filter(Boolean) : [];
   return t.some(
-    (s) => s === et || s.toUpperCase() === "ID"
+    (o) => o === st || o.toUpperCase() === "ID"
   ) ? true : !n.some(
-    (s) => s === et || s.toUpperCase() === "ID"
+    (o) => o === st || o.toUpperCase() === "ID"
   );
 }
-function gn(e) {
+function Ln(e) {
   const t = e && typeof e == "object" ? (
     /** @type {{ event?: Record<string, unknown> }} */
     e.event
@@ -13004,220 +15115,220 @@ function gn(e) {
   const n = String(t["hub.event"] || "").trim().toLowerCase();
   if (n !== "conference-start" && n !== "conference-end" && n !== "conference-lead")
     return null;
-  const i = t.context && typeof t.context == "object" ? (
+  const r = t.context && typeof t.context == "object" ? (
     /** @type {Record<string, unknown>} */
     t.context
-  ) : {}, r = String(
-    i.hostTopic || t["hub.topic"] || ""
-  ).trim(), s = String(i.title || "").trim(), o = String(i.hostUserName || "").trim(), c = String(i.sceneLeaderTopic || "").trim(), l = String(
-    i.leaderUserName || i.leaderLabel || ""
-  ).trim(), h = l || c || o || r || "host", a = String(i.joinedTopic || "").trim();
+  ) : {}, i = String(
+    r.hostTopic || t["hub.topic"] || ""
+  ).trim(), o = String(r.title || "").trim(), s = String(r.hostUserName || "").trim(), c = String(r.sceneLeaderTopic || "").trim(), l = String(
+    r.leaderUserName || r.leaderLabel || ""
+  ).trim(), h = l || c || s || i || "host", a = String(r.joinedTopic || "").trim();
   return {
     hubEvent: n,
-    title: s,
-    hostTopic: r,
-    hostUserName: o,
-    hostLabel: o || r || "host",
+    title: o,
+    hostTopic: i,
+    hostUserName: s,
+    hostLabel: s || i || "host",
     sceneLeaderTopic: c,
     leaderUserName: l,
     leaderLabel: h,
     joinedTopic: a
   };
 }
-function _(e, t) {
+function M(e, t) {
   return `${e}-${t}`;
 }
-function yn(e = {}) {
+function Nn(e = {}) {
   const t = typeof e.onDecision == "function" ? e.onDecision : null, n = String(
     e.classPrefix || "cast-conference-invite"
-  ).trim(), i = e.root || (typeof document < "u" ? document.body : null);
-  if (!i)
+  ).trim(), r = e.root || (typeof document < "u" ? document.body : null);
+  if (!r)
     throw new Error("createCastConferenceInviteDialog requires a DOM root");
-  let r = W(e.strings), s = null, o = false;
+  let i = Z(e.strings), o = null, s = false;
   const c = document.createElement("div");
-  c.className = _(n, "overlay"), c.hidden = true, c.innerHTML = `
-    <div class="${_(n, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${_(n, "title")}" tabindex="-1">
-      <div class="${_(n, "header")}">
-        <h2 id="${_(n, "title")}" class="${_(n, "title")}" data-cast-invite-title></h2>
-        <button type="button" class="${_(n, "close")}" data-cast-invite-close aria-label="">\xD7</button>
+  c.className = M(n, "overlay"), c.hidden = true, c.innerHTML = `
+    <div class="${M(n, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${M(n, "title")}" tabindex="-1">
+      <div class="${M(n, "header")}">
+        <h2 id="${M(n, "title")}" class="${M(n, "title")}" data-cast-invite-title></h2>
+        <button type="button" class="${M(n, "close")}" data-cast-invite-close aria-label="">\xD7</button>
       </div>
-      <div class="${_(n, "body")}">
-        <p class="${_(n, "lead")}" data-cast-invite-lead></p>
-        <p class="${_(n, "status")}" data-cast-invite-status role="alert" hidden></p>
-        <div class="${_(n, "actions")}">
-          <button type="button" class="${_(n, "primary")}" data-cast-invite-follow></button>
-          <button type="button" class="${_(n, "secondary")}" data-cast-invite-join></button>
-          <button type="button" class="${_(n, "secondary")}" data-cast-invite-decline></button>
+      <div class="${M(n, "body")}">
+        <p class="${M(n, "lead")}" data-cast-invite-lead></p>
+        <p class="${M(n, "status")}" data-cast-invite-status role="alert" hidden></p>
+        <div class="${M(n, "actions")}">
+          <button type="button" class="${M(n, "primary")}" data-cast-invite-follow></button>
+          <button type="button" class="${M(n, "secondary")}" data-cast-invite-join></button>
+          <button type="button" class="${M(n, "secondary")}" data-cast-invite-decline></button>
         </div>
       </div>
     </div>
-  `, i.appendChild(c);
-  const l = c.querySelector(`.${_(n, "dialog")}`), h = c.querySelector("[data-cast-invite-title]"), a = c.querySelector("[data-cast-invite-lead]"), u = c.querySelector("[data-cast-invite-status]"), f = c.querySelector("[data-cast-invite-follow]"), d = c.querySelector("[data-cast-invite-join]"), b = c.querySelector("[data-cast-invite-decline]"), m = c.querySelector("[data-cast-invite-close]");
+  `, r.appendChild(c);
+  const l = c.querySelector(`.${M(n, "dialog")}`), h = c.querySelector("[data-cast-invite-title]"), a = c.querySelector("[data-cast-invite-lead]"), f = c.querySelector("[data-cast-invite-status]"), u = c.querySelector("[data-cast-invite-follow]"), d = c.querySelector("[data-cast-invite-join]"), b = c.querySelector("[data-cast-invite-decline]"), p = c.querySelector("[data-cast-invite-close]");
   function g() {
-    h && (h.textContent = r.inviteTitle), d && (d.textContent = r.joinNoFollow), b && (b.textContent = r.doNotJoin), m instanceof HTMLElement && m.setAttribute("aria-label", r.closeAria), f && s ? f.textContent = ie(
-      r.joinAndFollowHost,
-      { host: s.hostLabel || r.hostFallback }
-    ) : f && (f.textContent = r.joinAndFollow);
+    h && (h.textContent = i.inviteTitle), d && (d.textContent = i.joinNoFollow), b && (b.textContent = i.doNotJoin), p instanceof HTMLElement && p.setAttribute("aria-label", i.closeAria), u && o ? u.textContent = de3(
+      i.joinAndFollowHost,
+      { host: o.hostLabel || i.hostFallback }
+    ) : u && (u.textContent = i.joinAndFollow);
   }
   g();
-  function y(S, x) {
-    if (!(u instanceof HTMLElement)) return;
-    const U = String(x || "").trim();
-    u.hidden = !U, u.textContent = U, u.classList.toggle(_(n, "status-error"), S === "error");
+  function C(T, I2) {
+    if (!(f instanceof HTMLElement)) return;
+    const k = String(I2 || "").trim();
+    f.hidden = !k, f.textContent = k, f.classList.toggle(M(n, "status-error"), T === "error");
   }
-  function N(S) {
-    o = S;
-    for (const x of [f, d, b])
-      x instanceof HTMLButtonElement && (x.disabled = S);
+  function N(T) {
+    s = T;
+    for (const I2 of [u, d, b])
+      I2 instanceof HTMLButtonElement && (I2.disabled = T);
   }
-  function T() {
-    c.hidden = true, s = null, y("", ""), N(false);
+  function $2() {
+    c.hidden = true, o = null, C("", ""), N(false);
   }
-  function L(S) {
-    const x = String(
-      (S == null ? void 0 : S.hostLabel) || (S == null ? void 0 : S.hostUserName) || (S == null ? void 0 : S.hostTopic) || r.hostFallback
-    ).trim() || r.hostFallback, U = String((S == null ? void 0 : S.title) || "").trim();
-    s = {
+  function A(T) {
+    const I2 = String(
+      (T == null ? void 0 : T.hostLabel) || (T == null ? void 0 : T.hostUserName) || (T == null ? void 0 : T.hostTopic) || i.hostFallback
+    ).trim() || i.hostFallback, k = String((T == null ? void 0 : T.title) || "").trim();
+    o = {
       hubEvent: "conference-start",
-      title: U,
-      hostTopic: String((S == null ? void 0 : S.hostTopic) || "").trim(),
-      hostUserName: String((S == null ? void 0 : S.hostUserName) || "").trim(),
-      hostLabel: x
-    }, a instanceof HTMLElement && (a.textContent = U ? ie(r.inviteLeadWithTitle, {
-      title: U,
-      host: x
-    }) : ie(r.inviteLeadNoTitle, {
-      host: x
-    })), f instanceof HTMLElement && (f.textContent = ie(
-      r.joinAndFollowHost,
-      { host: x }
-    )), y("", ""), c.hidden = false, l instanceof HTMLElement && l.focus({ preventScroll: true });
+      title: k,
+      hostTopic: String((T == null ? void 0 : T.hostTopic) || "").trim(),
+      hostUserName: String((T == null ? void 0 : T.hostUserName) || "").trim(),
+      hostLabel: I2
+    }, a instanceof HTMLElement && (a.textContent = k ? de3(i.inviteLeadWithTitle, {
+      title: k,
+      host: I2
+    }) : de3(i.inviteLeadNoTitle, {
+      host: I2
+    })), u instanceof HTMLElement && (u.textContent = de3(
+      i.joinAndFollowHost,
+      { host: I2 }
+    )), C("", ""), c.hidden = false, l instanceof HTMLElement && l.focus({ preventScroll: true });
   }
-  async function A(S) {
-    if (o || !s) return;
-    const x = s;
+  async function E(T) {
+    if (s || !o) return;
+    const I2 = o;
     N(true);
     try {
-      t && await t(S, x), T();
-    } catch (U) {
-      y(
+      t && await t(T, I2), $2();
+    } catch (k) {
+      C(
         "error",
-        U instanceof Error ? U.message : r.failedUpdate
+        k instanceof Error ? k.message : i.failedUpdate
       ), N(false);
     }
   }
-  return f == null || f.addEventListener("click", () => {
-    A("join-follow");
+  return u == null || u.addEventListener("click", () => {
+    E("join-follow");
   }), d == null || d.addEventListener("click", () => {
-    A("join");
+    E("join");
   }), b == null || b.addEventListener("click", () => {
-    A("decline");
-  }), c.querySelectorAll("[data-cast-invite-close]").forEach((S) => {
-    S.addEventListener("click", () => T());
-  }), c.addEventListener("click", (S) => {
-    S.target === c && T();
+    E("decline");
+  }), c.querySelectorAll("[data-cast-invite-close]").forEach((T) => {
+    T.addEventListener("click", () => $2());
+  }), c.addEventListener("click", (T) => {
+    T.target === c && $2();
   }), {
-    open: L,
-    close: T,
+    open: A,
+    close: $2,
     /**
      * @param {Partial<import('./conferenceStrings.js').CastConferenceStrings> | null | undefined} next
      */
-    setStrings(S) {
-      r = W(S), g(), s && !c.hidden && L(s);
+    setStrings(T) {
+      i = Z(T), g(), o && !c.hidden && A(o);
     },
     destroy() {
-      T(), c.remove();
+      $2(), c.remove();
     },
     isOpen() {
       return !c.hidden;
     },
     getInvite() {
-      return s;
+      return o;
     },
     element: c
   };
 }
-function Kr(e) {
-  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.shouldShow) == "function" ? e.shouldShow : () => true, i = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, r = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, s = typeof (e == null ? void 0 : e.onLeadChange) == "function" ? e.onLeadChange : null, o = (e == null ? void 0 : e.dialog) || yn({
+function di(e) {
+  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.shouldShow) == "function" ? e.shouldShow : () => true, r = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, i = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, o = typeof (e == null ? void 0 : e.onLeadChange) == "function" ? e.onLeadChange : null, s = (e == null ? void 0 : e.dialog) || Nn({
     root: e == null ? void 0 : e.root,
     classPrefix: e == null ? void 0 : e.classPrefix,
     strings: e == null ? void 0 : e.strings,
-    onDecision: async (a, u) => {
-      await l(a, u);
+    onDecision: async (a, f) => {
+      await l(a, f);
     }
   });
   async function c() {
-    const a = t(), u = await dn(
+    const a = t(), f = await Sn(
       a.hubEndpoint || "",
       a.topic || "",
       a.subscriberName || "",
       a.userName || ""
     );
-    return i == null || i(u), u;
+    return r == null || r(f), f;
   }
-  async function l(a, u) {
-    const f = t(), d = String((u == null ? void 0 : u.hostTopic) || "").trim();
+  async function l(a, f) {
+    const u = t(), d = String((f == null ? void 0 : f.hostTopic) || "").trim();
     if (!d)
       throw new Error("Missing conference host topic.");
     if (a === "decline") {
-      await pt(
-        f.hubEndpoint || "",
+      await Tt(
+        u.hubEndpoint || "",
         d,
-        f.topic || ""
-      ), r == null || r(false), i == null || i(null);
+        u.topic || ""
+      ), i == null || i(false), r == null || r(null);
       return;
     }
     const b = a === "join-follow";
-    r == null || r(b, b ? u : void 0), await c();
+    i == null || i(b, b ? f : void 0), await c();
   }
   function h(a) {
-    const u = gn(a);
-    if (!u) return false;
-    const f = t(), d = String(f.topic || "").trim();
-    if (u.hubEvent === "conference-lead") {
-      const m = String(u.sceneLeaderTopic || "").trim(), g = !!d && !!m && (d === m || d.toLowerCase() === m.toLowerCase());
-      return r == null || r(!g, u), c().then(() => {
-        s == null || s(u);
+    const f = Ln(a);
+    if (!f) return false;
+    const u = t(), d = String(u.topic || "").trim();
+    if (f.hubEvent === "conference-lead") {
+      const p = String(f.sceneLeaderTopic || "").trim(), g = !!d && !!p && (d === p || d.toLowerCase() === p.toLowerCase());
+      return i == null || i(!g, f), c().then(() => {
+        o == null || o(f);
       }), true;
     }
-    if (u.hubEvent === "conference-end") {
-      const m = (
+    if (f.hubEvent === "conference-end") {
+      const p = (
         /** @type {{ context?: Record<string, unknown> }} */
         a.event || {}
-      ), g = m.context && typeof m.context == "object" ? m.context : {}, y = String(g.leaveTopic || "").trim();
-      return !y || y === d ? (o.close(), r == null || r(false), i == null || i(null)) : c(), true;
+      ), g = p.context && typeof p.context == "object" ? p.context : {}, C = String(g.leaveTopic || "").trim();
+      return !C || C === d ? (s.close(), i == null || i(false), r == null || r(null)) : c(), true;
     }
-    if (d && u.hostTopic && (d === u.hostTopic || d.toLowerCase() === u.hostTopic.toLowerCase()))
-      return r == null || r(false), c(), true;
-    const b = String(u.joinedTopic || "").trim();
-    return d && b && (d === b || d.toLowerCase() === b.toLowerCase()) ? (r == null || r(true, u), c(), true) : n() ? (o.open(u), c(), true) : (c(), true);
+    if (d && f.hostTopic && (d === f.hostTopic || d.toLowerCase() === f.hostTopic.toLowerCase()))
+      return i == null || i(false), c(), true;
+    const b = String(f.joinedTopic || "").trim();
+    return d && b && (d === b || d.toLowerCase() === b.toLowerCase()) ? (i == null || i(true, f), c(), true) : n() ? (s.open(f), c(), true) : (c(), true);
   }
   return {
     handleHubMessage: h,
-    open: (a) => o.open(a),
-    close: () => o.close(),
-    destroy: () => o.destroy(),
+    open: (a) => s.open(a),
+    close: () => s.close(),
+    destroy: () => s.destroy(),
     refresh: c,
     /**
      * @param {Partial<import('./conferenceStrings.js').CastConferenceStrings> | null | undefined} next
      */
     setStrings(a) {
-      var u;
-      (u = o.setStrings) == null || u.call(o, a);
+      var f;
+      (f = s.setStrings) == null || f.call(s, a);
     },
-    dialog: o
+    dialog: s
   };
 }
-function Xr(e = {}) {
+function hi(e = {}) {
   return new Promise((t) => {
     if (typeof document > "u") {
       t(false);
       return;
     }
-    const n = W(e.strings), i = String(
+    const n = Z(e.strings), r = String(
       e.classPrefix || "cast-conference-takeover"
-    ).trim(), r = e.root || document.body, s = document.createElement("div");
-    s.className = `${i}-overlay`, s.setAttribute("role", "presentation"), s.style.cssText = [
+    ).trim(), i = e.root || document.body, o = document.createElement("div");
+    o.className = `${r}-overlay`, o.setAttribute("role", "presentation"), o.style.cssText = [
       "position:fixed",
       "inset:0",
       "z-index:10040",
@@ -13227,8 +15338,8 @@ function Xr(e = {}) {
       "background:rgba(0,0,0,.45)",
       "padding:16px"
     ].join(";");
-    const o = document.createElement("div");
-    o.className = `${i}-dialog`, o.setAttribute("role", "dialog"), o.setAttribute("aria-modal", "true"), o.setAttribute("aria-labelledby", `${i}-title`), o.tabIndex = -1, o.style.cssText = [
+    const s = document.createElement("div");
+    s.className = `${r}-dialog`, s.setAttribute("role", "dialog"), s.setAttribute("aria-modal", "true"), s.setAttribute("aria-labelledby", `${r}-title`), s.tabIndex = -1, s.style.cssText = [
       "width:min(420px,100%)",
       "background:#121820",
       "color:#e8eef8",
@@ -13237,39 +15348,39 @@ function Xr(e = {}) {
       "box-shadow:0 16px 40px rgba(0,0,0,.4)",
       "padding:18px 18px 14px",
       "font:14px/1.45 -apple-system,system-ui,sans-serif"
-    ].join(";"), o.innerHTML = `
-      <h2 id="${i}-title" style="margin:0 0 10px;font:700 16px/1.3 -apple-system,system-ui,sans-serif;"></h2>
+    ].join(";"), s.innerHTML = `
+      <h2 id="${r}-title" style="margin:0 0 10px;font:700 16px/1.3 -apple-system,system-ui,sans-serif;"></h2>
       <p data-cast-takeover-body style="margin:0 0 16px;opacity:.92;"></p>
       <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
         <button type="button" data-cast-takeover-cancel style="padding:7px 12px;border-radius:6px;border:1px solid #4a628a;background:#1a2332;color:#e8eef8;cursor:pointer;font:600 13px -apple-system,system-ui,sans-serif;"></button>
         <button type="button" data-cast-takeover-confirm style="padding:7px 12px;border-radius:6px;border:1px solid #2b6cb0;background:#2b6cb0;color:#fff;cursor:pointer;font:600 13px -apple-system,system-ui,sans-serif;"></button>
       </div>
     `;
-    const c = o.querySelector(`#${i}-title`), l = o.querySelector("[data-cast-takeover-body]"), h = o.querySelector("[data-cast-takeover-cancel]"), a = o.querySelector("[data-cast-takeover-confirm]");
-    c && (c.textContent = n.takeoverTitle), l && (l.textContent = n.takeoverBody), h && (h.textContent = n.cancel), a && (a.textContent = n.takeOver), s.appendChild(o), r.appendChild(s);
-    let u = false;
-    const f = (d) => {
-      u || (u = true, s.remove(), t(!!d));
+    const c = s.querySelector(`#${r}-title`), l = s.querySelector("[data-cast-takeover-body]"), h = s.querySelector("[data-cast-takeover-cancel]"), a = s.querySelector("[data-cast-takeover-confirm]");
+    c && (c.textContent = n.takeoverTitle), l && (l.textContent = n.takeoverBody), h && (h.textContent = n.cancel), a && (a.textContent = n.takeOver), o.appendChild(s), i.appendChild(o);
+    let f = false;
+    const u = (d) => {
+      f || (f = true, o.remove(), t(!!d));
     };
-    s.addEventListener("click", (d) => {
-      d.target === s && f(false);
-    }), h == null || h.addEventListener("click", () => f(false)), a == null || a.addEventListener("click", () => f(true)), o.addEventListener("keydown", (d) => {
-      d.key === "Escape" && (d.preventDefault(), f(false));
-    }), o.focus({ preventScroll: true });
+    o.addEventListener("click", (d) => {
+      d.target === o && u(false);
+    }), h == null || h.addEventListener("click", () => u(false)), a == null || a.addEventListener("click", () => u(true)), s.addEventListener("keydown", (d) => {
+      d.key === "Escape" && (d.preventDefault(), u(false));
+    }), s.focus({ preventScroll: true });
   });
 }
-function Qr(e, t = {}) {
+function bi(e, t = {}) {
   var l;
   const n = String(e || "").trim();
   if (!n || typeof document > "u")
     return;
-  const i = Math.max(1e3, Number(t.ms) || 4e3), r = String(t.classPrefix || "cast-info-toast").trim(), s = t.root || (typeof document < "u" ? document.body : null);
-  if (!s)
+  const r = Math.max(1e3, Number(t.ms) || 4e3), i = String(t.classPrefix || "cast-info-toast").trim(), o = t.root || (typeof document < "u" ? document.body : null);
+  if (!o)
     return;
-  const o = (l = s.querySelector) == null ? void 0 : l.call(s, `.${r}`);
-  o && o.remove();
+  const s = (l = o.querySelector) == null ? void 0 : l.call(o, `.${i}`);
+  s && s.remove();
   const c = document.createElement("div");
-  c.className = r, c.setAttribute("role", "status"), c.textContent = n, c.style.cssText = [
+  c.className = i, c.setAttribute("role", "status"), c.textContent = n, c.style.cssText = [
     "position:fixed",
     "left:50%",
     "bottom:28px",
@@ -13283,62 +15394,62 @@ function Qr(e, t = {}) {
     "font:600 13px/1.35 -apple-system,system-ui,sans-serif",
     "box-shadow:0 8px 28px rgba(0,0,0,.35)",
     "pointer-events:none"
-  ].join(";"), s.appendChild(c), window.setTimeout(() => {
+  ].join(";"), o.appendChild(c), window.setTimeout(() => {
     c.remove();
-  }, i);
+  }, r);
 }
-var me = "http://fhircast.hl7.org/StructureDefinition/fhircast-imaging-study-open";
-var pe = "urn:dicom:uid";
-var St = "urn:cast:nifti-url";
-var wt = "urn:cast:nifti-filename";
-var Ie = "urn:cast:volview-sample-id";
-var Q = "urn:cast:worklist-sample-id";
-var $e = "urn:cast:ohif-mode";
-var ee = "urn:cast:open-mode";
-var ue = "dicomweb";
-var _e = "dicom-url";
-var Y = "files";
-var Ue = "idc";
-var Me = "local-dicom";
+var Ee = "http://fhircast.hl7.org/StructureDefinition/fhircast-imaging-study-open";
+var Ae = "urn:dicom:uid";
+var Nt = "urn:cast:nifti-url";
+var xt = "urn:cast:nifti-filename";
+var Re = "urn:cast:volview-sample-id";
+var oe = "urn:cast:worklist-sample-id";
+var Me = "urn:cast:ohif-mode";
+var se = "urn:cast:open-mode";
+var ge = "dicomweb";
+var Oe = "dicom-url";
+var ne = "files";
 var Pe = "idc";
-var Re = "idc-source-bucket";
-var Et = "urn:cast:dicomweb-root";
-function P(e) {
+var Fe = "local-dicom";
+var De = "idc";
+var He = "idc-source-bucket";
+var It = "urn:cast:dicomweb-root";
+function D(e) {
   return typeof e != "string" ? "" : e.trim().replace(/^urn:oid:/i, "");
 }
-function Bt(e) {
+function Jt(e) {
   return typeof e == "string" ? e.trim().toLowerCase() : "";
 }
-function X(e, t) {
+function ie(e, t) {
   if (!Array.isArray(e))
     return null;
-  const n = String(t || "").trim().toLowerCase(), i = e.find(
-    (r) => r && typeof r == "object" && typeof r.key == "string" && r.key.trim().toLowerCase() === n
+  const n = String(t || "").trim().toLowerCase(), r = e.find(
+    (i) => i && typeof i == "object" && typeof i.key == "string" && i.key.trim().toLowerCase() === n
   );
-  return !(i != null && i.resource) || typeof i.resource != "object" ? null : i.resource;
+  return !(r != null && r.resource) || typeof r.resource != "object" ? null : r.resource;
 }
-function R(e, t) {
-  const n = X(e, "study");
+function H(e, t) {
+  const n = ie(e, "study");
   if (!n)
     return "";
-  const i = Array.isArray(n.identifier) ? n.identifier : [], r = Bt(t), s = i.find(
-    (o) => Bt(o == null ? void 0 : o.system) === r
+  const r = Array.isArray(n.identifier) ? n.identifier : [], i = Jt(t), o = r.find(
+    (s) => Jt(s == null ? void 0 : s.system) === i
   );
-  return typeof (s == null ? void 0 : s.value) == "string" ? s.value.trim() : "";
+  return typeof (o == null ? void 0 : o.value) == "string" ? o.value.trim() : "";
 }
-function J(e) {
-  const t = X(e, "study");
-  return t ? P(t.uid) || P(R(e, pe)) : "";
+function ee(e) {
+  const t = ie(e, "study");
+  return t ? D(t.uid) || D(H(e, Ae)) : "";
 }
-function V(e) {
-  const t = X(e, "series");
+function Q(e) {
+  const t = ie(e, "series");
   if (t)
-    return P(t.uid);
-  const n = X(e, "study"), r = (Array.isArray(n == null ? void 0 : n.series) ? n.series : [])[0];
-  return !r || typeof r != "object" ? "" : P(r.uid);
+    return D(t.uid);
+  const n = ie(e, "study"), i = (Array.isArray(n == null ? void 0 : n.series) ? n.series : [])[0];
+  return !i || typeof i != "object" ? "" : D(i.uid);
 }
-function tt(e) {
-  const t = R(e, Et);
+function at(e) {
+  const t = H(e, It);
   if (!t)
     return "";
   try {
@@ -13350,8 +15461,8 @@ function tt(e) {
   }
   return "";
 }
-function le(e) {
-  const t = R(e, St);
+function ye(e) {
+  const t = H(e, Nt);
   if (!t)
     return "";
   try {
@@ -13363,105 +15474,105 @@ function le(e) {
   }
   return "";
 }
-function Tt(e) {
-  return R(e, wt);
+function kt(e) {
+  return H(e, xt);
 }
-function Cn(e) {
-  return R(e, $e);
+function xn(e) {
+  return H(e, Me);
 }
-function Sn(e) {
-  return R(e, Ie) || R(e, Q);
+function In(e) {
+  return H(e, Re) || H(e, oe);
 }
-function ei(e) {
+function mi(e) {
   return typeof e.url == "string" ? e.url.trim() : typeof e.uri == "string" ? e.uri.trim() : "";
 }
-function ti(e) {
+function pi(e) {
   return typeof e.fileName == "string" ? e.fileName.trim() : typeof e.filename == "string" ? e.filename.trim() : "";
 }
-var ni = /* @__PURE__ */ new Set(["http:", "https:", "s3:", "gs:"]);
-function Fe(e) {
+var gi = /* @__PURE__ */ new Set(["http:", "https:", "s3:", "gs:"]);
+function Be(e) {
   if (!e || typeof e != "object")
     return null;
-  const t = ei(e);
+  const t = mi(e);
   if (!t)
     return null;
   try {
-    const o = new URL(t);
-    if (!ni.has(o.protocol))
+    const s = new URL(t);
+    if (!gi.has(s.protocol))
       return null;
   } catch {
     return null;
   }
-  const n = ti(e), i = typeof e.mimeType == "string" ? e.mimeType.trim() : "", r = typeof e.role == "string" ? e.role.trim() : "", s = typeof e.label == "string" ? e.label.trim() : "";
+  const n = pi(e), r = typeof e.mimeType == "string" ? e.mimeType.trim() : "", i = typeof e.role == "string" ? e.role.trim() : "", o = typeof e.label == "string" ? e.label.trim() : "";
   return {
     url: t,
     fileName: n,
-    mimeType: i,
-    role: r,
-    label: s
+    mimeType: r,
+    role: i,
+    label: o
   };
 }
-function K(e) {
-  const t = X(e, "files"), i = (Array.isArray(t == null ? void 0 : t.files) ? t.files : []).map((s) => Fe(s)).filter((s) => s !== null);
-  if (i.length > 0)
-    return i;
-  const r = le(e);
-  return r ? [
+function re(e) {
+  const t = ie(e, "files"), r = (Array.isArray(t == null ? void 0 : t.files) ? t.files : []).map((o) => Be(o)).filter((o) => o !== null);
+  if (r.length > 0)
+    return r;
+  const i = ye(e);
+  return i ? [
     {
-      url: r,
-      fileName: Tt(e),
+      url: i,
+      fileName: kt(e),
       mimeType: "",
       role: "",
       label: ""
     }
   ] : [];
 }
-function nt(e) {
-  return P(R(e, Pe));
+function ct(e) {
+  return D(H(e, De));
 }
-function rt(e) {
-  return R(
+function lt3(e) {
+  return H(
     e,
-    Re
+    He
   ).toLowerCase() === "gcs" ? "gcs" : "aws";
 }
-function wn(e) {
-  const t = R(e, ee);
-  return t === ue || t === _e || t === Y || t === Ue || t === Me ? t : K(e).length > 0 || le(e) ? Y : J(e) && !le(e) ? ue : "";
+function kn(e) {
+  const t = H(e, se);
+  return t === ge || t === Oe || t === ne || t === Pe || t === Fe ? t : re(e).length > 0 || ye(e) ? ne : ee(e) && !ye(e) ? ge : "";
 }
-function En({
+function $n({
   id: e,
   files: t,
   patientReference: n,
-  openMode: i,
-  includeLegacyNiftiIdentifiers: r = false
+  openMode: r,
+  includeLegacyNiftiIdentifiers: i = false
 }) {
-  const s = String(e || "").trim() || "study", o = (Array.isArray(t) ? t : []).map((a) => Fe(a)).filter((a) => a !== null), c = [
-    { system: ee, value: i },
+  const o = String(e || "").trim() || "study", s = (Array.isArray(t) ? t : []).map((a) => Be(a)).filter((a) => a !== null), c = [
+    { system: se, value: r },
     {
-      system: Q,
-      value: s
+      system: oe,
+      value: o
     },
     {
-      system: Ie,
-      value: s
+      system: Re,
+      value: o
     }
   ];
-  if (r && o.length === 1) {
-    const [a] = o;
+  if (i && s.length === 1) {
+    const [a] = s;
     c.push({
-      system: St,
+      system: Nt,
       value: a.url
     }), a.fileName && c.push({
-      system: wt,
+      system: xt,
       value: a.fileName
     });
   }
   const l = {
     resourceType: "ImagingStudy",
-    id: s,
+    id: o,
     meta: {
-      profile: [me]
+      profile: [Ee]
     },
     identifier: c,
     status: "available"
@@ -13473,10 +15584,10 @@ function En({
       resource: l
     }
   ];
-  return o.length > 0 && h.push({
+  return s.length > 0 && h.push({
     key: "files",
     resource: {
-      files: o.map((a) => ({
+      files: s.map((a) => ({
         url: a.url,
         fileName: a.fileName || void 0,
         mimeType: a.mimeType || void 0,
@@ -13486,80 +15597,80 @@ function En({
     }
   }), h;
 }
-function Tn({
+function _n({
   id: e,
   files: t,
   patientReference: n,
-  includeLegacyNiftiIdentifiers: i = true
+  includeLegacyNiftiIdentifiers: r = true
 }) {
-  return En({
+  return $n({
     id: e,
     files: t,
     patientReference: n,
-    openMode: Y,
-    includeLegacyNiftiIdentifiers: i
+    openMode: ne,
+    includeLegacyNiftiIdentifiers: r
   });
 }
-function ri({
+function yi({
   id: e,
   files: t,
   patientReference: n
 }) {
-  return En({
+  return $n({
     id: e,
     files: t,
     patientReference: n,
-    openMode: _e,
+    openMode: Oe,
     includeLegacyNiftiIdentifiers: false
   });
 }
-function ii({
+function Ci({
   id: e,
   studyInstanceUID: t,
   seriesInstanceUID: n,
-  dicomwebRoot: i,
-  patientReference: r,
-  ohifMode: s,
-  files: o,
+  dicomwebRoot: r,
+  patientReference: i,
+  ohifMode: o,
+  files: s,
   sourceBucket: c
 }) {
-  const l = String(e || "").trim() || "study", h = P(t), a = P(n), u = String(i || "").trim().replace(/\/$/, ""), f = [
-    { system: ee, value: ue },
-    { system: pe, value: h },
+  const l = String(e || "").trim() || "study", h = D(t), a = D(n), f = String(r || "").trim().replace(/\/$/, ""), u = [
+    { system: se, value: ge },
+    { system: Ae, value: h },
     {
-      system: Q,
+      system: oe,
       value: l
     }
   ];
-  u && f.push({ system: Et, value: u });
-  const d = String(s || "").trim();
-  d && f.push({
-    system: $e,
+  f && u.push({ system: It, value: f });
+  const d = String(o || "").trim();
+  d && u.push({
+    system: Me,
     value: d
   });
-  const b = (Array.isArray(o) ? o : []).map((y) => Fe(y)).filter((y) => y !== null);
+  const b = (Array.isArray(s) ? s : []).map((C) => Be(C)).filter((C) => C !== null);
   if (b.length > 0) {
-    const y = String(c || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws";
-    f.push({
-      system: Re,
-      value: y
-    }), a && f.push({ system: Pe, value: a });
+    const C = String(c || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws";
+    u.push({
+      system: He,
+      value: C
+    }), a && u.push({ system: De, value: a });
   }
-  const m = {
+  const p = {
     resourceType: "ImagingStudy",
     id: l,
     uid: h,
     meta: {
-      profile: [me]
+      profile: [Ee]
     },
-    identifier: f,
+    identifier: u,
     status: "available"
   };
-  r && (m.subject = { reference: String(r).trim() });
+  i && (p.subject = { reference: String(i).trim() });
   const g = [
     {
       key: "study",
-      resource: m
+      resource: p
     }
   ];
   return a && g.push({
@@ -13571,80 +15682,80 @@ function ii({
   }), b.length > 0 && g.push({
     key: "files",
     resource: {
-      files: b.map((y) => ({
-        url: y.url,
-        fileName: y.fileName || void 0,
-        mimeType: y.mimeType || void 0,
-        role: y.role || void 0,
-        label: y.label || void 0
+      files: b.map((C) => ({
+        url: C.url,
+        fileName: C.fileName || void 0,
+        mimeType: C.mimeType || void 0,
+        role: C.role || void 0,
+        label: C.label || void 0
       }))
     }
   }), g;
 }
-function oi({
+function Si({
   id: e,
   studyInstanceUID: t,
   seriesInstanceUID: n,
-  patientReference: i
+  patientReference: r
 }) {
-  const r = String(e || "").trim() || "study", s = P(t), o = P(n), l = {
+  const i = String(e || "").trim() || "study", o = D(t), s = D(n), l = {
     resourceType: "ImagingStudy",
-    id: r,
-    uid: s,
+    id: i,
+    uid: o,
     meta: {
-      profile: [me]
+      profile: [Ee]
     },
     identifier: [
-      { system: ee, value: Me },
-      { system: pe, value: s },
+      { system: se, value: Fe },
+      { system: Ae, value: o },
       {
-        system: Q,
-        value: r
+        system: oe,
+        value: i
       }
     ],
     status: "available"
   };
-  i && (l.subject = { reference: String(i).trim() });
+  r && (l.subject = { reference: String(r).trim() });
   const h = [
     {
       key: "study",
       resource: l
     }
   ];
-  return o && h.push({
+  return s && h.push({
     key: "series",
     resource: {
       resourceType: "ImagingStudy",
-      uid: o
+      uid: s
     }
   }), h;
 }
-function si({
+function wi({
   id: e,
   studyInstanceUID: t,
   seriesInstanceUID: n,
-  sourceBucket: i,
-  files: r,
-  patientReference: s,
-  ohifMode: o
+  sourceBucket: r,
+  files: i,
+  patientReference: o,
+  ohifMode: s
 }) {
-  const c = String(e || "").trim() || "study", l = P(t), h = P(n), a = String(i || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws", u = (Array.isArray(r) ? r : []).map((g) => Fe(g)).filter((g) => g !== null), f = [
-    { system: ee, value: Ue },
-    { system: pe, value: l },
+  const c = String(e || "").trim() || "study", l = D(t), h = D(n), a = String(r || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws", f = (Array.isArray(i) ? i : []).map((g) => Be(g)).filter((g) => g !== null), u = [
+    { system: se, value: Pe },
+    { system: Ae, value: l },
     {
-      system: Q,
+      system: oe,
       value: c
     },
     {
-      system: Ie,
+      system: Re,
       value: c
     },
-    { system: Re, value: a }
+    { system: He, value: a }
   ];
-  h && f.push({ system: Pe, value: h });
-  const d = String(o || "").trim();
-  d && f.push({
-    system: $e,
+  h && u.push({ system: De, value: h });
+  const d = String(s || "").trim();
+  d && u.push({
+    system: Me,
     value: d
   });
   const b = {
@@ -13652,28 +15763,28 @@ function si({
     id: c,
     uid: l,
     meta: {
-      profile: [me]
+      profile: [Ee]
     },
-    identifier: f,
+    identifier: u,
     status: "available"
   };
-  s && (b.subject = { reference: String(s).trim() });
-  const m = [
+  o && (b.subject = { reference: String(o).trim() });
+  const p = [
     {
       key: "study",
       resource: b
     }
   ];
-  return h && m.push({
+  return h && p.push({
     key: "series",
     resource: {
       resourceType: "ImagingStudy",
       uid: h
     }
-  }), u.length > 0 && m.push({
+  }), f.length > 0 && p.push({
     key: "files",
     resource: {
-      files: u.map((g) => ({
+      files: f.map((g) => ({
         url: g.url,
         fileName: g.fileName || void 0,
         mimeType: g.mimeType || void 0,
@@ -13681,158 +15792,135 @@ function si({
         label: g.label || void 0
       }))
     }
-  }), m;
+  }), p;
 }
-function ai({
+function Ti({
   id: e,
   url: t,
   filename: n,
-  patientReference: i
+  patientReference: r
 }) {
-  return Tn({
+  return _n({
     id: e,
     files: [{ url: t, fileName: n }],
-    patientReference: i,
+    patientReference: r,
     includeLegacyNiftiIdentifiers: true
   });
 }
-function vt(e) {
+function $t(e) {
   if (Array.isArray(e) || !e || typeof e != "object")
     return e;
-  const t = Object.entries(e).reduce((n, [i, r]) => (r && typeof r == "object" && !Array.isArray(r) && n.push({ key: i, resource: r }), n), []);
+  const t = Object.entries(e).reduce((n, [r, i]) => (i && typeof i == "object" && !Array.isArray(i) && n.push({ key: r, resource: i }), n), []);
   return t.length ? t : e;
 }
-function jt(e, t, n) {
-  const i = vt(e), r = K(i);
-  return r.length === 0 ? null : { mode: "files", studyId: t, files: r, ohifMode: n };
+function Xt(e, t, n) {
+  const r = $t(e), i = re(r);
+  return i.length === 0 ? null : { mode: "files", studyId: t, files: i, ohifMode: n };
 }
-function ci(e) {
-  const t = vt(e), n = Sn(t) || "study", i = wn(t), r = Cn(t) || void 0;
-  if (i === ue) {
-    const l = J(t);
+function Ei(e) {
+  const t = $t(e), n = In(t) || "study", r = kn(t), i = xn(t) || void 0;
+  if (r === ge) {
+    const l = ee(t);
     if (!l)
       return null;
     const h = {
       mode: "dicomweb",
       studyId: n,
       studyInstanceUID: l,
-      seriesInstanceUID: V(t) || void 0,
-      dicomwebRoot: tt(t) || void 0,
-      ohifMode: r
-    }, a = K(t);
+      seriesInstanceUID: Q(t) || void 0,
+      dicomwebRoot: at(t) || void 0,
+      ohifMode: i
+    }, a = re(t);
     return a.length > 0 && (h.idcFallback = {
       studyInstanceUID: l,
-      seriesInstanceUID: nt(t) || V(t) || void 0,
-      sourceBucket: rt(t),
+      seriesInstanceUID: ct(t) || Q(t) || void 0,
+      sourceBucket: lt3(t),
       files: a
     }), h;
   }
-  if (i === Y) {
-    const l = jt(t, n, r);
+  if (r === ne) {
+    const l = Xt(t, n, i);
     if (l)
       return l;
   }
-  if (i === _e) {
-    const l = K(t);
-    return l.length ? { mode: "dicom-url", studyId: n, files: l, ohifMode: r } : null;
+  if (r === Oe) {
+    const l = re(t);
+    return l.length ? { mode: "dicom-url", studyId: n, files: l, ohifMode: i } : null;
   }
-  if (i === Ue) {
-    const l = J(t);
+  if (r === Pe) {
+    const l = ee(t);
     if (!l)
       return null;
-    const h = K(t);
+    const h = re(t);
     return h.length ? {
       mode: "idc",
       studyId: n,
       studyInstanceUID: l,
-      seriesInstanceUID: nt(t) || V(t) || void 0,
-      sourceBucket: rt(t),
+      seriesInstanceUID: ct(t) || Q(t) || void 0,
+      sourceBucket: lt3(t),
       files: h,
-      ohifMode: r
+      ohifMode: i
     } : null;
   }
-  if (i === Me) {
-    const l = J(t);
+  if (r === Fe) {
+    const l = ee(t);
     return l ? {
       mode: "local-dicom",
       studyId: n,
       studyInstanceUID: l,
-      seriesInstanceUID: V(t) || void 0,
-      ohifMode: r
+      seriesInstanceUID: Q(t) || void 0,
+      ohifMode: i
     } : null;
   }
-  const s = jt(t, n, r);
-  if (s)
-    return s;
-  const o = le(t);
-  if (o) {
-    const l = Tt(t);
+  const o = Xt(t, n, i);
+  if (o)
+    return o;
+  const s = ye(t);
+  if (s) {
+    const l = kt(t);
     return {
       mode: "files",
       studyId: n,
-      files: [{ url: o, fileName: l || "volume.nii.gz", label: n }],
-      ohifMode: r
+      files: [{ url: s, fileName: l || "volume.nii.gz", label: n }],
+      ohifMode: i
     };
   }
-  const c = J(t);
+  const c = ee(t);
   return c ? {
     mode: "dicomweb",
     studyId: n,
     studyInstanceUID: c,
-    seriesInstanceUID: V(t) || void 0,
-    dicomwebRoot: tt(t) || void 0,
-    ohifMode: r
+    seriesInstanceUID: Q(t) || void 0,
+    dicomwebRoot: at(t) || void 0,
+    ohifMode: i
   } : null;
 }
-function it(e) {
+function ut(e) {
   return typeof e != "string" ? "" : e.trim().replace(/^urn:oid:/i, "");
 }
-function ui(e) {
+function Ai(e) {
   if (!e || typeof e != "object")
     return "";
-  const t = it(e.uid);
+  const t = ut(e.uid);
   if (t)
     return t;
-  const i = (Array.isArray(e.identifier) ? e.identifier : []).find(
-    (r) => typeof (r == null ? void 0 : r.system) == "string" && r.system.toLowerCase() === "urn:dicom:uid"
+  const r = (Array.isArray(e.identifier) ? e.identifier : []).find(
+    (i) => typeof (i == null ? void 0 : i.system) == "string" && i.system.toLowerCase() === "urn:dicom:uid"
   );
-  return it(i == null ? void 0 : i.value);
+  return ut(r == null ? void 0 : r.value);
 }
-function vn(e, t, n = "cast-dialog-anchored") {
-  e instanceof HTMLElement && e.classList.remove(n), t instanceof HTMLElement && (t.style.top = "", t.style.left = "", t.style.right = "", t.style.bottom = "", t.style.maxWidth = "", t.style.position = "", t.style.margin = "");
-}
-function li(e) {
-  const t = e == null ? void 0 : e.overlay, n = e == null ? void 0 : e.dialog, i = e == null ? void 0 : e.anchor, r = String((e == null ? void 0 : e.anchoredClass) || "cast-dialog-anchored").trim(), s = Number.isFinite(e == null ? void 0 : e.gap) ? Number(e.gap) : 6, o = Number.isFinite(e == null ? void 0 : e.pad) ? Number(e.pad) : 8;
-  if (!(t instanceof HTMLElement) || !(n instanceof HTMLElement))
-    return;
-  if (!(i instanceof HTMLElement)) {
-    vn(t, n, r);
-    return;
-  }
-  const c = i.getBoundingClientRect();
-  t.classList.add(r), n.style.position = "absolute", n.style.margin = "0";
-  const l = Math.max(
-    280,
-    Math.min(n.offsetWidth || 480, window.innerWidth - o * 2)
-  );
-  let h = c.left, a = c.bottom + s;
-  const u = window.innerWidth - l - o;
-  h > u && (h = Math.max(o, u)), h < o && (h = o);
-  const f = n.offsetHeight || 280;
-  a + f > window.innerHeight - o && (a = Math.max(o, c.top - f - s)), n.style.left = `${Math.round(h)}px`, n.style.top = `${Math.round(a)}px`, n.style.maxWidth = `${Math.round(l)}px`;
-}
-function ge(e) {
+function ve(e) {
   const t = e == null ? void 0 : e["hub.event"];
   return typeof t == "string" ? t.trim().toLowerCase() : "";
 }
-function Ln(e) {
+function Un(e) {
   return typeof e == "string" ? e.trim().toUpperCase() : !e || typeof e != "object" ? "" : (typeof e.keyword == "string" && e.keyword || typeof e.id == "string" && e.id || typeof e.key == "string" && e.key || "").trim().toUpperCase();
 }
-function fi(e) {
+function vi(e) {
   const t = e == null ? void 0 : e["target.actor"];
-  return t == null ? "" : Ln(t);
+  return t == null ? "" : Un(t);
 }
-function di(e) {
+function Li(e) {
   if (!Array.isArray(e))
     return [];
   try {
@@ -13845,129 +15933,129 @@ function di(e) {
     }
   }
 }
-function hi(e) {
+function Ni(e) {
   const t = e == null ? void 0 : e.event;
   return t && typeof t == "object" && t.context != null ? t.context : [];
 }
-function bi(e) {
+function xi(e) {
   return String(
     (e == null ? void 0 : e["subscriber.name"]) || (e == null ? void 0 : e.subscriber) || ""
   ).trim() || null;
 }
-function mi(e) {
+function Ii(e) {
   return String((e == null ? void 0 : e["subscriber.product.name"]) || "").trim();
 }
-function pi(e) {
+function ki(e) {
   const t = String((e == null ? void 0 : e["subscriber.actor"]) || "").trim();
   if (t)
     return t;
   const n = e == null ? void 0 : e["subscriber.actors"];
   if (Array.isArray(n))
-    for (const i of n) {
-      const r = String(i || "").trim();
-      if (r)
-        return r;
+    for (const r of n) {
+      const i = String(r || "").trim();
+      if (i)
+        return i;
     }
   return "";
 }
-function gi(e) {
+function $i(e) {
   const t = e == null ? void 0 : e.event;
-  if (ge(t) !== "status-update")
+  if (ve(t) !== "status-update")
     return null;
   const n = t != null && t.context && typeof t.context == "object" && !Array.isArray(t.context) ? t.context : {};
   return { message: String(n.message ?? "").trim(), level: String(n.level ?? "info") };
 }
-function yi(e) {
+function _i(e) {
   const t = atob(e), n = new Uint8Array(t.length);
-  for (let i = 0; i < t.length; i += 1)
-    n[i] = t.charCodeAt(i);
+  for (let r = 0; r < t.length; r += 1)
+    n[r] = t.charCodeAt(r);
   return n;
 }
-function An(e) {
+function Rn(e) {
   try {
-    const t = yi(e), n = new ArrayBuffer(t.byteLength);
+    const t = _i(e), n = new ArrayBuffer(t.byteLength);
     return new Uint8Array(n).set(t), n;
   } catch {
     return null;
   }
 }
-function Nn(e) {
+function Mn(e) {
   const t = e == null ? void 0 : e.context;
   if (!t || typeof t != "object" || Array.isArray(t))
     return [];
   const n = t.files;
-  return Array.isArray(n) ? n.filter((i) => !!(i && typeof i == "object")) : [];
+  return Array.isArray(n) ? n.filter((r) => !!(r && typeof r == "object")) : [];
 }
-function Ci(e) {
+function Ui(e) {
   const t = e == null ? void 0 : e.context;
   return Array.isArray(t) ? t : t != null ? [t] : [];
 }
-function Ht(e, t, n) {
+function Yt(e, t, n) {
   return e instanceof ArrayBuffer ? { arrayBuffer: e, fileName: t, mimeType: n } : typeof e == "string" && e ? { fileName: t, data: e, mimeType: n } : null;
 }
-function xn(e) {
+function On(e) {
   return e === "nifti-send" ? "application/vnd.unknown.nifti-1" : "application/dicom";
 }
-function Si(e, t) {
+function Ri(e, t) {
   return e === "nifti-send" ? `cast-nifti-send-${t + 1}.nii.gz` : `cast-dicom-send-${t + 1}.dcm`;
 }
-function wi(e, t) {
+function Mi(e, t) {
   return e === "nifti-send" ? `cast-nifti-send-${t + 1}.nii.gz` : "dicom-sr.dcm";
 }
-function Ei(e, t) {
-  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : xn(t);
+function Oi(e, t) {
+  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : On(t);
 }
-function Ti(e, t) {
-  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : typeof e.contentType == "string" && e.contentType.trim() ? e.contentType.trim() : xn(t);
+function Pi(e, t) {
+  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : typeof e.contentType == "string" && e.contentType.trim() ? e.contentType.trim() : On(t);
 }
-function vi(e, t) {
+function Fi(e, t) {
   const n = e == null ? void 0 : e.event;
-  if (ge(n) !== t.toLowerCase())
+  if (ve(n) !== t.toLowerCase())
     return [];
-  const i = Nn(n);
-  if (i.length) {
-    const s = i.map((o, c) => {
-      const l = Ei(o, t), h = typeof o.fileName == "string" && o.fileName.trim() ? o.fileName.trim() : Si(t, c);
-      return Ht(o.data, h, l);
+  const r = Mn(n);
+  if (r.length) {
+    const o = r.map((s, c) => {
+      const l = Oi(s, t), h = typeof s.fileName == "string" && s.fileName.trim() ? s.fileName.trim() : Ri(t, c);
+      return Yt(s.data, h, l);
     }).filter(Boolean);
-    if (s.length)
-      return s;
+    if (o.length)
+      return o;
   }
-  return Ci(n).map((s, o) => {
-    if (!s || typeof s != "object")
+  return Ui(n).map((o, s) => {
+    if (!o || typeof o != "object")
       return null;
-    const c = s.resource;
+    const c = o.resource;
     if (!c || typeof c != "object")
       return null;
-    const l = Ti(c, t), h = typeof c.fileName == "string" && c.fileName.trim() ? c.fileName.trim() : wi(t, o);
-    return Ht(c.data, h, l);
+    const l = Pi(c, t), h = typeof c.fileName == "string" && c.fileName.trim() ? c.fileName.trim() : Mi(t, s);
+    return Yt(c.data, h, l);
   }).filter(Boolean);
 }
-function kn(e) {
-  return (e == null ? void 0 : e.arrayBuffer) instanceof ArrayBuffer ? e.arrayBuffer : typeof (e == null ? void 0 : e.data) == "string" ? An(e.data) : null;
+function Pn(e) {
+  return (e == null ? void 0 : e.arrayBuffer) instanceof ArrayBuffer ? e.arrayBuffer : typeof (e == null ? void 0 : e.data) == "string" ? Rn(e.data) : null;
 }
-function Li(e, t, n) {
-  const i = kn(e);
-  if (!i)
+function Di(e, t, n) {
+  const r = Pn(e);
+  if (!r)
     return null;
-  const r = (e == null ? void 0 : e.fileName) || t, s = (e == null ? void 0 : e.mimeType) || n;
-  return new File([i], r, { type: s });
+  const i = (e == null ? void 0 : e.fileName) || t, o = (e == null ? void 0 : e.mimeType) || n;
+  return new File([r], i, { type: o });
 }
-var qt = 4e3;
-var Ai = 480;
-var ve = "[binary/redacted]";
-function Le(e, t) {
-  return t > 8 ? "[max-depth]" : e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? ve : typeof e == "string" ? e.length > Ai ? `${e.slice(0, 160)}\u2026 (${e.length} chars)` : e : Array.isArray(e) ? e.map((n) => Le(n, t + 1)) : e && typeof e == "object" ? Object.entries(e).reduce((n, [i, r]) => (i.toLowerCase() === "data" && typeof r == "string" && r.length > 200 ? n[i] = ve : n[i] = Le(r, t + 1), n), {}) : e;
+var Zt = 4e3;
+var Hi = 480;
+var xe = "[binary/redacted]";
+function Ie(e, t) {
+  return t > 8 ? "[max-depth]" : e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? xe : typeof e == "string" ? e.length > Hi ? `${e.slice(0, 160)}\u2026 (${e.length} chars)` : e : Array.isArray(e) ? e.map((n) => Ie(n, t + 1)) : e && typeof e == "object" ? Object.entries(e).reduce((n, [r, i]) => (r.toLowerCase() === "data" && typeof i == "string" && i.length > 200 ? n[r] = xe : n[r] = Ie(i, t + 1), n), {}) : e;
 }
-function ot(e) {
+function ft(e) {
   try {
-    const t = JSON.stringify(Le(e, 0));
-    return t.length > qt ? `${t.slice(0, qt)}\u2026` : t;
+    const t = JSON.stringify(Ie(e, 0));
+    return t.length > Zt ? `${t.slice(0, Zt)}\u2026` : t;
   } catch {
     return "[unserializable]";
   }
 }
-function Lt(e) {
+function _t(e) {
   if (!e)
     return 0;
   const { context: t } = e;
@@ -13979,280 +16067,347 @@ function Lt(e) {
   }
   return 0;
 }
-function In(e, t) {
+function Fn(e, t) {
   if (!e)
     return t === 1 ? "1 object" : `${t} objects`;
   if (t === 0)
     return e;
-  const n = e === "dicom-send" || e === "nifti-send" ? "image" : "object", i = t === 1 ? n : `${n}s`;
-  return `${e} (${t} ${i})`;
+  const n = e === "dicom-send" || e === "nifti-send" ? "image" : "object", r = t === 1 ? n : `${n}s`;
+  return `${e} (${t} ${r})`;
 }
-function Ni(e) {
-  const t = e != null && e.event && typeof e.event == "object" ? e.event : void 0, i = ge(t) || "publish", r = Lt(t);
-  return { label: In(i, r), detail: "" };
+function Bi(e) {
+  const t = e != null && e.event && typeof e.event == "object" ? e.event : void 0, r = ve(t) || "publish", i = _t(t);
+  return { label: Fn(r, i), detail: "" };
 }
-function xi(e) {
+function ji(e) {
   if (!e || typeof e != "object")
-    return { label: "raw", detail: ot(e) };
-  const t = e.event, i = ge(t) || (typeof (t == null ? void 0 : t.event) == "string" ? String(t.event) : "message"), r = Lt(t);
-  return { label: In(i, r), detail: ot(e) };
+    return { label: "raw", detail: ft(e) };
+  const t = e.event, r = ve(t) || (typeof (t == null ? void 0 : t.event) == "string" ? String(t.event) : "message"), i = _t(t);
+  return { label: Fn(r, i), detail: ft(e) };
 }
-function ki(e) {
-  return Le(e, 0);
+function qi(e) {
+  return Ie(e, 0);
 }
-var q = "*";
-var Oe = "ID";
-var Ii = {
-  subscriberName: q,
-  subscriberActor: Oe,
-  targetActor: q,
-  targetProductName: q
+var Y = "*";
+var je = "ID";
+var zi = {
+  subscriberName: Y,
+  subscriberActor: je,
+  targetActor: Y,
+  targetProductName: Y
 };
-function fe(e) {
-  return String(e ?? "").trim() || q;
+function Ce(e) {
+  return String(e ?? "").trim() || Y;
 }
-function $i(e, t) {
+function Wi(e, t) {
   return {
-    subscriberName: (e.subscriberName ?? "").trim() || t.subscriberName || q,
-    subscriberActor: (e.subscriberActor ?? "").trim() || Oe,
-    targetActor: fe(e.targetActor),
-    targetProductName: fe(e.targetProductName)
+    subscriberName: (e.subscriberName ?? "").trim() || t.subscriberName || Y,
+    subscriberActor: (e.subscriberActor ?? "").trim() || je,
+    targetActor: Ce(e.targetActor),
+    targetProductName: Ce(e.targetProductName)
   };
 }
-function _i(e, t) {
-  e["subscriber.name"] = t.subscriberName.trim() || q, e["subscriber.actor"] = t.subscriberActor.trim() || Oe, e["target.actor"] = fe(t.targetActor), e["target.product.name"] = fe(
+function Vi(e, t) {
+  e["subscriber.name"] = t.subscriberName.trim() || Y, e["subscriber.actor"] = t.subscriberActor.trim() || je, e["target.actor"] = Ce(t.targetActor), e["target.product.name"] = Ce(
     t.targetProductName
   );
 }
-function $n(e) {
+function Dn(e) {
   const t = e == null ? void 0 : e.event;
-  return !!(t && Ye(t));
+  return !!(t && nt(t));
 }
-async function Ui(e, t) {
-  var r, s;
-  if (!(((r = e == null ? void 0 : e.hasPendingPayload) == null ? void 0 : r.call(e, t)) || $n(t)))
+async function Gi(e, t) {
+  var i, o;
+  if (!(((i = e == null ? void 0 : e.hasPendingPayload) == null ? void 0 : i.call(e, t)) || Dn(t)))
     return t;
-  let i = t;
+  let r = t;
   if (e != null && e.fetchAllPayloads)
-    i = await e.fetchAllPayloads(t);
+    r = await e.fetchAllPayloads(t);
   else if (e != null && e.fetchPayload)
-    for (; (s = e.hasPendingPayload) != null && s.call(e, i); )
-      i = await e.fetchPayload(i);
-  return i;
+    for (; (o = e.hasPendingPayload) != null && o.call(e, r); )
+      r = await e.fetchPayload(r);
+  return r;
 }
-var _n = [
+var Hn = [
   "TOTALSEG",
   "TOTAL_SEGMENTATOR",
   "TOTAL-SEGMENTATOR"
 ];
-var Un = [
+var Bn = [
   "LUNGSCREENING",
   "LUNG_SCREENING"
 ];
-var Mn = [
+var jn = [
   "NEURO_SEG",
   "NEUROSEG",
   "NEURO-SEG"
 ];
-var Pn = [
+var qn = [
   "DENTAL_SEG",
   "DENTALSEG",
   "DENTAL-SEG",
   "DENTALSEGMENTATOR"
 ];
-var Rn = ["MHUB", "MHUB_AI", "MHUBAI"];
-function st(e) {
+var zn = [
+  "TORCHXRAYVISION",
+  "TXRV",
+  "TORCH_XRAY_VISION",
+  "TORCH-XRAY-VISION"
+];
+var Ji = ["FLEXRAY", "FLEX_RAY", "FLEX-RAY"];
+var Wn = ["MHUB", "MHUB_AI", "MHUBAI"];
+function dt(e) {
   return String(e || "").trim().toUpperCase().replace(/-/g, "_");
 }
-function ye(e, t) {
-  const n = st(e);
+function K(e, t) {
+  const n = dt(e);
   if (!n)
     return false;
-  const i = n.replace(/_/g, "");
-  return t.some((r) => {
-    const s = st(r);
-    return s === n || s.replace(/_/g, "") === i;
+  const r = n.replace(/_/g, "");
+  return t.some((i) => {
+    const o = dt(i);
+    return o === n || o.replace(/_/g, "") === r;
   });
 }
-function De(e) {
-  return ye(e, _n);
-}
-function Be(e) {
-  return ye(e, Un);
-}
-function je(e) {
-  return ye(e, Mn);
-}
-function He(e) {
-  return ye(e, Pn);
-}
 function qe(e) {
-  return ye(e, Rn);
-}
-function Mi(e) {
-  return qe(e) || De(e) || Be(e) || je(e) || He(e);
-}
-function At(e, t) {
-  if (!Array.isArray(e))
-    return;
-  const n = String(t).trim().toLowerCase(), i = e.find((s) => !s || typeof s != "object" ? false : String(s.key ?? "").trim().toLowerCase() === n);
-  if (!i)
-    return;
-  const r = i.value;
-  return typeof r == "string" ? r.trim() : void 0;
-}
-function Nt(e) {
-  if (!e || typeof e != "object" || e.source !== "status")
-    return false;
-  const t = At(e.items, "availability");
-  return t ? t.toLowerCase() === "online" : Array.isArray(e.items) && e.items.length > 0;
+  return K(e, Hn);
 }
 function ze(e) {
+  return K(e, Bn);
+}
+function We(e) {
+  return K(e, jn);
+}
+function Ve(e) {
+  return K(e, qn);
+}
+function Ge(e) {
+  return K(e, zn);
+}
+function Vn(e) {
+  return K(e, Ji);
+}
+function Je(e) {
+  return K(e, Wn);
+}
+function Xi(e) {
+  return Je(e) || qe(e) || ze(e) || We(e) || Ve(e) || Ge(e) || Vn(e);
+}
+function Ut(e, t) {
+  if (!Array.isArray(e))
+    return;
+  const n = String(t).trim().toLowerCase(), r = e.find((o) => !o || typeof o != "object" ? false : String(o.key ?? "").trim().toLowerCase() === n);
+  if (!r)
+    return;
+  const i = r.value;
+  return typeof i == "string" ? i.trim() : void 0;
+}
+function Rt(e) {
+  if (!e || typeof e != "object" || e.source !== "status")
+    return false;
+  const t = Ut(e.items, "availability");
+  return t ? t.toLowerCase() === "online" : Array.isArray(e.items) && e.items.length > 0;
+}
+function Xe(e) {
   const t = String((e == null ? void 0 : e.productName) ?? "").trim();
   if (t)
     return t;
   const n = e == null ? void 0 : e.data;
   if (n && typeof n == "object") {
-    const i = String(n.product ?? "").trim();
-    if (i)
-      return i;
+    const r = String(n.product ?? "").trim();
+    if (r)
+      return r;
   }
   return "";
 }
-function Ce(e, t) {
+function ae(e, t) {
   return Array.isArray(e) ? e.some((n) => {
-    const i = ze(n);
-    return t(i) && Nt(n.data);
+    const r = Xe(n);
+    return t(r) && Rt(n.data);
   }) : false;
 }
-function Pi(e) {
-  return Ce(
+function Yi(e) {
+  return ae(
     e,
-    De
+    qe
   );
 }
-function Ri(e) {
-  return Ce(e, Be);
+function Zi(e) {
+  return ae(e, ze);
 }
-function Fi(e) {
-  return Ce(e, je);
+function Ki(e) {
+  return ae(e, We);
 }
-function Oi(e) {
-  return Ce(e, He);
+function Qi(e) {
+  return ae(e, Ve);
 }
-function Di(e) {
-  return Ce(e, qe);
+function eo(e) {
+  return ae(
+    e,
+    Ge
+  );
 }
-function Bi(e) {
+function to(e) {
+  return ae(e, Je);
+}
+function no2(e) {
   return typeof e != "string" ? false : e.trim().toUpperCase() === "STATUS";
 }
-var ji = "mhub";
-var Hi = "MHUB";
-var qi = "MHub models";
-var zi = "Boston, USA";
-var Wi = "Medical Imaging Model Hub \u2014 peer-reviewed deep learning models via standardized Docker I/O.";
-var Gi = "https://github.com/MHubAI/";
-var Vi = "https://mhub.ai";
-var Ji = "dicom-send";
-var Zi = true;
-var Yi = "https://github.com/MHubAI.png";
-var Ki = {
-  id: ji,
-  product: Hi,
-  title: qi,
-  location: zi,
-  summary: Wi,
-  githubUrl: Gi,
-  websiteUrl: Vi,
-  hubEvent: Ji,
-  enabled: Zi,
-  iconUrl: Yi
+var ro3 = "mhub";
+var io = "MHUB";
+var oo = "MHub models";
+var so = "Boston, USA";
+var ao = "Medical Imaging Model Hub \u2014 peer-reviewed deep learning models via standardized Docker I/O.";
+var co = "https://github.com/MHubAI/";
+var lo = "https://mhub.ai";
+var uo = "dicom-send";
+var fo = true;
+var ho = "https://github.com/MHubAI.png";
+var bo = {
+  id: ro3,
+  product: io,
+  title: oo,
+  location: so,
+  summary: ao,
+  githubUrl: co,
+  websiteUrl: lo,
+  hubEvent: uo,
+  enabled: fo,
+  iconUrl: ho
 };
-var Xi = "lung";
-var Qi = "LUNGSCREENING";
-var eo = "Lung Screening";
-var to = "Toronto, Canada";
-var no = "CT lung screening.";
-var ro = "https://github.com/rphellan/slicerW45";
-var io = "https://projectweek.na-mic.org/PW45_2026_Boston/Projects/ExtractingDeepLearningFeaturesFromCtImagesOfTheThoracicRegionForLungCancerApplications/";
-var oo = "dicom-send";
-var so = false;
-var ao = {
-  id: Xi,
-  product: Qi,
-  title: eo,
-  location: to,
-  summary: no,
-  githubUrl: ro,
-  websiteUrl: io,
-  hubEvent: oo,
-  enabled: so
+var mo = "lung";
+var po = "LUNGSCREENING";
+var go = "Lung Screening";
+var yo = "Toronto, Canada";
+var Co = "CT lung screening.";
+var So = "https://github.com/rphellan/slicerW45";
+var wo = "https://projectweek.na-mic.org/PW45_2026_Boston/Projects/ExtractingDeepLearningFeaturesFromCtImagesOfTheThoracicRegionForLungCancerApplications/";
+var To = "dicom-send";
+var Eo = false;
+var Ao = {
+  id: mo,
+  product: po,
+  title: go,
+  location: yo,
+  summary: Co,
+  githubUrl: So,
+  websiteUrl: wo,
+  hubEvent: To,
+  enabled: Eo
 };
-var co = "totalseg";
-var uo = "TOTALSEG";
-var lo = "Total Segmentator";
-var fo = "Basel, Switzerland";
-var ho = "Whole-body CT/MR multi-organ segmentation.";
-var bo = "https://github.com/wasserth/TotalSegmentator";
-var mo = "https://totalsegmentator.com/";
-var po = "https://www.buymeacoffee.com/totalsegmentator";
-var go = "dicom-send";
-var yo = true;
-var Co = "https://pubs.rsna.org/doi/10.1148/ryai.230024";
-var So = {
-  id: co,
-  product: uo,
-  title: lo,
-  location: fo,
-  summary: ho,
-  githubUrl: bo,
-  websiteUrl: mo,
-  buyMeACoffeeUrl: po,
-  hubEvent: go,
-  enabled: yo,
-  citeUrl: Co
+var vo = "totalseg";
+var Lo = "TOTALSEG";
+var No = "Total Segmentator";
+var xo = "Basel, Switzerland";
+var Io = "Whole-body CT/MR multi-organ segmentation.";
+var ko3 = "https://github.com/wasserth/TotalSegmentator";
+var $o = "https://totalsegmentator.com/";
+var _o = "https://www.buymeacoffee.com/totalsegmentator";
+var Uo = "dicom-send";
+var Ro = true;
+var Mo = "https://pubs.rsna.org/doi/10.1148/ryai.230024";
+var Oo = {
+  id: vo,
+  product: Lo,
+  title: No,
+  location: xo,
+  summary: Io,
+  githubUrl: ko3,
+  websiteUrl: $o,
+  buyMeACoffeeUrl: _o,
+  hubEvent: Uo,
+  enabled: Ro,
+  citeUrl: Mo
 };
-var wo = "neuro";
-var Eo = "NEURO_SEG";
-var To = "Subcortical segmentation";
-var vo = "Montreal, Canada";
-var Lo = "Neuro / subcortical segmentation. Improved white and pial surfaces and parcellation (aparc+aseg) from recon-all pipeline (FreeSurfer 7.4.1) through added dataset";
-var Ao = "https://projectweek.na-mic.org/PW45_2026_Boston/Projects/ReconAllCorrectionScriptBasedOnManualSubcorticalSegmentationFiles/";
-var No = "nifti-send";
-var xo = true;
-var ko = {
-  id: wo,
-  product: Eo,
-  title: To,
-  location: vo,
-  summary: Lo,
-  websiteUrl: Ao,
-  hubEvent: No,
-  enabled: xo
+var Po = "neuro";
+var Fo = "NEURO_SEG";
+var Do = "Subcortical segmentation";
+var Ho = "Montreal, Canada";
+var Bo = "Neuro / subcortical segmentation. Improved white and pial surfaces and parcellation (aparc+aseg) from recon-all pipeline (FreeSurfer 7.4.1) through added dataset";
+var jo = "https://projectweek.na-mic.org/PW45_2026_Boston/Projects/ReconAllCorrectionScriptBasedOnManualSubcorticalSegmentationFiles/";
+var qo = "nifti-send";
+var zo = true;
+var Wo = {
+  id: Po,
+  product: Fo,
+  title: Do,
+  location: Ho,
+  summary: Bo,
+  websiteUrl: jo,
+  hubEvent: qo,
+  enabled: zo
 };
-var Io = "dental";
-var $o = "DENTAL_SEG";
-var _o = "Dental Segmentator";
-var Uo = "Paris, France";
-var Mo = "Fully automatic CT/CBCT dental segmentation (maxilla, mandible, upper/lower teeth, mandibular canal).";
-var Po = "https://github.com/gaudot/SlicerDentalSegmentator";
-var Ro = "https://www.kitware.com/dental-segmentator/";
-var Fo = "dicom-send";
-var Oo = true;
-var Do = {
-  id: Io,
-  product: $o,
-  title: _o,
-  location: Uo,
-  summary: Mo,
-  githubUrl: Po,
-  websiteUrl: Ro,
-  hubEvent: Fo,
-  enabled: Oo
+var Vo = "dental";
+var Go = "DENTAL_SEG";
+var Jo = "Dental Segmentator";
+var Xo = "Paris, France";
+var Yo = "Fully automatic CT/CBCT dental segmentation (maxilla, mandible, upper/lower teeth, mandibular canal).";
+var Zo = "https://github.com/gaudot/SlicerDentalSegmentator";
+var Ko = "https://www.kitware.com/dental-segmentator/";
+var Qo = "dicom-send";
+var es3 = true;
+var ts = {
+  id: Vo,
+  product: Go,
+  title: Jo,
+  location: Xo,
+  summary: Yo,
+  githubUrl: Zo,
+  websiteUrl: Ko,
+  hubEvent: Qo,
+  enabled: es3
 };
-var Bo = "data:image/svg+xml,%3csvg%20width='35'%20height='50'%20viewBox='0%200%2035%2050'%20fill='none'%20xmlns='http://www.w3.org/2000/svg'%3e%3cpath%20d='M30.7512%2011.6307L30.7171%2011.6106L30.6382%2011.5865C30.6699%2011.6134%2030.7097%2011.6289%2030.7512%2011.6307Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M31.2481%2015.2031L31.21%2015.2138L31.2481%2015.2031Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.7659%2011.6253C30.761%2011.6247%2030.7563%2011.6236%2030.7517%2011.6219C30.7514%2011.6251%2030.7514%2011.6283%2030.7517%2011.6314C30.7569%2011.6307%2030.7618%2011.6286%2030.7659%2011.6253Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.7515%2011.6314H30.7572V11.6278L30.7515%2011.6314Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M31.2178%2015.1962L31.2753%2015.1634L31.2967%2015.1514L31.3161%2015.1307C31.2796%2015.1464%2031.2463%2015.1686%2031.2178%2015.1962Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.8507%2011.7088L30.7945%2011.6553L30.7563%2011.6345C30.7768%2011.6707%2030.8107%2011.6973%2030.8507%2011.7088Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M16.715%2046.3714C16.6701%2046.3908%2016.6307%2046.4212%2016.6006%2046.4597L16.636%2046.4369C16.6601%2046.4149%2016.6942%2046.3888%2016.715%2046.3714Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M24.9235%2044.7473C24.9235%2044.6965%2024.8987%2044.7059%2024.9048%2044.8864C24.9048%2044.8717%2024.9108%2044.857%2024.9134%2044.843C24.9168%2044.8109%2024.9195%2044.7794%2024.9235%2044.7473Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M24.0719%2046.3714C24.027%2046.3908%2023.9877%2046.4212%2023.9575%2046.4597L23.993%2046.4369C24.017%2046.4149%2024.0512%2046.3888%2024.0719%2046.3714Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M10.9344%2046.7574C10.9003%2046.7277%2010.8586%2046.7082%2010.814%2046.7012C10.8501%2046.7186%2010.8862%2046.736%2010.9103%2046.7493L10.9344%2046.7574Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M9.63391%2045.5042C9.62859%2045.4515%209.61242%2045.4005%209.58643%2045.3544C9.60484%2045.4024%209.62025%2045.4516%209.63258%2045.5015L9.63391%2045.5042Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M18.3715%2023.0976C16.5857%2023.8665%2014.5591%2024.7382%2011.9326%2024.7382C10.8339%2024.736%209.74049%2024.5844%208.68213%2024.2875L10.4987%2043.0444C10.563%2043.8284%2010.9181%2044.5594%2011.4935%2045.0923C12.0689%2045.6251%2012.8225%2045.9208%2013.6047%2045.9207C13.6047%2045.9207%2016.1804%2046.0552%2017.0398%2046.0552C17.9648%2046.0552%2020.7385%2045.9207%2020.7385%2045.9207C21.5205%2045.9207%2022.274%2045.6249%2022.8493%2045.092C23.4245%2044.5592%2023.7795%2043.8283%2023.8438%2043.0444L25.7895%2022.3173C24.92%2022.0187%2024.0425%2021.8203%2023.0533%2021.8203C21.3424%2021.8196%2019.964%2022.4122%2018.3715%2023.0976Z'%20fill='%23FFFFFF'/%3e%3cpath%20d='M3.05859%2015.095L3.08936%2015.1238L3.10943%2015.1358C3.09397%2015.1205%203.07693%2015.1068%203.05859%2015.095Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M34.1896%2013.3639L33.916%2011.9762C33.6706%2010.7312%2033.1134%209.55468%2031.8426%209.10468C31.4353%208.96073%2030.9732%208.89885%2030.6608%208.60086C30.3485%208.30288%2030.2562%207.84009%2030.1839%207.41094C30.0502%206.62326%2029.9244%205.83492%2029.7873%205.04859C29.6689%204.37257%2029.5753%203.61315%2029.267%202.99296C28.8657%202.16022%2028.033%201.67322%2027.205%201.35102C26.7807%201.19173%2026.3477%201.05698%2025.9081%200.947426C23.8394%200.398542%2021.6644%200.196746%2019.5362%200.0817228C16.9817%20-0.0600379%2014.4204%20-0.0173274%2011.872%200.209526C9.97525%200.383071%207.97745%200.592939%206.17495%201.25281C5.51616%201.49429%204.8373%201.7842%204.33634%202.29609C3.72169%202.92502%203.52104%203.89768%203.96982%204.68199C4.28886%205.23895%204.82927%205.63245%205.40246%205.89276C6.14906%206.22818%206.92877%206.48341%207.72865%206.65421C9.95585%207.14928%2012.2626%207.34368%2014.538%207.42641C17.0599%207.52878%2019.5859%207.44582%2022.0958%207.1782C22.7165%207.10959%2023.336%207.0273%2023.9545%206.93134C24.6828%206.81901%2025.1503%205.86115%2024.9356%205.19388C24.6788%204.39611%2023.9886%204.08669%2023.208%204.2071C23.093%204.22526%2022.9786%204.24208%2022.8636%204.25889L22.7807%204.271C22.5163%204.30463%2022.2518%204.33602%2021.9874%204.36517C21.4412%204.42437%2020.8937%204.4728%2020.3448%204.51046C19.1155%204.59656%2017.8828%204.63625%2016.6508%204.63827C15.4403%204.63827%2014.229%204.60396%2013.0211%204.52392C12.47%204.48759%2011.9202%204.4414%2011.3718%204.38535C11.1223%204.35912%2010.8735%204.33154%2010.6247%204.3006L10.3879%204.27033L10.3364%204.26293L10.091%204.22728C9.58933%204.15127%209.08771%204.06382%208.59144%203.95822C8.54136%203.94704%208.49657%203.91902%208.46446%203.87879C8.43236%203.83855%208.41486%203.7885%208.41486%203.73691C8.41486%203.68533%208.43236%203.63528%208.46446%203.59504C8.49657%203.55481%208.54136%203.52679%208.59144%203.51561H8.6008C9.03086%203.42346%209.46426%203.34476%209.899%203.27615C10.0439%203.25328%2010.1893%203.23086%2010.3351%203.20888H10.3391C10.6113%203.19072%2010.8849%203.14162%2011.1557%203.10933C13.5125%202.86279%2015.8832%202.77874%2018.2513%202.85776C19.4011%202.89139%2020.5501%202.95933%2021.6945%203.07637C21.9406%203.10193%2022.1854%203.12884%2022.4302%203.15911C22.5238%203.17054%2022.6181%203.18399%2022.7124%203.19543L22.9024%203.22301C23.4562%203.30597%2024.0071%203.40664%2024.5551%203.52503C25.367%203.70261%2026.4097%203.76046%2026.7709%204.65508C26.8859%204.93894%2026.9381%205.25442%2027.0016%205.5524L27.0826%205.93245C27.0847%205.93927%2027.0863%205.94624%2027.0873%205.9533C27.2785%206.85017%2027.4701%207.74704%2027.6618%208.64391C27.6758%208.71017%2027.6762%208.77862%2027.6628%208.84501C27.6493%208.9114%2027.6225%208.97429%2027.5838%209.02977C27.5451%209.08525%2027.4955%209.13212%2027.4381%209.16746C27.3806%209.2028%2027.3165%209.22585%2027.2498%209.23517H27.2444L27.1274%209.25132L27.0117%209.26679C26.6452%209.31477%2026.2782%209.35961%2025.9108%209.40132C25.1871%209.48428%2024.4623%209.55603%2023.7364%209.61657C22.294%209.7372%2020.8486%209.81635%2019.4004%209.85401C18.6625%209.87374%2017.9247%209.88294%2017.1872%209.88159C14.2517%209.87926%2011.3188%209.70768%208.40283%209.36769C8.08714%209.33002%207.77145%209.28966%207.45577%209.24863C7.70056%209.28024%207.27786%209.22441%207.19225%209.2123C6.9916%209.18405%206.79095%209.15468%206.5903%209.12419C5.91679%209.02262%205.24729%208.8975%204.57511%208.78786C3.76249%208.65333%202.98531%208.72059%202.25026%209.12419C1.6469%209.45624%201.15857%209.96544%200.850401%2010.5838C0.533376%2011.243%200.439071%2011.9608%200.297279%2012.6691C0.155487%2013.3774%20-0.0652275%2014.1395%200.0183763%2014.8666C0.198292%2016.4359%201.28915%2017.7113%202.85823%2017.9965C4.33434%2018.2655%205.81847%2018.4835%207.30662%2018.6691C13.1524%2019.3892%2019.0582%2019.4753%2024.9223%2018.9261C25.3998%2018.8812%2025.8767%2018.8324%2026.3529%2018.7794C26.5016%2018.763%2026.6521%2018.7802%2026.7934%2018.8299C26.9347%2018.8795%2027.0631%2018.9603%2027.1693%2019.0663C27.2755%2019.1724%2027.3567%2019.3009%2027.4071%2019.4426C27.4575%2019.5843%2027.4757%2019.7356%2027.4605%2019.8853L27.312%2021.3369C27.0128%2024.2701%2026.7136%2027.2031%2026.4144%2030.1358C26.1023%2033.2157%2025.7882%2036.2953%2025.472%2039.3747C25.3829%2040.242%2025.2937%2041.109%2025.2045%2041.9758C25.1189%2042.8294%2025.1069%2043.7099%2024.9457%2044.5534C24.6915%2045.8799%2023.7986%2046.6945%2022.4957%2046.9925C21.3021%2047.2657%2020.0827%2047.4091%2018.8586%2047.4203C17.5016%2047.4277%2016.1452%2047.3672%2014.7881%2047.3746C13.3395%2047.3826%2011.5651%2047.2481%2010.4468%2046.1638C9.46426%2045.2113%209.32849%2043.72%209.19472%2042.4306C9.01637%2040.7234%208.83957%2039.0164%208.66434%2037.3097L7.68116%2027.8192L7.0451%2021.6786C7.0344%2021.577%207.0237%2021.4768%207.01367%2021.3745C6.93742%2020.642%206.42176%2019.925%205.60913%2019.962C4.91354%2019.9929%204.12299%2020.5875%204.20458%2021.3745L4.67611%2025.927L5.65126%2035.3442C5.92905%2038.0191%206.20617%2040.6944%206.48262%2043.3703C6.53613%2043.8828%206.58628%2044.3967%206.64247%2044.9093C6.94812%2047.7102%209.075%2049.2196%2011.7089%2049.6448C13.2472%2049.8936%2014.8229%2049.9448%2016.384%2049.9703C18.3851%2050.0026%2020.4063%2050.08%2022.3747%2049.7154C25.2915%2049.1773%2027.4799%2047.2185%2027.7922%2044.1801C27.8814%2043.303%2027.9706%2042.4256%2028.0597%2041.548C28.3563%2038.6458%2028.6523%2035.7433%2028.9479%2032.8406L29.9151%2023.3562L30.3585%2019.0095C30.3806%2018.794%2030.4711%2018.5913%2030.6166%2018.4315C30.7621%2018.2717%2030.9549%2018.1633%2031.1665%2018.1223C32.0005%2017.9588%2032.7977%2017.6796%2033.391%2017.0413C34.3354%2016.0249%2034.5233%2014.6998%2034.1896%2013.3639ZM2.81542%2014.3016C2.82813%2014.2955%202.80472%2014.4052%202.79469%2014.4563C2.79268%2014.3789%202.7967%2014.3103%202.81542%2014.3016ZM2.89635%2014.9312C2.90304%2014.9265%202.9231%2014.9534%202.94384%2014.9857C2.9124%2014.9561%202.89234%2014.9339%202.89568%2014.9312H2.89635ZM2.97594%2015.0368C3.0047%2015.0859%203.02009%2015.1168%202.97594%2015.0368V15.0368ZM3.13579%2015.1673H3.1398C3.1398%2015.172%203.14716%2015.1767%203.14984%2015.1814C3.1454%2015.1762%203.14048%2015.1715%203.13513%2015.1673H3.13579ZM31.1277%2014.9722C30.828%2015.2588%2030.3766%2015.392%2029.9305%2015.4586C24.9276%2016.2052%2019.8519%2016.5832%2014.7942%2016.4164C11.1745%2016.292%207.59287%2015.8877%204.00928%2015.3785C3.65815%2015.3287%203.27758%2015.2642%203.03614%2015.0038C2.58133%2014.5128%202.80472%2013.524%202.9231%2012.9307C3.03145%2012.3872%203.23879%2011.6628%203.88154%2011.5854C4.88478%2011.467%206.04989%2011.8928%207.04243%2012.0442C8.2374%2012.2276%209.43684%2012.3744%2010.6407%2012.4848C15.7787%2012.9556%2021.0029%2012.8823%2026.1181%2012.1935C27.0505%2012.0675%2027.9795%2011.9211%2028.9051%2011.7543C29.7298%2011.6056%2030.6441%2011.3264%2031.1424%2012.1854C31.4841%2012.7706%2031.5296%2013.5536%2031.4768%2014.2148C31.4605%2014.5029%2031.3354%2014.7739%2031.127%2014.9722H31.1277Z'%20fill='%23FFDD00'/%3e%3c/svg%3e";
-function jo(e) {
-  const t = String(e.summary || e.capabilities || "").trim(), n = e.hubEvent === "nifti-send" ? "nifti-send" : "dicom-send", i = {
+var ns = "txrv";
+var rs = "TORCHXRAYVISION";
+var is = "TorchXRayVision";
+var os = "Montreal, Canada";
+var ss = "Chest X-ray pathology classification (18 findings) and lung/heart anatomy segmentation.";
+var as = "https://github.com/mlmed/torchxrayvision";
+var cs3 = "https://mlmed.org/torchxrayvision/";
+var ls = "Cohen et al., TorchXRayVision: A library of chest X-ray datasets and models, MIDL 2022";
+var us = "https://arxiv.org/abs/2111.00595";
+var fs = "dicom-send";
+var ds = true;
+var hs = {
+  id: ns,
+  product: rs,
+  title: is,
+  location: os,
+  summary: ss,
+  githubUrl: as,
+  websiteUrl: cs3,
+  cite: ls,
+  citeUrl: us,
+  hubEvent: fs,
+  enabled: ds
+};
+var bs = "flexray";
+var ms = "FLEXRAY";
+var ps = "FleXray";
+var gs = "Cambridge, MA, USA";
+var ys = "Foundation model for universal clinical X-ray anatomy segmentation (60 structures) across body regions, views, and acquisition settings. Designed for on-device / local inference.";
+var Cs = "https://flexray.csail.mit.edu/";
+var Ss = "Victor Ion Butoi, Vivek Gopalakrishnan, John V. Guttag, Adrian V. Dalca, and Neel Dey (2026). FleXray: Universal Clinical X-ray Segmentation. arXiv:2609.26756";
+var ws = "https://arxiv.org/abs/2609.26756";
+var Ts = "dicom-send";
+var Es = true;
+var As = true;
+var vs = {
+  id: bs,
+  product: ms,
+  title: ps,
+  location: gs,
+  summary: ys,
+  websiteUrl: Cs,
+  cite: Ss,
+  citeUrl: ws,
+  hubEvent: Ts,
+  enabled: Es,
+  localCapable: As
+};
+var Ls = "data:image/svg+xml,%3csvg%20width='35'%20height='50'%20viewBox='0%200%2035%2050'%20fill='none'%20xmlns='http://www.w3.org/2000/svg'%3e%3cpath%20d='M30.7512%2011.6307L30.7171%2011.6106L30.6382%2011.5865C30.6699%2011.6134%2030.7097%2011.6289%2030.7512%2011.6307Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M31.2481%2015.2031L31.21%2015.2138L31.2481%2015.2031Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.7659%2011.6253C30.761%2011.6247%2030.7563%2011.6236%2030.7517%2011.6219C30.7514%2011.6251%2030.7514%2011.6283%2030.7517%2011.6314C30.7569%2011.6307%2030.7618%2011.6286%2030.7659%2011.6253Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.7515%2011.6314H30.7572V11.6278L30.7515%2011.6314Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M31.2178%2015.1962L31.2753%2015.1634L31.2967%2015.1514L31.3161%2015.1307C31.2796%2015.1464%2031.2463%2015.1686%2031.2178%2015.1962Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.8507%2011.7088L30.7945%2011.6553L30.7563%2011.6345C30.7768%2011.6707%2030.8107%2011.6973%2030.8507%2011.7088Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M16.715%2046.3714C16.6701%2046.3908%2016.6307%2046.4212%2016.6006%2046.4597L16.636%2046.4369C16.6601%2046.4149%2016.6942%2046.3888%2016.715%2046.3714Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M24.9235%2044.7473C24.9235%2044.6965%2024.8987%2044.7059%2024.9048%2044.8864C24.9048%2044.8717%2024.9108%2044.857%2024.9134%2044.843C24.9168%2044.8109%2024.9195%2044.7794%2024.9235%2044.7473Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M24.0719%2046.3714C24.027%2046.3908%2023.9877%2046.4212%2023.9575%2046.4597L23.993%2046.4369C24.017%2046.4149%2024.0512%2046.3888%2024.0719%2046.3714Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M10.9344%2046.7574C10.9003%2046.7277%2010.8586%2046.7082%2010.814%2046.7012C10.8501%2046.7186%2010.8862%2046.736%2010.9103%2046.7493L10.9344%2046.7574Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M9.63391%2045.5042C9.62859%2045.4515%209.61242%2045.4005%209.58643%2045.3544C9.60484%2045.4024%209.62025%2045.4516%209.63258%2045.5015L9.63391%2045.5042Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M18.3715%2023.0976C16.5857%2023.8665%2014.5591%2024.7382%2011.9326%2024.7382C10.8339%2024.736%209.74049%2024.5844%208.68213%2024.2875L10.4987%2043.0444C10.563%2043.8284%2010.9181%2044.5594%2011.4935%2045.0923C12.0689%2045.6251%2012.8225%2045.9208%2013.6047%2045.9207C13.6047%2045.9207%2016.1804%2046.0552%2017.0398%2046.0552C17.9648%2046.0552%2020.7385%2045.9207%2020.7385%2045.9207C21.5205%2045.9207%2022.274%2045.6249%2022.8493%2045.092C23.4245%2044.5592%2023.7795%2043.8283%2023.8438%2043.0444L25.7895%2022.3173C24.92%2022.0187%2024.0425%2021.8203%2023.0533%2021.8203C21.3424%2021.8196%2019.964%2022.4122%2018.3715%2023.0976Z'%20fill='%23FFFFFF'/%3e%3cpath%20d='M3.05859%2015.095L3.08936%2015.1238L3.10943%2015.1358C3.09397%2015.1205%203.07693%2015.1068%203.05859%2015.095Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M34.1896%2013.3639L33.916%2011.9762C33.6706%2010.7312%2033.1134%209.55468%2031.8426%209.10468C31.4353%208.96073%2030.9732%208.89885%2030.6608%208.60086C30.3485%208.30288%2030.2562%207.84009%2030.1839%207.41094C30.0502%206.62326%2029.9244%205.83492%2029.7873%205.04859C29.6689%204.37257%2029.5753%203.61315%2029.267%202.99296C28.8657%202.16022%2028.033%201.67322%2027.205%201.35102C26.7807%201.19173%2026.3477%201.05698%2025.9081%200.947426C23.8394%200.398542%2021.6644%200.196746%2019.5362%200.0817228C16.9817%20-0.0600379%2014.4204%20-0.0173274%2011.872%200.209526C9.97525%200.383071%207.97745%200.592939%206.17495%201.25281C5.51616%201.49429%204.8373%201.7842%204.33634%202.29609C3.72169%202.92502%203.52104%203.89768%203.96982%204.68199C4.28886%205.23895%204.82927%205.63245%205.40246%205.89276C6.14906%206.22818%206.92877%206.48341%207.72865%206.65421C9.95585%207.14928%2012.2626%207.34368%2014.538%207.42641C17.0599%207.52878%2019.5859%207.44582%2022.0958%207.1782C22.7165%207.10959%2023.336%207.0273%2023.9545%206.93134C24.6828%206.81901%2025.1503%205.86115%2024.9356%205.19388C24.6788%204.39611%2023.9886%204.08669%2023.208%204.2071C23.093%204.22526%2022.9786%204.24208%2022.8636%204.25889L22.7807%204.271C22.5163%204.30463%2022.2518%204.33602%2021.9874%204.36517C21.4412%204.42437%2020.8937%204.4728%2020.3448%204.51046C19.1155%204.59656%2017.8828%204.63625%2016.6508%204.63827C15.4403%204.63827%2014.229%204.60396%2013.0211%204.52392C12.47%204.48759%2011.9202%204.4414%2011.3718%204.38535C11.1223%204.35912%2010.8735%204.33154%2010.6247%204.3006L10.3879%204.27033L10.3364%204.26293L10.091%204.22728C9.58933%204.15127%209.08771%204.06382%208.59144%203.95822C8.54136%203.94704%208.49657%203.91902%208.46446%203.87879C8.43236%203.83855%208.41486%203.7885%208.41486%203.73691C8.41486%203.68533%208.43236%203.63528%208.46446%203.59504C8.49657%203.55481%208.54136%203.52679%208.59144%203.51561H8.6008C9.03086%203.42346%209.46426%203.34476%209.899%203.27615C10.0439%203.25328%2010.1893%203.23086%2010.3351%203.20888H10.3391C10.6113%203.19072%2010.8849%203.14162%2011.1557%203.10933C13.5125%202.86279%2015.8832%202.77874%2018.2513%202.85776C19.4011%202.89139%2020.5501%202.95933%2021.6945%203.07637C21.9406%203.10193%2022.1854%203.12884%2022.4302%203.15911C22.5238%203.17054%2022.6181%203.18399%2022.7124%203.19543L22.9024%203.22301C23.4562%203.30597%2024.0071%203.40664%2024.5551%203.52503C25.367%203.70261%2026.4097%203.76046%2026.7709%204.65508C26.8859%204.93894%2026.9381%205.25442%2027.0016%205.5524L27.0826%205.93245C27.0847%205.93927%2027.0863%205.94624%2027.0873%205.9533C27.2785%206.85017%2027.4701%207.74704%2027.6618%208.64391C27.6758%208.71017%2027.6762%208.77862%2027.6628%208.84501C27.6493%208.9114%2027.6225%208.97429%2027.5838%209.02977C27.5451%209.08525%2027.4955%209.13212%2027.4381%209.16746C27.3806%209.2028%2027.3165%209.22585%2027.2498%209.23517H27.2444L27.1274%209.25132L27.0117%209.26679C26.6452%209.31477%2026.2782%209.35961%2025.9108%209.40132C25.1871%209.48428%2024.4623%209.55603%2023.7364%209.61657C22.294%209.7372%2020.8486%209.81635%2019.4004%209.85401C18.6625%209.87374%2017.9247%209.88294%2017.1872%209.88159C14.2517%209.87926%2011.3188%209.70768%208.40283%209.36769C8.08714%209.33002%207.77145%209.28966%207.45577%209.24863C7.70056%209.28024%207.27786%209.22441%207.19225%209.2123C6.9916%209.18405%206.79095%209.15468%206.5903%209.12419C5.91679%209.02262%205.24729%208.8975%204.57511%208.78786C3.76249%208.65333%202.98531%208.72059%202.25026%209.12419C1.6469%209.45624%201.15857%209.96544%200.850401%2010.5838C0.533376%2011.243%200.439071%2011.9608%200.297279%2012.6691C0.155487%2013.3774%20-0.0652275%2014.1395%200.0183763%2014.8666C0.198292%2016.4359%201.28915%2017.7113%202.85823%2017.9965C4.33434%2018.2655%205.81847%2018.4835%207.30662%2018.6691C13.1524%2019.3892%2019.0582%2019.4753%2024.9223%2018.9261C25.3998%2018.8812%2025.8767%2018.8324%2026.3529%2018.7794C26.5016%2018.763%2026.6521%2018.7802%2026.7934%2018.8299C26.9347%2018.8795%2027.0631%2018.9603%2027.1693%2019.0663C27.2755%2019.1724%2027.3567%2019.3009%2027.4071%2019.4426C27.4575%2019.5843%2027.4757%2019.7356%2027.4605%2019.8853L27.312%2021.3369C27.0128%2024.2701%2026.7136%2027.2031%2026.4144%2030.1358C26.1023%2033.2157%2025.7882%2036.2953%2025.472%2039.3747C25.3829%2040.242%2025.2937%2041.109%2025.2045%2041.9758C25.1189%2042.8294%2025.1069%2043.7099%2024.9457%2044.5534C24.6915%2045.8799%2023.7986%2046.6945%2022.4957%2046.9925C21.3021%2047.2657%2020.0827%2047.4091%2018.8586%2047.4203C17.5016%2047.4277%2016.1452%2047.3672%2014.7881%2047.3746C13.3395%2047.3826%2011.5651%2047.2481%2010.4468%2046.1638C9.46426%2045.2113%209.32849%2043.72%209.19472%2042.4306C9.01637%2040.7234%208.83957%2039.0164%208.66434%2037.3097L7.68116%2027.8192L7.0451%2021.6786C7.0344%2021.577%207.0237%2021.4768%207.01367%2021.3745C6.93742%2020.642%206.42176%2019.925%205.60913%2019.962C4.91354%2019.9929%204.12299%2020.5875%204.20458%2021.3745L4.67611%2025.927L5.65126%2035.3442C5.92905%2038.0191%206.20617%2040.6944%206.48262%2043.3703C6.53613%2043.8828%206.58628%2044.3967%206.64247%2044.9093C6.94812%2047.7102%209.075%2049.2196%2011.7089%2049.6448C13.2472%2049.8936%2014.8229%2049.9448%2016.384%2049.9703C18.3851%2050.0026%2020.4063%2050.08%2022.3747%2049.7154C25.2915%2049.1773%2027.4799%2047.2185%2027.7922%2044.1801C27.8814%2043.303%2027.9706%2042.4256%2028.0597%2041.548C28.3563%2038.6458%2028.6523%2035.7433%2028.9479%2032.8406L29.9151%2023.3562L30.3585%2019.0095C30.3806%2018.794%2030.4711%2018.5913%2030.6166%2018.4315C30.7621%2018.2717%2030.9549%2018.1633%2031.1665%2018.1223C32.0005%2017.9588%2032.7977%2017.6796%2033.391%2017.0413C34.3354%2016.0249%2034.5233%2014.6998%2034.1896%2013.3639ZM2.81542%2014.3016C2.82813%2014.2955%202.80472%2014.4052%202.79469%2014.4563C2.79268%2014.3789%202.7967%2014.3103%202.81542%2014.3016ZM2.89635%2014.9312C2.90304%2014.9265%202.9231%2014.9534%202.94384%2014.9857C2.9124%2014.9561%202.89234%2014.9339%202.89568%2014.9312H2.89635ZM2.97594%2015.0368C3.0047%2015.0859%203.02009%2015.1168%202.97594%2015.0368V15.0368ZM3.13579%2015.1673H3.1398C3.1398%2015.172%203.14716%2015.1767%203.14984%2015.1814C3.1454%2015.1762%203.14048%2015.1715%203.13513%2015.1673H3.13579ZM31.1277%2014.9722C30.828%2015.2588%2030.3766%2015.392%2029.9305%2015.4586C24.9276%2016.2052%2019.8519%2016.5832%2014.7942%2016.4164C11.1745%2016.292%207.59287%2015.8877%204.00928%2015.3785C3.65815%2015.3287%203.27758%2015.2642%203.03614%2015.0038C2.58133%2014.5128%202.80472%2013.524%202.9231%2012.9307C3.03145%2012.3872%203.23879%2011.6628%203.88154%2011.5854C4.88478%2011.467%206.04989%2011.8928%207.04243%2012.0442C8.2374%2012.2276%209.43684%2012.3744%2010.6407%2012.4848C15.7787%2012.9556%2021.0029%2012.8823%2026.1181%2012.1935C27.0505%2012.0675%2027.9795%2011.9211%2028.9051%2011.7543C29.7298%2011.6056%2030.6441%2011.3264%2031.1424%2012.1854C31.4841%2012.7706%2031.5296%2013.5536%2031.4768%2014.2148C31.4605%2014.5029%2031.3354%2014.7739%2031.127%2014.9722H31.1277Z'%20fill='%23FFDD00'/%3e%3c/svg%3e";
+function Ns(e) {
+  const t = String(e.summary || e.capabilities || "").trim(), n = e.hubEvent === "nifti-send" ? "nifti-send" : "dicom-send", r = {
     id: String(e.id || "").trim(),
     product: String(e.product || "").trim(),
     title: String(e.title || "").trim(),
@@ -14260,88 +16415,94 @@ function jo(e) {
     summary: t,
     capabilities: t,
     hubEvent: n
-  }, r = String(e.githubUrl || "").trim();
-  r && (i.githubUrl = r);
-  const s = String(e.websiteUrl || "").trim();
-  s && (i.websiteUrl = s);
-  const o = String(e.buyMeACoffeeUrl || "").trim();
-  o && (i.buyMeACoffeeUrl = o);
+  }, i = String(e.githubUrl || "").trim();
+  i && (r.githubUrl = i);
+  const o = String(e.websiteUrl || "").trim();
+  o && (r.websiteUrl = o);
+  const s = String(e.buyMeACoffeeUrl || "").trim();
+  s && (r.buyMeACoffeeUrl = s);
   const c = String(e.iconUrl || "").trim();
-  c && (i.iconUrl = c);
+  c && (r.iconUrl = c);
   const l = String(e.cite || "").trim();
-  l && (i.cite = l);
+  l && (r.cite = l);
   const h = String(e.citeUrl || "").trim();
-  return h && (i.citeUrl = h), i;
+  return h && (r.citeUrl = h), e.localCapable === true && (r.localCapable = true), r;
 }
-function Ho(e) {
+function xs(e) {
   return (e == null ? void 0 : e.enabled) !== false;
 }
-var z = Object.freeze(
-  [Ki, ao, So, ko, Do].filter(Ho).map(jo)
+var W = Object.freeze(
+  [bo, Ao, Oo, Wo, ts, hs, vs].filter(xs).map(Ns)
 );
-function F(e) {
+var Is = Object.freeze(
+  W.filter((e) => e.localCapable === true)
+);
+function ks(e) {
+  return !!(e && e.localCapable === true);
+}
+function B(e) {
   return String(e ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function qo(e) {
+function $s(e) {
   if (!e || typeof e != "object") return "";
-  const t = F(e.title), n = F(e.summary || e.capabilities), i = String(e.iconUrl || "").trim(), r = ['<div class="cast-inference-info-card">'];
-  i ? r.push(
-    `<div class="cast-inference-info-heading"><img class="cast-inference-info-icon" src="${F(i)}" alt="" width="28" height="28" decoding="async" /><div class="cast-inference-info-title">${t}</div></div>`
-  ) : r.push(`<div class="cast-inference-info-title">${t}</div>`), n && r.push(`<p class="cast-inference-info-summary">${n}</p>`);
-  const s = String(e.cite || "").trim(), o = String(e.citeUrl || "").trim();
-  if (s) {
-    const a = F(s);
-    o ? r.push(
-      `<p class="cast-inference-info-citation"><span class="cast-inference-info-citation-label">Citation:</span> <a class="cast-inference-info-citation-link" href="${F(o)}" target="_blank" rel="noopener noreferrer">${a}</a></p>`
-    ) : r.push(
+  const t = B(e.title), n = B(e.summary || e.capabilities), r = String(e.iconUrl || "").trim(), i = ['<div class="cast-inference-info-card">'];
+  r ? i.push(
+    `<div class="cast-inference-info-heading"><img class="cast-inference-info-icon" src="${B(r)}" alt="" width="28" height="28" decoding="async" /><div class="cast-inference-info-title">${t}</div></div>`
+  ) : i.push(`<div class="cast-inference-info-title">${t}</div>`), n && i.push(`<p class="cast-inference-info-summary">${n}</p>`);
+  const o = String(e.cite || "").trim(), s = String(e.citeUrl || "").trim();
+  if (o) {
+    const a = B(o);
+    s ? i.push(
+      `<p class="cast-inference-info-citation"><span class="cast-inference-info-citation-label">Citation:</span> <a class="cast-inference-info-citation-link" href="${B(s)}" target="_blank" rel="noopener noreferrer">${a}</a></p>`
+    ) : i.push(
       `<p class="cast-inference-info-citation"><span class="cast-inference-info-citation-label">Citation:</span> ${a}</p>`
     );
   }
-  r.push('<div class="cast-inference-info-links">');
+  i.push('<div class="cast-inference-info-links">');
   const c = String(e.githubUrl || "").trim();
-  c && r.push(
-    `<a class="cast-inference-info-link cast-inference-info-github" href="${F(c)}" target="_blank" rel="noopener noreferrer"><svg class="cast-inference-info-github-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>`
+  c && i.push(
+    `<a class="cast-inference-info-link cast-inference-info-github" href="${B(c)}" target="_blank" rel="noopener noreferrer"><svg class="cast-inference-info-github-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>`
   );
   const l = String(e.websiteUrl || "").trim();
-  l && r.push(
-    `<a class="cast-inference-info-link" href="${F(l)}" target="_blank" rel="noopener noreferrer">Website</a>`
-  ), o && r.push(
-    `<a class="cast-inference-info-link" href="${F(o)}" target="_blank" rel="noopener noreferrer" title="${F(s || "Citation")}">Cite</a>`
+  l && i.push(
+    `<a class="cast-inference-info-link" href="${B(l)}" target="_blank" rel="noopener noreferrer">Website</a>`
+  ), s && i.push(
+    `<a class="cast-inference-info-link" href="${B(s)}" target="_blank" rel="noopener noreferrer" title="${B(o || "Citation")}">Cite</a>`
   );
   const h = String(e.buyMeACoffeeUrl || "").trim();
-  return h && r.push(
-    `<a class="cast-inference-info-link cast-inference-info-coffee" href="${F(h)}" target="_blank" rel="noopener noreferrer" title="Buy Me a Coffee"><img class="cast-inference-info-coffee-icon" src="${Bo}" alt="" width="12" height="16" decoding="async" />Buy me a coffee</a>`
-  ), r.push("</div></div>"), r.join("");
+  return h && i.push(
+    `<a class="cast-inference-info-link cast-inference-info-coffee" href="${B(h)}" target="_blank" rel="noopener noreferrer" title="Buy Me a Coffee"><img class="cast-inference-info-coffee-icon" src="${Ls}" alt="" width="12" height="16" decoding="async" />Buy me a coffee</a>`
+  ), i.push("</div></div>"), i.join("");
 }
-function zo(e, t) {
+function _s(e, t) {
   if (!e || typeof e != "object")
     return "";
   const n = [
     String(e.title || "").trim(),
     String(e.summary || e.capabilities || "").trim(),
     `Location: ${String(e.location || "").trim()}`
-  ].filter((s) => s && !s.endsWith(": "));
+  ].filter((o) => o && !o.endsWith(": "));
   t && n.push(`Status: ${t}`);
-  const i = String(e.cite || "").trim();
-  i && n.push(`Citation: ${i}`);
-  const r = String(e.githubUrl || "").trim();
-  return r && n.push(r), n.join(`
+  const r = String(e.cite || "").trim();
+  r && n.push(`Citation: ${r}`);
+  const i = String(e.githubUrl || "").trim();
+  return i && n.push(i), n.join(`
 `);
 }
-function Fn(e) {
+function Gn(e) {
   const t = String(e || "").trim().toUpperCase().replace(/-/g, "_");
   if (!t)
     return null;
   const n = t.replace(/_/g, "");
-  return z.find((i) => {
-    const r = String(i.product || "").trim().toUpperCase().replace(/-/g, "_");
-    return r === t || r.replace(/_/g, "") === n;
+  return W.find((r) => {
+    const i = String(r.product || "").trim().toUpperCase().replace(/-/g, "_");
+    return i === t || i.replace(/_/g, "") === n;
   }) || null;
 }
-function On(e) {
+function Jn(e) {
   return String(e || "").trim().toUpperCase();
 }
-var Dn = Object.freeze({
+var Xn = Object.freeze({
   ira: (e) => e === "SLICERLIVE-IRA" || e.startsWith("SLICERLIVE-IRA"),
   ohif: (e) => e === "OHIF" || e.startsWith("OHIF"),
   volview: (e) => e === "VOLVIEW" || e.startsWith("VOLVIEW"),
@@ -14353,28 +16514,30 @@ var Dn = Object.freeze({
   totalseg: (e) => e === "TOTALSEG" || e.startsWith("TOTALSEG") || e === "TOTAL_SEGMENTATOR" || e.startsWith("TOTAL_SEGMENTATOR") || e === "TOTAL-SEGMENTATOR" || e.startsWith("TOTAL-SEGMENTATOR"),
   neuro: (e) => e === "NEURO_SEG" || e.startsWith("NEURO_SEG") || e === "NEUROSEG" || e.startsWith("NEUROSEG"),
   dental: (e) => e === "DENTAL_SEG" || e.startsWith("DENTAL_SEG") || e === "DENTALSEG" || e.startsWith("DENTALSEG") || e === "DENTALSEGMENTATOR" || e.startsWith("DENTALSEGMENTATOR"),
-  reporting: (e) => e === "CAST-RPT" || e.startsWith("CAST-RPT")
+  txrv: (e) => e === "TORCHXRAYVISION" || e.startsWith("TORCHXRAYVISION") || e === "TXRV" || e.startsWith("TXRV") || e === "TORCH_XRAY_VISION" || e.startsWith("TORCH_XRAY_VISION") || e === "TORCH-XRAY-VISION" || e.startsWith("TORCH-XRAY-VISION"),
+  reporting: (e) => e === "CAST-RPT" || e.startsWith("CAST-RPT"),
+  classroom: (e) => e === "CAST-CLASSROOM" || e.startsWith("CAST-CLASSROOM")
 });
-function Wo(e, t) {
-  const n = Dn[t];
-  return n ? n(On(e)) : false;
+function Us(e, t) {
+  const n = Xn[t];
+  return n ? n(Jn(e)) : false;
 }
-function Bn(e, t, n) {
+function Yn(e, t, n) {
   if (!e || typeof e != "object")
     return { online: false, items: [], raw: n, ...t ? { productName: t } : {} };
-  const i = (
+  const r = (
     /** @type {{ items?: unknown }} */
     e
-  ), r = Array.isArray(i.items) ? i.items : [], s = At(r, "job");
+  ), i = Array.isArray(r.items) ? r.items : [], o = Ut(i, "job");
   return {
-    online: Nt(e),
-    items: r,
-    ...s ? { job: s } : {},
+    online: Rt(e),
+    items: i,
+    ...o ? { job: o } : {},
     raw: n,
     ...t ? { productName: t } : {}
   };
 }
-function jn(e) {
+function Zn(e) {
   if (!e || typeof e != "object")
     return { online: false, items: [], error: "Empty STATUS result" };
   const t = (
@@ -14388,94 +16551,94 @@ function jn(e) {
       error: `HTTP ${t.status ?? "?"}`,
       raw: t.data
     };
-  const { responses: n } = xe(t.data);
-  for (const i of n) {
-    const r = i.data;
-    if (!r || typeof r != "object")
+  const { responses: n } = _e(t.data);
+  for (const r of n) {
+    const i = r.data;
+    if (!i || typeof i != "object")
       continue;
-    const s = ze(i) || void 0, o = Bn(r, s, t.data);
-    if (o.online || Array.isArray(
+    const o = Xe(r) || void 0, s = Yn(i, o, t.data);
+    if (s.online || Array.isArray(
       /** @type {{ items?: unknown }} */
-      r.items
+      i.items
     ))
-      return o;
+      return s;
   }
   return { online: false, items: [], raw: t.data };
 }
-async function xt(e, t) {
+async function Mt(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
     return { ok: false, status: 0, data: { error: "No Cast client" } };
   if (!n)
     return { ok: false, status: 0, data: { error: "No subscriber name" } };
-  const i = String((t == null ? void 0 : t.topic) || "").trim(), r = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), o = String((t == null ? void 0 : t.targetActor) || "*").trim() || "*", c = String((t == null ? void 0 : t.targetProductName) || "").trim();
+  const r = String((t == null ? void 0 : t.topic) || "").trim(), i = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), o = String((t == null ? void 0 : t.subscriberActor) || "").trim(), s = String((t == null ? void 0 : t.targetActor) || "*").trim() || "*", c = String((t == null ? void 0 : t.targetProductName) || "").trim();
   return e.request({
     "subscriber.name": n,
-    ...r ? { "subscriber.product.name": r } : {},
-    ...s ? { "subscriber.actor": s } : {},
-    "target.actor": o,
+    ...i ? { "subscriber.product.name": i } : {},
+    ...o ? { "subscriber.actor": o } : {},
+    "target.actor": s,
     ...c ? { "target.product.name": c } : {},
     event: {
-      "hub.event": ke("STATUS"),
-      ...i ? { "hub.topic": i } : {},
+      "hub.event": Ue("STATUS"),
+      ...r ? { "hub.topic": r } : {},
       context: { dataType: "STATUS" }
     }
   });
 }
-async function Go(e, t) {
+async function Rs(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
     return { ok: false, status: 0, data: { error: "No Cast client" } };
   if (!n)
     return { ok: false, status: 0, data: { error: "No subscriber name" } };
-  const i = String((t == null ? void 0 : t.topic) || "").trim(), r = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), o = String((t == null ? void 0 : t.targetActor) || "ID").trim() || "ID", c = String((t == null ? void 0 : t.targetProductName) || "").trim();
+  const r = String((t == null ? void 0 : t.topic) || "").trim(), i = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), o = String((t == null ? void 0 : t.subscriberActor) || "").trim(), s = String((t == null ? void 0 : t.targetActor) || "ID").trim() || "ID", c = String((t == null ? void 0 : t.targetProductName) || "").trim();
   return e.request({
     "subscriber.name": n,
-    ...r ? { "subscriber.product.name": r } : {},
-    ...s ? { "subscriber.actor": s } : {},
-    "target.actor": o,
+    ...i ? { "subscriber.product.name": i } : {},
+    ...o ? { "subscriber.actor": o } : {},
+    "target.actor": s,
     ...c ? { "target.product.name": c } : {},
     event: {
-      "hub.event": ke("LIVESCENE"),
-      ...i ? { "hub.topic": i } : {},
+      "hub.event": Ue("LIVESCENE"),
+      ...r ? { "hub.topic": r } : {},
       context: { dataType: "LIVESCENE" }
     }
   });
 }
-async function Vo(e, t) {
-  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), i = String((t == null ? void 0 : t.subscriberName) || "").trim();
+async function Ms(e, t) {
+  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
     return { online: false, items: [], error: "No Cast client" };
-  if (!i)
+  if (!r)
     return { online: false, items: [], error: "No subscriber name" };
   if (!n)
     return { online: false, items: [], error: "No target product" };
   try {
-    const r = await xt(e, {
-      subscriberName: i,
+    const i = await Mt(e, {
+      subscriberName: r,
       subscriberProductName: t == null ? void 0 : t.subscriberProductName,
       subscriberActor: t == null ? void 0 : t.subscriberActor,
       topic: t == null ? void 0 : t.topic,
       targetProductName: n
     });
-    return jn(r);
-  } catch (r) {
+    return Zn(i);
+  } catch (i) {
     return {
       online: false,
       items: [],
-      error: r instanceof Error ? r.message : String(r)
+      error: i instanceof Error ? i.message : String(i)
     };
   }
 }
-function Jo(e, t) {
+function Os(e, t) {
   if (!e) return false;
-  const n = Fn(e);
-  return n && n.id === t.id ? true : t.id === "mhub" ? qe(e) : t.id === "totalseg" ? De(e) : t.id === "lung" ? Be(e) : t.id === "neuro" ? je(e) : t.id === "dental" ? He(e) : false;
+  const n = Gn(e);
+  return n && n.id === t.id ? true : t.id === "mhub" ? Je(e) : t.id === "totalseg" ? qe(e) : t.id === "lung" ? ze(e) : t.id === "neuro" ? We(e) : t.id === "dental" ? Ve(e) : t.id === "txrv" ? Ge(e) : t.id === "flexray" ? Vn(e) : false;
 }
-function Hn(e) {
+function Kn(e) {
   if (!e || typeof e != "object")
-    return z.map((i) => ({
-      server: i,
+    return W.map((r) => ({
+      server: r,
       probe: { online: false, items: [], error: "Empty STATUS result" }
     }));
   const t = (
@@ -14483,38 +16646,38 @@ function Hn(e) {
     e
   );
   if (t.ok === false) {
-    const i = `HTTP ${t.status ?? "?"}`;
-    return z.map((r) => ({
-      server: r,
-      probe: { online: false, items: [], error: i, raw: t.data }
+    const r = `HTTP ${t.status ?? "?"}`;
+    return W.map((i) => ({
+      server: i,
+      probe: { online: false, items: [], error: r, raw: t.data }
     }));
   }
-  const { responses: n } = xe(t.data);
-  return z.map((i) => {
-    for (const r of n) {
-      const s = ze(r);
-      if (!Jo(s, i)) continue;
-      const o = r.data;
+  const { responses: n } = _e(t.data);
+  return W.map((r) => {
+    for (const i of n) {
+      const o = Xe(i);
+      if (!Os(o, r)) continue;
+      const s = i.data;
       return {
-        server: i,
-        probe: Bn(
-          o,
-          s || i.product,
+        server: r,
+        probe: Yn(
+          s,
+          o || r.product,
           t.data
         )
       };
     }
     return {
-      server: i,
+      server: r,
       probe: { online: false, items: [], raw: t.data }
     };
   });
 }
-async function Zo(e, t) {
+async function Ps(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request) || !n)
-    return z.map((i) => ({
-      server: i,
+    return W.map((r) => ({
+      server: r,
       probe: {
         online: false,
         items: [],
@@ -14522,59 +16685,59 @@ async function Zo(e, t) {
       }
     }));
   try {
-    const i = await xt(e, {
+    const r = await Mt(e, {
       subscriberName: n,
       subscriberProductName: t == null ? void 0 : t.subscriberProductName,
       subscriberActor: t == null ? void 0 : t.subscriberActor,
       topic: t == null ? void 0 : t.topic,
       targetActor: "*"
     });
-    return Hn(i);
-  } catch (i) {
-    const r = i instanceof Error ? i.message : String(i);
-    return z.map((s) => ({
-      server: s,
-      probe: { online: false, items: [], error: r }
+    return Kn(r);
+  } catch (r) {
+    const i = r instanceof Error ? r.message : String(r);
+    return W.map((o) => ({
+      server: o,
+      probe: { online: false, items: [], error: i }
     }));
   }
 }
-async function Yo(e, t) {
-  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), i = String((t == null ? void 0 : t.hubEvent) || "").trim(), r = String((t == null ? void 0 : t.subscriberName) || "").trim(), s = String((t == null ? void 0 : t.topic) || "").trim(), o = Array.isArray(t == null ? void 0 : t.files) ? t.files : [];
+async function Fs(e, t) {
+  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.hubEvent) || "").trim(), i = String((t == null ? void 0 : t.subscriberName) || "").trim(), o = String((t == null ? void 0 : t.topic) || "").trim(), s = Array.isArray(t == null ? void 0 : t.files) ? t.files : [];
   if (!(e != null && e.publish))
     return { ok: false, detail: "No Cast client" };
-  if (!r)
+  if (!i)
     return { ok: false, detail: "No subscriber name" };
-  if (!s)
+  if (!o)
     return { ok: false, detail: "No Cast topic" };
   if (!n)
     return { ok: false, detail: "No target product" };
-  if (!i)
+  if (!r)
     return { ok: false, detail: "No hub.event" };
-  if (!o.length)
+  if (!s.length)
     return { ok: false, detail: "No volume files" };
   const c = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), l = String((t == null ? void 0 : t.subscriberActor) || "").trim(), h = t != null && t.contextExtras && typeof t.contextExtras == "object" ? t.contextExtras : {};
   try {
     const a = await e.publish({
-      "subscriber.name": r,
+      "subscriber.name": i,
       ...c ? { "subscriber.product.name": c } : {},
       ...l ? { "subscriber.actor": l } : {},
       "target.product.name": n,
       event: {
-        "hub.topic": s,
-        "hub.event": i,
+        "hub.topic": o,
+        "hub.event": r,
         context: {
-          files: o.map((f) => ({
-            url: String(f.url || "").trim(),
-            fileName: String(f.fileName || "volume").trim() || "volume"
+          files: s.map((u) => ({
+            url: String(u.url || "").trim(),
+            fileName: String(u.fileName || "volume").trim() || "volume"
           })),
           ...h
         }
       }
-    }), u = !!(a && /** @type {{ ok?: boolean }} */
+    }), f = !!(a && /** @type {{ ok?: boolean }} */
     a.ok !== false);
     return {
-      ok: u,
-      detail: u ? "published" : `publish status ${/** @type {{ status?: number }} */
+      ok: f,
+      detail: f ? "published" : `publish status ${/** @type {{ status?: number }} */
       (a == null ? void 0 : a.status) ?? "?"}`,
       response: a
     };
@@ -14585,9 +16748,9 @@ async function Yo(e, t) {
     };
   }
 }
-var Ko = 1e4;
-var zt = 5e3;
-var Wt = {
+var Ds = 1e4;
+var Kt = 5e3;
+var Qt = {
   config: {
     hub: {},
     session: {},
@@ -14604,16 +16767,16 @@ var Wt = {
   onMessageCallback: null,
   onConnectionStateChangeCallback: null
 };
-function Xo(e, t) {
+function Hs(e, t) {
   t.classHierarchy.push("vtkCastClient");
-  function n(a, u) {
-    t.onConnectionStateChangeCallback && t.onConnectionStateChangeCallback(a, u);
-  }
-  function i() {
-    const a = t.session.productName || t.config.productName || at;
-    return nr(a);
+  function n(a, f) {
+    t.onConnectionStateChangeCallback && t.onConnectionStateChangeCallback(a, f);
   }
   function r() {
+    const a = t.session.productName || t.config.productName || ht;
+    return pr(a);
+  }
+  function i() {
     const a = t.hub.authorization_endpoint;
     if (typeof a == "string" && a.trim())
       return a.trim();
@@ -14623,24 +16786,24 @@ function Xo(e, t) {
       return "";
     }
   }
-  function s() {
+  function o() {
     console.debug("CastClient: websocket is closed."), t.hub.resubscribeRequested = true, n("disconnected");
   }
-  const o = Ir(() => ({
+  const s = zr(() => ({
     hubEndpoint: t.hub.hub_endpoint,
     accessToken: t.hub.token
   }));
   function c(a) {
     try {
-      const u = JSON.parse(a);
-      if (u["hub.mode"])
+      const f = JSON.parse(a);
+      if (f["hub.mode"])
         return;
-      const f = u.event;
-      if (!f || f["hub.event"] === "heartbeat" || u.id === t.hub.lastPublishedMessageID)
+      const u = f.event;
+      if (!u || u["hub.event"] === "heartbeat" || f.id === t.hub.lastPublishedMessageID)
         return;
-      t.onMessageCallback && t.onMessageCallback(u);
-    } catch (u) {
-      console.warn("CastClient: websocket processing error:", u);
+      t.onMessageCallback && t.onMessageCallback(f);
+    } catch (f) {
+      console.warn("CastClient: websocket processing error:", f);
     }
   }
   async function l() {
@@ -14650,7 +16813,7 @@ function Xo(e, t) {
     t.onMessageCallback = a;
   }, e.onConnectionStateChange = (a) => {
     t.onConnectionStateChangeCallback = a;
-  }, e.delete = er(() => {
+  }, e.delete = br(() => {
     t.reconnectInterval && (clearInterval(t.reconnectInterval), t.reconnectInterval = null), e.unsubscribe();
   }, e.delete), e.getHubConfig = () => {
     const a = t.hub;
@@ -14695,39 +16858,39 @@ function Xo(e, t) {
   }, e.setUserName = (a) => {
     t.session.userName = a || "";
   }, e.authenticate = async () => {
-    const a = r();
+    const a = i();
     if (!a)
       throw new Error(
         "CastClient.authenticate: no authorization_endpoint or token_endpoint configured."
       );
     try {
-      const m = new URL(a);
+      const p = new URL(a);
       console.debug(
         "CastClient: Authorizing at:",
-        `${m.origin}${m.pathname}`
+        `${p.origin}${p.pathname}`
       );
     } catch {
       console.debug("CastClient: Authorizing at hub");
     }
-    const u = t.session.productName || t.config.productName || "CAST", f = new URLSearchParams();
-    t.hub.lastIdToken ? f.append("id_token", t.hub.lastIdToken) : t.session.userName && f.append("user_name", t.session.userName), f.append("client_product_name", u), t.session.topic && f.append("topic", t.session.topic);
+    const f = t.session.productName || t.config.productName || "CAST", u = new URLSearchParams();
+    t.hub.lastIdToken ? u.append("id_token", t.hub.lastIdToken) : t.session.userName && u.append("user_name", t.session.userName), u.append("client_product_name", f), t.session.topic && u.append("topic", t.session.topic);
     let d;
     try {
       d = await fetch(a, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: f
+        body: u
       });
-    } catch (m) {
-      const g = m instanceof Error ? m.message : String(m);
-      throw console.error("CastClient: Exception during authenticate:", g), m;
+    } catch (p) {
+      const g = p instanceof Error ? p.message : String(p);
+      throw console.error("CastClient: Exception during authenticate:", g), p;
     }
     if (d.status !== 200) {
-      const m = await d.text().catch(() => "");
+      const p = await d.text().catch(() => "");
       throw console.error(
         "CastClient: Authenticate failed. Status:",
         d.status,
-        m
+        p
       ), new Error(
         `CastClient.authenticate failed (HTTP ${d.status})`
       );
@@ -14752,13 +16915,13 @@ function Xo(e, t) {
     } catch {
       console.debug("CastClient: Exchanging code at hub");
     }
-    const u = t.session.productName || t.config.productName || "CAST", f = new URLSearchParams();
-    f.append("grant_type", "authorization_code"), f.append("code", a), f.append("client_id", t.hub.client_id || ""), f.append("client_secret", t.hub.client_secret || ""), f.append("client_product_name", u);
+    const f = t.session.productName || t.config.productName || "CAST", u = new URLSearchParams();
+    u.append("grant_type", "authorization_code"), u.append("code", a), u.append("client_id", t.hub.client_id || ""), u.append("client_secret", t.hub.client_secret || ""), u.append("client_product_name", f);
     try {
       const d = await fetch(t.hub.token_endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: f
+        body: u
       });
       if (d.status === 200) {
         const b = await d.json();
@@ -14773,25 +16936,25 @@ function Xo(e, t) {
       return console.error("CastClient: Exception getting token:", b), false;
     }
   }, e.subscribe = async (a = false) => {
-    const u = t.session.topic && t.session.topic.trim();
-    if (!u)
+    const f = t.session.topic && t.session.topic.trim();
+    if (!f)
       return console.warn(
         "CastClient: Error. subscription not sent. No topic defined."
       ), "error: topic not defined";
-    if ((!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = ct(
+    if ((!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = bt(
       t.session.productName || t.config.productName || "CAST"
     )), !t.hub.token)
       return console.warn(
         "CastClient: Error. subscription not sent. No token available."
       ), "error: no token";
-    const f = Rt(t.config.callbackUrl), d = Ft(
+    const u = zt(t.config.callbackUrl), d = Wt(
       "subscribe",
       {
         ...t.session,
-        topic: u,
+        topic: f,
         subscriberName: t.session.subscriberName
       },
-      f,
+      u,
       t.config.productVersion
     ), b = {
       method: "POST",
@@ -14800,98 +16963,98 @@ function Xo(e, t) {
         Authorization: `Bearer ${t.hub.token}`
       },
       body: d,
-      signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(zt) : void 0
+      signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(Kt) : void 0
     };
     try {
       n("connecting");
-      const m = await fetch(t.hub.hub_endpoint, b);
-      if (m.status === 202) {
+      const p = await fetch(t.hub.hub_endpoint, b);
+      if (p.status === 202) {
         t.hub.resubscribeRequested = false;
         let g;
         try {
-          g = await m.json();
-        } catch (L) {
+          g = await p.json();
+        } catch (A) {
           t.hub.subscribed = false;
-          const A = L instanceof Error ? L.message : String(L);
+          const E = A instanceof Error ? A.message : String(A);
           return console.error(
             "CastClient: Subscribe 202 body was not valid JSON:",
-            A
+            E
           ), n("error"), 0;
         }
-        const y = g["hub.channel.endpoint"];
-        if (!y || typeof y != "string")
+        const C = g["hub.channel.endpoint"];
+        if (!C || typeof C != "string")
           return t.hub.subscribed = false, console.error(
             "CastClient: Subscribe 202 missing hub.channel.endpoint"
           ), n("error"), 0;
-        let N = y;
+        let N = C;
         try {
-          const L = new URL(t.hub.hub_endpoint), A = new URL(y), S = L.protocol === "https:" ? "wss:" : "ws:";
-          N = y.replace(
-            A.origin,
-            `${S}//${L.host}`
+          const A = new URL(t.hub.hub_endpoint), E = new URL(C), T = A.protocol === "https:" ? "wss:" : "ws:";
+          N = C.replace(
+            E.origin,
+            `${T}//${A.host}`
           );
         } catch {
         }
         if (t.hub.websocket) {
           try {
-            t.hub.websocket.removeEventListener("close", s), t.hub.websocket.close();
+            t.hub.websocket.removeEventListener("close", o), t.hub.websocket.close();
           } catch {
           }
           t.hub.websocket = null;
         }
-        let T;
+        let $2;
         try {
-          T = new WebSocket(N);
-        } catch (L) {
+          $2 = new WebSocket(N);
+        } catch (A) {
           t.hub.subscribed = false;
-          const A = L instanceof Error ? L.message : String(L);
+          const E = A instanceof Error ? A.message : String(A);
           return console.error(
             "CastClient: Failed to open WebSocket after subscribe:",
-            A
+            E
           ), n("error"), 0;
         }
-        return t.hub.subscribed = true, t.hub.websocket = T, t.hub.websocket.onopen = function() {
+        return t.hub.subscribed = true, t.hub.websocket = $2, t.hub.websocket.onopen = function() {
           this.send(
             JSON.stringify({
               "hub.channel.endpoint": N
             })
           ), n("connected");
-        }, t.hub.websocket.addEventListener("message", (L) => {
-          typeof L.data == "string" && c(L.data);
-        }), t.hub.websocket.addEventListener("close", s), t.hub.websocket.onerror = function() {
+        }, t.hub.websocket.addEventListener("message", (A) => {
+          typeof A.data == "string" && c(A.data);
+        }), t.hub.websocket.addEventListener("close", o), t.hub.websocket.onerror = function() {
           console.warn("CastClient: Error reported on websocket"), n("error");
-        }, m.status;
+        }, p.status;
       }
-      if (m.status === 401) {
+      if (p.status === 401) {
         if (console.warn(
           "CastClient: Subscription response 401 - Token refresh needed."
         ), a)
-          return m.status;
+          return p.status;
         try {
           const { code: g } = await e.authenticate();
           if (g && await e.getToken(g))
             return await e.subscribe(true);
         } catch (g) {
-          const y = g instanceof Error ? g.message : String(g);
+          const C = g instanceof Error ? g.message : String(g);
           console.error(
             "CastClient: Token refresh after 401 failed:",
-            y
+            C
           );
         }
       } else
         console.error(
           "CastClient: Subscription rejected by hub. Status:",
-          m.status
+          p.status
         );
-      return m.status;
-    } catch (m) {
+      return p.status;
+    } catch (p) {
       t.hub.subscribed = false;
-      const g = m instanceof Error ? m.message : String(m);
+      const g = p instanceof Error ? p.message : String(p);
       return console.error("CastClient: Exception subscribing to the hub:", g), 0;
     }
   }, e.unsubscribe = async () => {
     t.hub.subscribed = false, t.hub.resubscribeRequested = false;
-    const a = Rt(t.config.callbackUrl), u = Ft(
+    const a = zt(t.config.callbackUrl), f = Wt(
       "unsubscribe",
       t.session,
       a,
@@ -14904,363 +17067,384 @@ function Xo(e, t) {
           "Content-Type": "application/x-www-form-urlencoded",
           Authorization: `Bearer ${t.hub.token}`
         },
-        body: u,
-        signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(zt) : void 0
+        body: f,
+        signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(Kt) : void 0
       })).status === 202 && console.debug(
         "CastClient: Unsubscribe successfully from hub",
         t.hub.name
       );
-    } catch (f) {
-      const d = f instanceof Error ? f.message : String(f);
+    } catch (u) {
+      const d = u instanceof Error ? u.message : String(u);
       console.warn("CastClient: Error unsubscribing from the hub.", d);
     }
     t.hub.websocket && (t.hub.websocket.close(), t.hub.websocket = null), n("disconnected");
   };
-  function h(a, u = t.hub) {
-    const f = { ...a, timestamp: (/* @__PURE__ */ new Date()).toJSON() };
-    f.id = Ee(i()), u.lastPublishedMessageID = f.id;
+  function h(a, f = t.hub) {
+    const u = { ...a, timestamp: (/* @__PURE__ */ new Date()).toJSON() };
+    u.id = Le(r()), f.lastPublishedMessageID = u.id;
     const d = t.session.subscriberName && t.session.subscriberName.trim(), b = t.session.productName && t.session.productName.trim();
-    if (d && f["subscriber.name"] === void 0 && (f["subscriber.name"] = d), b && f["subscriber.product.name"] === void 0 && (f["subscriber.product.name"] = b), f.event && !f.event["hub.topic"] && (f.event["hub.topic"] = t.session.topic), f["target.actor"] === void 0 && t.session.defaultTargetActor && !String(
-      f["target.subscriber.name"] || ""
+    if (d && u["subscriber.name"] === void 0 && (u["subscriber.name"] = d), b && u["subscriber.product.name"] === void 0 && (u["subscriber.product.name"] = b), u.event && !u.event["hub.topic"] && (u.event["hub.topic"] = t.session.topic), u["target.actor"] === void 0 && t.session.defaultTargetActor && !String(
+      u["target.subscriber.name"] || ""
     ).trim()) {
-      const g = Te(
+      const g = Ne(
         t.session.defaultTargetActor
       );
-      g && (f["target.actor"] = g);
+      g && (u["target.actor"] = g);
     }
-    return f;
+    return u;
   }
-  e.fetchPayload = (a) => o.fetchPayload(a), e.fetchAllPayloads = (a) => o.fetchAllPayloads(a), e.hasPendingPayload = (a) => o.hasPendingPayload(a), e.publishMultipart = async (a, u, f = t.hub) => {
-    let d = h(a, f);
-    const b = await Ae(u);
-    d = Ze(d);
-    let m = await Pt(d);
-    if (!m.length) {
-      const y = (d.event && typeof d.event["hub.event"] == "string" ? d.event["hub.event"] : "") === "dicom-send" ? "dicom-send.dcm" : "nifti-send.nii.gz";
+  e.fetchPayload = (a) => s.fetchPayload(a), e.fetchAllPayloads = (a) => s.fetchAllPayloads(a), e.hasPendingPayload = (a) => s.hasPendingPayload(a), e.publishMultipart = async (a, f, u = t.hub) => {
+    let d = h(a, u);
+    const b = await ke(f);
+    d = tt(d);
+    let p = await qt(d);
+    if (!p.length) {
+      const C = (d.event && typeof d.event["hub.event"] == "string" ? d.event["hub.event"] : "") === "dicom-send" ? "dicom-send.dcm" : "nifti-send.nii.gz";
       d.event.context = {
         files: [
           {
             data: b,
-            fileName: or(d, y),
+            fileName: Cr(d, C),
             mimeType: "application/octet-stream",
             byteLength: b.byteLength
           }
         ]
-      }, m = [b];
+      }, p = [b];
     }
-    return e.publishBinaryBatch(d, m, f);
-  }, e.publishBinaryBatch = async (a, u, f = t.hub) => {
-    const d = Ze(
-      h(a, f)
+    return e.publishBinaryBatch(d, p, u);
+  }, e.publishBinaryBatch = async (a, f, u = t.hub) => {
+    const d = tt(
+      h(a, u)
     );
-    return fr({
+    return vr({
       msg: d,
-      fileBytesList: u,
-      hub: f,
-      messageIdPrefix: i
+      fileBytesList: f,
+      hub: u,
+      messageIdPrefix: r
     });
-  }, e.publish = async (a, u = t.hub) => {
-    let f = h(a, u);
-    if (f = Ze(f), ar(f)) {
-      const d = await Pt(f);
+  }, e.publish = async (a, f = t.hub) => {
+    let u = h(a, f);
+    if (u = tt(u), wr(u)) {
+      const d = await qt(u);
       if (d.length)
-        return e.publishBinaryBatch(f, d, u);
+        return e.publishBinaryBatch(u, d, f);
     }
     try {
-      return await fetch(u.hub_endpoint, {
+      return await fetch(f.hub_endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${u.token}`
+          Authorization: `Bearer ${f.token}`
         },
-        body: JSON.stringify(f)
+        body: JSON.stringify(u)
       });
     } catch (d) {
       const b = d instanceof Error ? d.message : String(d);
       return console.debug("CastClient:", b), null;
     }
-  }, e.publishNiftiMultipart = async (a, u, f) => e.publishBinaryBatch(a, [u], f), e.request = async (a = {}) => {
-    const u = String(a["subscriber.name"] || "").trim();
-    if (!u)
+  }, e.publishNiftiMultipart = async (a, f, u) => e.publishBinaryBatch(a, [f], u), e.request = async (a = {}) => {
+    const f = String(a["subscriber.name"] || "").trim();
+    if (!f)
       throw new Error('CastClient.request: "subscriber.name" is required.');
-    const f = t.hub, d = f.token && f.token.trim();
+    const u = t.hub, d = u.token && u.token.trim();
     if (!d)
       throw new Error(
         "CastClient.request: token is required (call authenticate() then getToken(code) first)."
       );
-    const b = `${(f.hub_endpoint || "").replace(
+    const b = `${(u.hub_endpoint || "").replace(
       /\/+$/,
       ""
-    )}/request`, m = {
-      "subscriber.name": u,
-      id: a.id && String(a.id).trim() || Ee(i()),
+    )}/request`, p = {
+      "subscriber.name": f,
+      id: a.id && String(a.id).trim() || Le(r()),
       timestamp: a.timestamp && String(a.timestamp).trim() || (/* @__PURE__ */ new Date()).toJSON()
     };
     if (a.event && typeof a.event == "object") {
-      m.event = { ...a.event };
-      const U = t.session.topic && String(t.session.topic).trim();
-      U && !m.event["hub.topic"] && (m.event["hub.topic"] = U);
+      p.event = { ...a.event };
+      const k = t.session.topic && String(t.session.topic).trim();
+      k && !p.event["hub.topic"] && (p.event["hub.topic"] = k);
     } else
       throw new Error(
         'CastClient.request: "event" with hub.event is required.'
       );
-    const g = m.event["hub.event"];
+    const g = p.event["hub.event"];
     if (!g || !String(g).trim())
       throw new Error(
         'CastClient.request: event["hub.event"] must be a *-request event name.'
       );
-    a["subscriber.actor"] && String(a["subscriber.actor"]).trim() && (m["subscriber.actor"] = String(a["subscriber.actor"]).trim());
-    const y = Object.prototype.hasOwnProperty.call(
+    a["subscriber.actor"] && String(a["subscriber.actor"]).trim() && (p["subscriber.actor"] = String(a["subscriber.actor"]).trim());
+    const C = Object.prototype.hasOwnProperty.call(
       a,
       "target.actor"
     );
-    let N = y ? Te(a["target.actor"]) : void 0;
-    N === void 0 && !y && t.session.defaultTargetActor && (N = Te(t.session.defaultTargetActor)), N !== void 0 && (m["target.actor"] = N);
-    const T = a["target.product.name"] !== void 0 ? a["target.product.name"] : a.targetProductName, L = nn(T);
-    L !== void 0 && (m["target.product.name"] = L);
-    const A = await fetch(b, {
+    let N = C ? Ne(a["target.actor"]) : void 0;
+    N === void 0 && !C && t.session.defaultTargetActor && (N = Ne(t.session.defaultTargetActor)), N !== void 0 && (p["target.actor"] = N);
+    const $2 = a["target.product.name"] !== void 0 ? a["target.product.name"] : a.targetProductName, A = fn($2);
+    A !== void 0 && (p["target.product.name"] = A);
+    const E = await fetch(b, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${d}`
       },
-      body: JSON.stringify(m)
+      body: JSON.stringify(p)
     });
-    let S;
-    if ((A.headers.get("content-type") || "").includes("application/json"))
+    let T;
+    if ((E.headers.get("content-type") || "").includes("application/json"))
       try {
-        S = await A.json();
+        T = await E.json();
       } catch {
-        S = "";
+        T = "";
       }
     else
-      S = await A.text();
-    return { ok: A.ok, status: A.status, data: S };
-  }, e.sendCastRequestResponse = (a, u, f, d) => {
+      T = await E.text();
+    return { ok: E.ok, status: E.status, data: T };
+  }, e.sendCastRequestResponse = (a, f, u, d) => {
     if (!t.hub.websocket || typeof WebSocket > "u" || t.hub.websocket.readyState !== WebSocket.OPEN)
       return;
     let b = "";
-    if (typeof u == "string" ? b = u.trim() : u != null && (b = String(u).trim()), !b) {
+    if (typeof f == "string" ? b = f.trim() : f != null && (b = String(f).trim()), !b) {
       console.error(
         "CastClient.sendCastRequestResponse requires a non-empty dataType."
       );
       return;
     }
-    const m = Kt(b), g = {
+    const p = sn(b), g = {
       timestamp: (/* @__PURE__ */ new Date()).toJSON(),
-      id: Ee(i()),
+      id: Le(r()),
       "subscriber.name": t.session.subscriberName || void 0,
       "subscriber.product.name": t.session.productName || void 0,
       event: {
         "hub.topic": d || t.session.topic,
-        "hub.event": m,
+        "hub.event": p,
         context: {
           id: a,
           dataType: b,
-          data: f
+          data: u
         }
       }
     };
     Array.isArray(t.session.actors) && t.session.actors.length > 0 && (g.actor = t.session.actors[0]), t.hub.websocket.send(JSON.stringify(g));
   }, t.config.autoReconnect && (t.reconnectInterval = setInterval(
     l,
-    Ko
+    Ds
   ));
 }
-function qn(e, t, n = {}) {
-  Object.assign(t, Wt, n), t.config = { ...Wt.config, ...n }, t.session = {
-    ...wr(),
+function Qn(e, t, n = {}) {
+  Object.assign(t, Qt, n), t.config = { ...Qt.config, ...n }, t.session = {
+    ...Mr(),
     ...t.config.session || {}
-  }, (!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = ct(
+  }, (!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = bt(
     t.session.productName || t.config.productName || "CAST"
   )), t.hub = {
-    ...Sr(),
+    ...Rr(),
     ...t.config.hub || {},
-    ...Er()
-  }, Xn(e, t), Qn(e, t, ["config"]), Xo(e, t);
+    ...Or()
+  }, dr(e, t), hr(e, t, ["config"]), Hs(e, t);
 }
-var Qo = tr(qn, "vtkCastClient");
-var es = {
-  newInstance: Qo,
-  extend: qn,
-  applyCastPublishEnvelopeFields: _i,
-  batchContextFiles: Nn,
-  BINARY_PLACEHOLDER: ve,
-  buildDicomwebImagingStudyOpenContext: ii,
-  buildDicomUrlImagingStudyOpenContext: ri,
-  buildFilesImagingStudyOpenContext: Tn,
-  buildIdcImagingStudyOpenContext: si,
-  buildLocalDicomImagingStudyOpenContext: oi,
-  buildNiftiUrlImagingStudyOpenContext: ai,
-  castMessageHasPendingFilePayloads: $n,
-  buildCastConferenceView: gt,
-  castConferenceSelfStatusLabel: Ct,
-  castConferencePlaceStatusLabel: hn,
-  castConferenceLeaderPlace: yt,
-  castConferenceParticipantRowStatus: bn,
-  resolveCastConferenceHeaderActions: pn,
-  applyCastConferenceHeaderActions: Vr,
-  renderCastConferencePresence: zr,
-  openCastConferenceParticipantsPopup: Gr,
-  closeCastConferenceParticipantsPopup: O,
-  isCastConferenceParticipantsPopupOpen: Wr,
-  CAST_CONFERENCE_EXIT_ACK_MS: sn,
-  CAST_CONFERENCE_POLL_MS: Br,
-  CAST_CONFERENCE_POPUP_SIZE: Ur,
-  CAST_REPORTING_WINDOW_NAME: Mr,
-  CAST_WORKLIST_WINDOW_NAME: Pr,
-  clearCastDialogNearAnchor: vn,
-  placeCastDialogNearAnchor: li,
-  CAST_CONFERENCE_TITLE_PRESETS: an,
-  CAST_CONFERENCE_STRINGS_EN: Qe,
-  CAST_DEFAULT_SUBSCRIBER_ACTOR: Oe,
-  createCastConferenceDialog: Zr,
-  confirmCastConferenceTakeover: Xr,
-  CAST_IMAGE_DISPLAY_ACTOR: et,
-  createCastConferenceInviteController: Kr,
-  createCastConferenceInviteDialog: yn,
-  interpolateCastConferenceString: ie,
-  mergeCastConferenceStrings: W,
-  parseConferenceInviteFromMessage: gn,
-  shouldShowConferenceInvite: Yr,
-  showCastInfoToast: Qr,
-  CAST_DICOMWEB_ROOT: Et,
-  CAST_ENVELOPE_ANY: q,
-  CAST_IDENTIFIER_DICOM_UID: pe,
-  CAST_IDENTIFIER_IDC: Pe,
-  CAST_IDENTIFIER_IDC_SOURCE_BUCKET: Re,
-  CAST_IDENTIFIER_NIFTI_FILENAME: wt,
-  CAST_IDENTIFIER_NIFTI_URL: St,
-  CAST_IDENTIFIER_OHIF_MODE: $e,
-  CAST_IDENTIFIER_VOLVIEW_SAMPLE_ID: Ie,
-  CAST_IDENTIFIER_WORKLIST_SAMPLE_ID: Q,
-  CAST_IMAGING_STUDY_OPEN_PROFILE: me,
-  CAST_OPEN_MODE: ee,
-  CAST_OPEN_MODE_DICOMWEB: ue,
-  CAST_OPEN_MODE_DICOM_URL: _e,
-  CAST_OPEN_MODE_FILES: Y,
-  CAST_OPEN_MODE_IDC: Ue,
-  CAST_OPEN_MODE_LOCAL_DICOM: Me,
-  CAST_RADIO_ICON_CLASS: Xt,
-  CAST_RADIO_ICON_SVG: Qt,
-  CAST_RADIO_SLASH_CLASS: tn,
-  CAST_RADIO_STATUS_ICON_CLASS: en,
-  castRadioStatusMarkup: yr,
-  castRadioStatusVisual: Cr,
-  collatedResponsesFromRequestResult: dr,
-  conferenceHostTopic: D,
-  conferenceSceneLeaderTopic: ht,
-  countEventContextObjects: Lt,
-  createCastConference: ln,
-  joinCastConference: fn,
-  dataTypeFromEventName: pr,
-  decodeBase64ToArrayBuffer: An,
-  DEFAULT_CAST_PUBLISH_ENVELOPE_FIELDS: Ii,
-  deleteCastConference: pt,
-  ensureCastSubscribeEvents: gr,
-  extractDicomSeriesUid: V,
-  extractDicomStudyUid: J,
-  extractDicomwebRoot: tt,
-  extractFilePayloadsForEvent: vi,
-  extractIdcSeriesUid: nt,
-  extractIdcSourceBucket: rt,
-  extractIdentifierValue: R,
-  extractImagingStudyFiles: K,
-  extractNiftiDownloadUrl: le,
-  extractNiftiFilename: Tt,
-  extractOhifMode: Cn,
-  extractOpenMode: wn,
-  extractStudyContextItem: X,
-  extractStudyUIDFromResource: ui,
-  extractVolviewSampleId: Sn,
-  fetchCastConferences: ce,
-  fetchCastConferenceTopics: un,
-  filePayloadToArrayBuffer: kn,
-  filePayloadToFile: Li,
-  findActiveCastConference: ae,
-  generateSubscriberName: ct,
-  getActorKeyword: Ln,
-  getHubEventLower: ge,
-  getInboundTargetActorKeyword: fi,
-  httpUrlFromHubEndpoint: he,
-  isCastConferenceHost: bt,
-  isCastConferenceParticipant: mt,
-  isCastConferenceSceneLeader: cn,
-  isHubEndpointInCloud: Yt,
-  isRequestEvent: br,
-  isResponseEvent: mr,
-  isRunningInCloud: Zt,
-  isStatusPayloadOnline: Nt,
-  isStatusRequestDataType: Bi,
-  isTotalSegmentatorProduct: De,
-  isLungScreeningProduct: Be,
-  isNeuroSegProduct: je,
-  isDentalSegProduct: He,
-  isMhubProduct: qe,
-  isInferenceProduct: Mi,
-  lungScreeningAvailableFromStatusResponses: Ri,
-  neuroSegAvailableFromStatusResponses: Fi,
-  dentalSegAvailableFromStatusResponses: Oi,
-  mhubAvailableFromStatusResponses: Di,
-  normalizeProductToken: st,
-  CAST_INFERENCE_SERVERS: z,
-  findInferenceServerByProduct: Fn,
-  inferenceServerInfoText: zo,
-  renderInferenceServerInfoCardHtml: qo,
-  CAST_PRODUCT_MATCHERS: Dn,
-  matchesCastProduct: Wo,
-  normalizeCastProductName: On,
-  parseProductStatusProbe: jn,
-  publishCastUrlSend: Yo,
-  requestCastLiveScene: Go,
-  requestCastProductStatus: Vo,
-  requestCastStatus: xt,
-  mapInferenceServersFromStatusResult: Hn,
-  probeCastInferenceServers: Zo,
-  cloneContextArray: di,
-  messageEventContext: hi,
-  messageSubscriberName: bi,
-  messageProductName: mi,
-  messageActor: pi,
-  parseStatusUpdateMessage: gi,
-  normalizeConferenceParticipants: dt,
-  normalizeDataType: ft,
-  normalizeImagingStudyContext: vt,
-  normalizeOptionalEnvelopeField: fe,
-  normalizeStudyUID: it,
-  openCastHubPopup: Dr,
-  castReportingPopupPlacement: Rr,
-  castReportingPopupFeatures: Fr,
-  placeCastPopupWindow: Or,
-  parseCollatedRequestResult: xe,
-  productNameFromStatusResponseItem: ze,
-  REQUEST_SUFFIX: oe,
-  requestEventFor: ke,
-  resolveCastConferenceClientUrl: _r,
-  resolveCastConferenceState: Hr,
-  resolveCastConferenceView: dn,
-  resolveCastFileMessage: Ui,
-  resolveCastHubAdminUrl: $r,
-  resolveCastPublishEnvelopeFields: $i,
-  resolveImagingStudyOpenPlan: ci,
-  resolveTargetActorForWire: Te,
-  resolveTargetProductNameForWire: nn,
-  responseEventFor: Kt,
-  RESPONSE_SUFFIX: se,
-  sanitizeCastMessageForDisplay: ki,
-  selectFirstMatchingHubKey: hr,
-  statusItemValue: At,
-  stringifyForLog: ot,
-  summarizeInboundCastMessage: xi,
-  summarizeOutboundCastPublish: Ni,
-  TOTAL_SEGMENTATOR_PRODUCT_ALIASES: _n,
-  LUNG_SCREENING_PRODUCT_ALIASES: Un,
-  NEURO_SEG_PRODUCT_ALIASES: Mn,
-  DENTAL_SEG_PRODUCT_ALIASES: Pn,
-  MHUB_PRODUCT_ALIASES: Rn,
-  totalSegmentatorAvailableFromStatusResponses: Pi,
-  transferCastConferenceLead: jr
+var Bs = mr(Qn, "vtkCastClient");
+var js = {
+  newInstance: Bs,
+  extend: Qn,
+  applyCastPublishEnvelopeFields: Vi,
+  batchContextFiles: Mn,
+  BINARY_PLACEHOLDER: xe,
+  buildDicomwebImagingStudyOpenContext: Ci,
+  buildDicomUrlImagingStudyOpenContext: yi,
+  buildFilesImagingStudyOpenContext: _n,
+  buildIdcImagingStudyOpenContext: wi,
+  buildLocalDicomImagingStudyOpenContext: Si,
+  buildNiftiUrlImagingStudyOpenContext: Ti,
+  castMessageHasPendingFilePayloads: Dn,
+  buildCastConferenceView: Et,
+  castConferenceSelfStatusLabel: vt,
+  castConferencePlaceStatusLabel: wn,
+  castConferenceLeaderPlace: At,
+  castConferenceParticipantRowStatus: Tn,
+  resolveCastConferenceHeaderActions: An,
+  applyCastConferenceHeaderActions: ci,
+  renderCastConferencePresence: oi,
+  openCastConferenceParticipantsPopup: ai,
+  closeCastConferenceParticipantsPopup: q,
+  isCastConferenceParticipantsPopupOpen: si,
+  CAST_CONFERENCE_EXIT_ACK_MS: bn,
+  CAST_CONFERENCE_POLL_MS: ti,
+  CAST_CONFERENCE_POPUP_SIZE: Gr,
+  CAST_REPORTING_WINDOW_NAME: Jr,
+  CAST_CLASSROOM_WINDOW_NAME: Xr,
+  CAST_WORKLIST_WINDOW_NAME: Yr,
+  clearCastDialogNearAnchor: Lt,
+  placeCastDialogNearAnchor: vn,
+  CAST_CONFERENCE_TITLE_PRESETS: mn,
+  CAST_CONFERENCE_STRINGS_EN: ot,
+  CAST_DEFAULT_SUBSCRIBER_ACTOR: je,
+  createCastConferenceDialog: ui,
+  confirmCastConferenceTakeover: hi,
+  CAST_IMAGE_DISPLAY_ACTOR: st,
+  createCastConferenceInviteController: di,
+  createCastConferenceInviteDialog: Nn,
+  interpolateCastConferenceString: de3,
+  mergeCastConferenceStrings: Z,
+  parseConferenceInviteFromMessage: Ln,
+  shouldShowConferenceInvite: fi,
+  showCastInfoToast: bi,
+  CAST_DICOMWEB_ROOT: It,
+  CAST_ENVELOPE_ANY: Y,
+  CAST_IDENTIFIER_DICOM_UID: Ae,
+  CAST_IDENTIFIER_IDC: De,
+  CAST_IDENTIFIER_IDC_SOURCE_BUCKET: He,
+  CAST_IDENTIFIER_NIFTI_FILENAME: xt,
+  CAST_IDENTIFIER_NIFTI_URL: Nt,
+  CAST_IDENTIFIER_OHIF_MODE: Me,
+  CAST_IDENTIFIER_VOLVIEW_SAMPLE_ID: Re,
+  CAST_IDENTIFIER_WORKLIST_SAMPLE_ID: oe,
+  CAST_IMAGING_STUDY_OPEN_PROFILE: Ee,
+  CAST_OPEN_MODE: se,
+  CAST_OPEN_MODE_DICOMWEB: ge,
+  CAST_OPEN_MODE_DICOM_URL: Oe,
+  CAST_OPEN_MODE_FILES: ne,
+  CAST_OPEN_MODE_IDC: Pe,
+  CAST_OPEN_MODE_LOCAL_DICOM: Fe,
+  CAST_RADIO_ICON_CLASS: an,
+  CAST_RADIO_ICON_SVG: cn,
+  CAST_RADIO_SLASH_CLASS: un,
+  CAST_RADIO_STATUS_ICON_CLASS: ln,
+  castRadioStatusMarkup: _r,
+  castRadioStatusVisual: Ur,
+  collatedResponsesFromRequestResult: Lr,
+  conferenceHostTopic: V,
+  conferenceSceneLeaderTopic: Ct,
+  countEventContextObjects: _t,
+  createCastConference: yn,
+  joinCastConference: Cn,
+  dataTypeFromEventName: kr,
+  decodeBase64ToArrayBuffer: Rn,
+  DEFAULT_CAST_PUBLISH_ENVELOPE_FIELDS: zi,
+  deleteCastConference: Tt,
+  ensureCastSubscribeEvents: $r,
+  extractDicomSeriesUid: Q,
+  extractDicomStudyUid: ee,
+  extractDicomwebRoot: at,
+  extractFilePayloadsForEvent: Fi,
+  extractIdcSeriesUid: ct,
+  extractIdcSourceBucket: lt3,
+  extractIdentifierValue: H,
+  extractImagingStudyFiles: re,
+  extractNiftiDownloadUrl: ye,
+  extractNiftiFilename: kt,
+  extractOhifMode: xn,
+  extractOpenMode: kn,
+  extractStudyContextItem: ie,
+  extractStudyUIDFromResource: Ai,
+  extractVolviewSampleId: In,
+  fetchCastConferences: pe,
+  fetchCastConferenceTopics: gn,
+  filePayloadToArrayBuffer: Pn,
+  filePayloadToFile: Di,
+  findActiveCastConference: me,
+  generateSubscriberName: bt,
+  getActorKeyword: Un,
+  getHubEventLower: ve,
+  getInboundTargetActorKeyword: vi,
+  httpUrlFromHubEndpoint: we,
+  isCastConferenceHost: St,
+  isCastConferenceParticipant: wt,
+  isCastConferenceSceneLeader: pn,
+  isHubEndpointInCloud: on,
+  isRequestEvent: xr,
+  isResponseEvent: Ir,
+  isRunningInCloud: rn,
+  isStatusPayloadOnline: Rt,
+  isStatusRequestDataType: no2,
+  isTotalSegmentatorProduct: qe,
+  isLungScreeningProduct: ze,
+  isNeuroSegProduct: We,
+  isDentalSegProduct: Ve,
+  isTorchXrayVisionProduct: Ge,
+  isMhubProduct: Je,
+  isInferenceProduct: Xi,
+  lungScreeningAvailableFromStatusResponses: Zi,
+  neuroSegAvailableFromStatusResponses: Ki,
+  dentalSegAvailableFromStatusResponses: Qi,
+  torchXrayVisionAvailableFromStatusResponses: eo,
+  mhubAvailableFromStatusResponses: to,
+  normalizeProductToken: dt,
+  CAST_INFERENCE_SERVERS: W,
+  LOCAL_AI_SERVERS: Is,
+  findInferenceServerByProduct: Gn,
+  inferenceServerInfoText: _s,
+  isLocalCapableInferenceServer: ks,
+  renderInferenceServerInfoCardHtml: $s,
+  CAST_PRODUCT_MATCHERS: Xn,
+  matchesCastProduct: Us,
+  normalizeCastProductName: Jn,
+  parseProductStatusProbe: Zn,
+  publishCastUrlSend: Fs,
+  requestCastLiveScene: Rs,
+  requestCastProductStatus: Ms,
+  requestCastStatus: Mt,
+  mapInferenceServersFromStatusResult: Kn,
+  probeCastInferenceServers: Ps,
+  cloneContextArray: Li,
+  messageEventContext: Ni,
+  messageSubscriberName: xi,
+  messageProductName: Ii,
+  messageActor: ki,
+  parseStatusUpdateMessage: $i,
+  normalizeConferenceParticipants: yt,
+  normalizeDataType: gt,
+  normalizeImagingStudyContext: $t,
+  normalizeOptionalEnvelopeField: Ce,
+  normalizeStudyUID: ut,
+  openCastHubPopup: ei,
+  castReportingPopupPlacement: Zr,
+  castReportingPopupFeatures: Kr,
+  placeCastPopupWindow: Qr,
+  parseCollatedRequestResult: _e,
+  productNameFromStatusResponseItem: Xe,
+  REQUEST_SUFFIX: he,
+  requestEventFor: Ue,
+  resolveCastConferenceClientUrl: Vr,
+  resolveCastConferenceState: ri,
+  resolveCastConferenceView: Sn,
+  resolveCastFileMessage: Gi,
+  resolveCastHubAdminUrl: Wr,
+  resolveCastPublishEnvelopeFields: Wi,
+  resolveImagingStudyOpenPlan: Ei,
+  resolveTargetActorForWire: Ne,
+  resolveTargetProductNameForWire: fn,
+  responseEventFor: sn,
+  RESPONSE_SUFFIX: be,
+  sanitizeCastMessageForDisplay: qi,
+  selectFirstMatchingHubKey: Nr,
+  statusItemValue: Ut,
+  stringifyForLog: ft,
+  summarizeInboundCastMessage: ji,
+  summarizeOutboundCastPublish: Bi,
+  TOTAL_SEGMENTATOR_PRODUCT_ALIASES: Hn,
+  LUNG_SCREENING_PRODUCT_ALIASES: Bn,
+  NEURO_SEG_PRODUCT_ALIASES: jn,
+  DENTAL_SEG_PRODUCT_ALIASES: qn,
+  TORCHXRAYVISION_PRODUCT_ALIASES: zn,
+  MHUB_PRODUCT_ALIASES: Wn,
+  totalSegmentatorAvailableFromStatusResponses: Yi,
+  transferCastConferenceLead: ni
 };
+
+// ../cast-context-identity.ts
+var SKIP_STUDY_RELOAD_TOAST = "Study already open \u2014 skipped reload";
+function sameOpenImagingStudyContext(a, b) {
+  if (!a?.length || !b?.length) return false;
+  const sa = In(a);
+  const sb = In(b);
+  if (sa && sb) return sa === sb;
+  const studyA = ee(a);
+  const studyB = ee(b);
+  if (!studyA || !studyB || studyA !== studyB) return false;
+  const seriesA = Q(a) || "";
+  const seriesB = Q(b) || "";
+  return seriesA === seriesB;
+}
 
 // logic/readers/nifti.ts
 var DT = {
@@ -15277,8 +17461,8 @@ function isGzip2(bytes) {
   return bytes.length > 2 && bytes[0] === 31 && bytes[1] === 139;
 }
 async function gunzip2(bytes) {
-  const ds = new DecompressionStream("gzip");
-  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer());
+  const ds2 = new DecompressionStream("gzip");
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds2)).arrayBuffer());
 }
 function isNifti(bytes) {
   if (bytes.length < 348) return false;
@@ -15295,7 +17479,7 @@ function quaternToMat(b, c, d, qfac, dx, dy, dz) {
     d /= l;
     a = 0;
   } else a = Math.sqrt(a);
-  const R2 = [
+  const R = [
     a * a + b * b - c * c - d * d,
     2 * b * c - 2 * a * d,
     2 * b * d + 2 * a * c,
@@ -15307,7 +17491,7 @@ function quaternToMat(b, c, d, qfac, dx, dy, dz) {
     a * a + d * d - c * c - b * b
   ];
   const s = [dx, dy, dz * (qfac < 0 ? -1 : 1)];
-  return R2.map((v, i) => v * s[i % 3]);
+  return R.map((v, i) => v * s[i % 3]);
 }
 async function parseNifti(input, name) {
   const bytes = isGzip2(input) ? await gunzip2(input) : input;
@@ -15332,7 +17516,7 @@ async function parseNifti(input, name) {
     sformCode = i16(254);
     quat = [f32(256), f32(260), f32(264)];
     qoff = [f32(268), f32(272), f32(276)];
-    srow = Array.from({ length: 12 }, (_2, i) => f32(280 + i * 4));
+    srow = Array.from({ length: 12 }, (_, i) => f32(280 + i * 4));
   } else {
     little = dv.getInt32(0, true) === 540;
     const i64 = (o) => Number(dv.getBigInt64(o, little)), f64 = (o) => dv.getFloat64(o, little), i32 = (o) => dv.getInt32(o, little);
@@ -15346,7 +17530,7 @@ async function parseNifti(input, name) {
     sformCode = i32(348);
     quat = [f64(352), f64(360), f64(368)];
     qoff = [f64(376), f64(384), f64(392)];
-    srow = Array.from({ length: 12 }, (_2, i) => f64(400 + i * 8));
+    srow = Array.from({ length: 12 }, (_, i) => f64(400 + i * 8));
   }
   const nd = dims[0];
   if (nd < 3 && nd !== 2) throw new Error(`unsupported NIfTI ndim ${nd}`);
@@ -15374,8 +17558,8 @@ async function parseNifti(input, name) {
   let M2;
   if (sformCode > 0) M2 = [...srow.slice(0, 4), ...srow.slice(4, 8), ...srow.slice(8, 12), 0, 0, 0, 1];
   else if (qformCode > 0) {
-    const R2 = quaternToMat(quat[0], quat[1], quat[2], pixdim[0] === 0 ? 1 : pixdim[0], pixdim[1], pixdim[2], pixdim[3]);
-    M2 = [R2[0], R2[1], R2[2], qoff[0], R2[3], R2[4], R2[5], qoff[1], R2[6], R2[7], R2[8], qoff[2], 0, 0, 0, 1];
+    const R = quaternToMat(quat[0], quat[1], quat[2], pixdim[0] === 0 ? 1 : pixdim[0], pixdim[1], pixdim[2], pixdim[3]);
+    M2 = [R[0], R[1], R[2], qoff[0], R[3], R[4], R[5], qoff[1], R[6], R[7], R[8], qoff[2], 0, 0, 0, 1];
   } else M2 = [pixdim[1] || 1, 0, 0, 0, 0, pixdim[2] || 1, 0, 0, 0, 0, pixdim[3] || 1, 0, 0, 0, 0, 1];
   return { dims: [nx, ny, nz], ijkToRAS: M2, data, dtype: dt2.zarr, name, meta };
 }
@@ -15650,9 +17834,9 @@ function materializeLiveSceneBlobUrls(sceneDoc, files) {
     const zarr = n.zarr && typeof n.zarr === "object" ? { ...n.zarr } : null;
     const attrs = n.attrs && typeof n.attrs === "object" ? { ...n.attrs } : null;
     const attrsZarr = attrs && attrs.zarr && typeof attrs.zarr === "object" ? { ...attrs.zarr } : null;
-    const rewriteHashes = (z2) => {
-      const hashes = z2.chunkHashes;
-      if (!hashes || typeof hashes !== "object") return z2;
+    const rewriteHashes = (z) => {
+      const hashes = z.chunkHashes;
+      if (!hashes || typeof hashes !== "object") return z;
       const next = {};
       for (const [coord, hash] of Object.entries(
         hashes
@@ -15660,7 +17844,7 @@ function materializeLiveSceneBlobUrls(sceneDoc, files) {
         const h = String(hash || "").trim();
         next[coord] = hashToUrl.get(h) || h;
       }
-      return { ...z2, chunkHashes: next };
+      return { ...z, chunkHashes: next };
     };
     if (zarr) n.zarr = rewriteHashes(zarr);
     if (attrsZarr && attrs) {
@@ -15672,7 +17856,7 @@ function materializeLiveSceneBlobUrls(sceneDoc, files) {
   return { ...sceneDoc, blobBase: "", nodes };
 }
 function sceneUrlFromOpenContext(context) {
-  const plan = ci(context);
+  const plan = Ei(context);
   if (!plan || plan.mode !== "files") return null;
   const files = Array.isArray(plan.files) ? plan.files : [];
   const sceneFile = files.find((f) => String(f.role || "").toLowerCase() === "scene") || files.find(looksLikeSceneJson) || files[0];
@@ -15718,7 +17902,7 @@ function imagingStudyContextFromSceneUrl(sceneUrl) {
     if (base) fileName = base;
   } catch {
   }
-  return Tn({
+  return _n({
     id: `scene-${fileName.replace(/\.[^.]+$/, "") || "livescene"}`,
     files: [
       {
@@ -15733,7 +17917,7 @@ function imagingStudyContextFromSceneUrl(sceneUrl) {
 }
 function imagingStudyContextFromSceneDoc(doc, idHint) {
   const url = String(doc.url || "").trim();
-  const filesCtx = url ? imagingStudyContextFromSceneUrl(url) : Tn({
+  const filesCtx = url ? imagingStudyContextFromSceneUrl(url) : _n({
     id: String(idHint || "livescene").trim() || "livescene",
     files: []
   });
@@ -15766,7 +17950,7 @@ function imagingStudyContextFromLocalStudy(opts) {
   const studyUid = String(opts.studyInstanceUID || "").trim();
   const seriesUid = String(opts.seriesInstanceUID || "").trim();
   const id = String(opts.id || "").trim() || studyUid || seriesUid || `local-${Date.now()}`;
-  const context = Tn({
+  const context = _n({
     id,
     files: []
   });
@@ -15861,7 +18045,7 @@ function looksLikeVolumeFile(f) {
   return tip.endsWith(".nii") || tip.endsWith(".nii.gz") || tip.endsWith(".nrrd") || tip.endsWith(".nrrd.gz") || tip.endsWith(".nhdr");
 }
 function volumeFileFromOpenContext(context) {
-  const plan = ci(context);
+  const plan = Ei(context);
   if (!plan || plan.mode !== "files") return null;
   const files = Array.isArray(plan.files) ? plan.files : [];
   const volFile = files.find((f) => looksLikeVolumeFile(f)) || files.find((f) => {
@@ -17662,7 +19846,7 @@ function isHostedOnCastHub(location2 = globalThis.location) {
   return String(location2?.pathname || "").startsWith("/slicerlive");
 }
 function shouldUseSameOriginHub(location2 = globalThis.location) {
-  return isHostedOnCastHub(location2) || Zt(location2);
+  return isHostedOnCastHub(location2) || rn(location2);
 }
 function resolveHubConfig(location2 = globalThis.location) {
   if (!shouldUseSameOriginHub(location2)) {
@@ -17720,9 +19904,9 @@ var worklistConnectedApps = /* @__PURE__ */ new Map();
 var TITLE_WORKLIST_ONLINE = "SlicerWorklist is connected on this topic";
 var TITLE_WORKLIST_OFFLINE = "Open SlicerWorklist (no worklist responded on this topic)";
 var TITLE_REPORTING_ONLINE = "DICOM SR is connected on this topic";
-var TITLE_REPORTING_OFFLINE = "Open DICOM SR reporting client (no reporting responded on this topic)";
-var TITLE_REMOTE_AI = "Remote AI \u2014 inference servers";
-var TITLE_REMOTE_AI_ONLINE = "Remote AI \u2014 inference server(s) online on this topic";
+var TITLE_REPORTING_OFFLINE = "Open DICOM SR Report Creator (no reporting responded on this topic)";
+var TITLE_REMOTE_AI = "Evidence Creators \u2014 inference servers";
+var TITLE_REMOTE_AI_ONLINE = "Evidence Creators \u2014 inference server(s) online on this topic";
 var inferenceServersOnline = false;
 function setIraCastStatusListener(fn2) {
   onStatus = fn2;
@@ -17834,7 +20018,7 @@ async function syncIraConferenceView() {
   }
   try {
     const hubEndpoint = client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
-    const view = await dn(
+    const view = await Sn(
       hubEndpoint,
       topic,
       subscriberName,
@@ -17846,7 +20030,7 @@ async function syncIraConferenceView() {
 }
 function handleConferenceHubEvent(message) {
   const event = message?.event;
-  const hubEvent = ge(event);
+  const hubEvent = ve(event);
   const inviteHandled = Boolean(conferenceHubHandler?.(message));
   if (inviteHandled) {
     if (hubEvent === "conference-start") {
@@ -17890,8 +20074,8 @@ function resolveIraWorklistUrl(location2 = globalThis.location) {
   }
   return "http://localhost:8140/";
 }
-var REPORTING_WINDOW_NAME = Mr;
-var WORKLIST_WINDOW_NAME = Pr;
+var REPORTING_WINDOW_NAME = Jr;
+var WORKLIST_WINDOW_NAME = Yr;
 var worklistClientWindow = null;
 var reportingWindow = null;
 var worklistWindow = null;
@@ -17926,7 +20110,7 @@ function adoptWorklistClientWindowFromStatusResponses(responses) {
   }
 }
 function reportingPopupPlacement() {
-  return Rr();
+  return Zr();
 }
 function focusExistingReportingWindow() {
   if (!reportingWindow || reportingWindow.closed) {
@@ -17978,13 +20162,13 @@ function openIraReportingClient() {
   if (nextToken) url.searchParams.set("id-token", nextToken);
   const href = url.toString();
   const place = reportingPopupPlacement();
-  const features = Fr(place);
+  const features = Kr(place);
   const win = globalThis.open(href, REPORTING_WINDOW_NAME, features);
   if (!win) {
     return globalThis.open(href, REPORTING_WINDOW_NAME);
   }
   reportingWindow = win;
-  Or(win, place);
+  Qr(win, place);
   return win;
 }
 function focusExistingWorklistWindow() {
@@ -18038,14 +20222,14 @@ function setIraImagingStudyContext(context) {
   lastImagingStudyOpenContext = Array.isArray(context) ? context : [];
 }
 function getIraImagingStudyOpenContext() {
-  return di(lastImagingStudyOpenContext);
+  return Li(lastImagingStudyOpenContext);
 }
 var suppressInboundImagingStudy = 0;
-function beginSuppressInboundImagingStudy(ms = 1500) {
+function beginSuppressInboundImagingStudy(ms2 = 1500) {
   suppressInboundImagingStudy += 1;
   globalThis.setTimeout(() => {
     suppressInboundImagingStudy = Math.max(0, suppressInboundImagingStudy - 1);
-  }, ms);
+  }, ms2);
 }
 function buildIraPublishPayload(hubEvent, context) {
   return {
@@ -18060,8 +20244,8 @@ function buildIraPublishPayload(hubEvent, context) {
   };
 }
 async function publishIraImagingStudyTransition(nextContext) {
-  const next = Array.isArray(nextContext) ? di(nextContext) : [];
-  const previous = di(lastImagingStudyOpenContext);
+  const next = Array.isArray(nextContext) ? Li(nextContext) : [];
+  const previous = Li(lastImagingStudyOpenContext);
   if (!client || connection !== "connected" || !topic) {
     lastImagingStudyOpenContext = next;
     lastLiveScene = null;
@@ -18133,6 +20317,13 @@ var onSceneUpdate = null;
 function setIraSceneUpdateHandler(fn2) {
   onSceneUpdate = fn2;
 }
+var onSegLocaleRefresh = null;
+function setIraSegLocaleRefreshHandler(fn2) {
+  onSegLocaleRefresh = fn2;
+}
+function refreshIraSegLabelsForLocale() {
+  onSegLocaleRefresh?.();
+}
 async function publishIraSceneUpdate(ops) {
   if (!client || connection !== "connected" || !topic) {
     console.warn(`${LOG} scene-update: not connected`);
@@ -18175,8 +20366,8 @@ function setIraPngFullSizeCaptureHandler(fn2) {
 }
 function handleSceneUpdateMessage(message) {
   const event = message?.event;
-  if (ge(event) !== "scene-update") return false;
-  const context = hi(message);
+  if (ve(event) !== "scene-update") return false;
+  const context = Ni(message);
   const items = Array.isArray(context) ? context : [];
   const deliver = conference && !conferenceFollowHost && !isIraConferenceHost() ? filterSceneUpdateContextForVanishing(items) : items;
   if (!deliver.length) {
@@ -18198,7 +20389,7 @@ async function publishInferenceJob(opts) {
   if (!subscriber) return { ok: false, detail: "No subscriber name" };
   if (!topic) return { ok: false, detail: "No Cast topic" };
   if (!opts.files.length) return { ok: false, detail: "No volume files" };
-  return Yo(client, {
+  return Fs(client, {
     targetProductName: opts.product,
     hubEvent: opts.hubEvent,
     files: opts.files,
@@ -18262,7 +20453,7 @@ function withSegmentationContext(context) {
   return withoutSeg;
 }
 function buildStatusResponseData() {
-  let context = di(lastImagingStudyOpenContext);
+  let context = Li(lastImagingStudyOpenContext);
   if (lastLiveScene) {
     context = context.filter((item) => {
       if (!item || typeof item !== "object") return true;
@@ -18327,7 +20518,7 @@ function clearInferenceServersOnline() {
   updateIraRemoteAiButton();
 }
 function applyInferenceOnlineFromStatusResult(result) {
-  const mapped = Hn(result);
+  const mapped = Kn(result);
   const online = mapped.some((r) => r.probe?.online);
   setInferenceServersOnline(online);
   if (online) {
@@ -18354,19 +20545,23 @@ function clearWorklistConnectedApps() {
 function isReportingPresencePeer(productName, actor) {
   const actorKey = actor.trim().toUpperCase();
   if (actorKey === REPORTING_ACTOR) return true;
-  return Wo(productName, "reporting");
+  const product = productName.trim().toUpperCase();
+  if (product === "RPT" || product.startsWith("RPT-") || product === "CAST-RPT" || product.startsWith("CAST-RPT")) {
+    return true;
+  }
+  return Us(productName, "reporting");
 }
 function isWorklistPresencePeer(productName, actor) {
   const actorKey = actor.trim().toUpperCase();
   if (actorKey === WORKLIST_ACTOR) return true;
   const product = productName.trim().toUpperCase();
-  return product === "CAST-WKLST" || product.startsWith("CAST-WKLST");
+  return product === "WKLST" || product.startsWith("WKLST-") || product === "CAST-WKLST" || product.startsWith("CAST-WKLST");
 }
 function markReportingConnectedApp(message) {
-  const subscriber = bi(message);
+  const subscriber = xi(message);
   if (!subscriber) return;
-  const productName = mi(message);
-  const actor = pi(message);
+  const productName = Ii(message);
+  const actor = ki(message);
   if (!isReportingPresencePeer(productName, actor)) return;
   const productKey = productName.trim().toUpperCase();
   if (productKey) {
@@ -18383,10 +20578,10 @@ function markReportingConnectedApp(message) {
   updateIraReportingButton();
 }
 function markWorklistConnectedApp(message) {
-  const subscriber = bi(message);
+  const subscriber = xi(message);
   if (!subscriber) return;
-  const productName = mi(message);
-  const actor = pi(message);
+  const productName = Ii(message);
+  const actor = ki(message);
   if (!isWorklistPresencePeer(productName, actor)) return;
   const productKey = productName.trim().toUpperCase();
   if (productKey) {
@@ -18409,7 +20604,7 @@ function markWorklistConnectedFromStatusResponses(responses) {
     if (!isWorklistPresencePeer("", actor)) continue;
     const key = actor || WORKLIST_ACTOR;
     worklistConnectedApps.set(key, {
-      productName: "CAST-WKLST",
+      productName: "WKLST",
       actor: actor || WORKLIST_ACTOR
     });
     found = true;
@@ -18418,10 +20613,10 @@ function markWorklistConnectedFromStatusResponses(responses) {
 }
 function handleSubscriptionRemoved(message) {
   const event = message?.event;
-  if (!event || ge(event) !== "subscription-removed") {
+  if (!event || ve(event) !== "subscription-removed") {
     return false;
   }
-  const subscriber = bi(message);
+  const subscriber = xi(message);
   if (!subscriber) return false;
   let changed = false;
   if (reportingConnectedApps.has(subscriber)) {
@@ -18468,7 +20663,7 @@ function extractActorKeywords(actor) {
 }
 function handleStatusRequest(message) {
   const event = message?.event;
-  if (!event || !br(ge(event))) return false;
+  if (!event || !xr(ve(event))) return false;
   const context = event.context && typeof event.context === "object" ? event.context : {};
   const correlationId = context.id;
   if (typeof correlationId !== "string" || !correlationId) return false;
@@ -18490,13 +20685,13 @@ function handleStatusRequest(message) {
 }
 function isPngFullSizeRequest(message) {
   const event = message?.event;
-  if (!event || !br(ge(event))) return false;
+  if (!event || !xr(ve(event))) return false;
   const context = event.context && typeof event.context === "object" ? event.context : {};
   return String(context.dataType || "").toUpperCase() === "PNGFULLSIZE";
 }
 async function handlePngFullSizeRequest(message) {
   const event = message?.event;
-  if (!event || !br(ge(event))) return false;
+  if (!event || !xr(ve(event))) return false;
   const context = event.context && typeof event.context === "object" ? event.context : {};
   const correlationId = context.id;
   if (typeof correlationId !== "string" || !correlationId) return false;
@@ -18539,29 +20734,29 @@ async function handlePngFullSizeRequest(message) {
   return true;
 }
 function handleStatusUpdate(message) {
-  const update = gi(message);
+  const update = $i(message);
   if (!update) return false;
   if (update.message) onStatusUpdate?.(update.message, update.level);
   return true;
 }
 function isNiftiSendMessage(message) {
   const event = message?.event;
-  return ge(event) === "nifti-send";
+  return ve(event) === "nifti-send";
 }
 function isDicomSendMessage(message) {
   const event = message?.event;
-  return ge(event) === "dicom-send";
+  return ve(event) === "dicom-send";
 }
 async function handleResolvedFileSend(message, kind, handler) {
   if (!client || !handler) return;
   try {
-    const resolved = await Ui(client, message);
+    const resolved = await Gi(client, message);
     const event = resolved?.event ?? message.event;
     if (!event || typeof event !== "object") {
       console.warn(`${LOG} ${kind}: missing event after resolve`);
       return;
     }
-    const files = Nn(event);
+    const files = Mn(event);
     const withData = files.filter((f) => {
       const data = f.data;
       return data instanceof ArrayBuffer || data instanceof Uint8Array || typeof data === "string";
@@ -18587,7 +20782,7 @@ async function handleDicomSendMessage(message) {
 }
 function handleImagingStudyMessage(message) {
   const event = message?.event;
-  const name = ge(event);
+  const name = ve(event);
   if (name === "imagingstudy-close") {
     if (suppressInboundImagingStudy > 0) {
       console.info(`${LOG} ImagingStudy-close ignored (local publish echo)`);
@@ -18606,7 +20801,7 @@ function handleImagingStudyMessage(message) {
   if (name !== "imagingstudy-open") return false;
   if (suppressInboundImagingStudy > 0) {
     const context = imagingStudyContextItems(message);
-    lastImagingStudyOpenContext = di(context);
+    lastImagingStudyOpenContext = Li(context);
     console.info(`${LOG} ImagingStudy-open ignored (local publish echo)`);
     return true;
   }
@@ -18624,12 +20819,88 @@ function imagingStudyContextItems(message) {
   if (ctx && typeof ctx === "object") {
     return contextItemsFromOpenContext(ctx);
   }
-  return hi(message);
+  return Ni(message);
+}
+function codingModalityRaw(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim().toUpperCase();
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const hit = codingModalityRaw(entry);
+      if (hit) return hit;
+    }
+    return "";
+  }
+  if (typeof value === "object") {
+    const obj = value;
+    if (obj.coding != null) return codingModalityRaw(obj.coding);
+    if (obj.code != null) return String(obj.code).trim().toUpperCase();
+    if (obj.text != null) return String(obj.text).trim().toUpperCase();
+  }
+  return "";
+}
+function modalityFromImagingStudyContext(context) {
+  if (!Array.isArray(context)) return "";
+  for (const item of context) {
+    if (!item || typeof item !== "object") continue;
+    const key = String(item.key || "");
+    const resource = item.resource;
+    if (!resource || typeof resource !== "object") continue;
+    const res = resource;
+    const fromStudy = codingModalityRaw(res.modality);
+    if (fromStudy) return fromStudy;
+    if (Array.isArray(res.series)) {
+      for (const series of res.series) {
+        if (!series || typeof series !== "object") continue;
+        const fromSeries = codingModalityRaw(
+          series.modality
+        );
+        if (fromSeries) return fromSeries;
+      }
+    }
+    if (key === "files" || Array.isArray(res.files)) {
+      const files = Array.isArray(res.files) ? res.files : [];
+      for (const file of files) {
+        if (!file || typeof file !== "object") continue;
+        const row = file;
+        const role = String(row.role || "").trim().toLowerCase();
+        if (role && role !== "volume") continue;
+        const label = String(row.label || "").trim().toUpperCase();
+        if (label === "CR" || label === "DX") return label;
+      }
+    }
+    const fromM = String(res.m || "").trim().toUpperCase();
+    if (fromM) return fromM;
+  }
+  return "";
+}
+function isProjectionRadiographyModality(modality) {
+  const m = String(modality || "").trim().toUpperCase();
+  return m === "CR" || m === "DX";
+}
+function rejectCrDxImagingStudyOpen(context, reason) {
+  const modality = modalityFromImagingStudyContext(context);
+  if (!isProjectionRadiographyModality(modality)) return false;
+  const hadOpen = lastImagingStudyOpenContext.length > 0 || iraUrlHasStudyParams();
+  console.info(
+    `${LOG} ImagingStudy-open rejected (${reason}): modality ${modality} \u2014 not opening in SlicerLive`
+  );
+  bi(`Modality ${modality} \u2014 not opening`);
+  lastImagingStudyOpenContext = [];
+  if (hadOpen) {
+    lastLiveScene = null;
+    lastSegCatalog = EMPTY_SEG_CATALOG;
+    onLiveSceneChange?.();
+    void Promise.resolve(onImagingStudyClose?.()).catch(
+      (err) => console.error(`${LOG} ImagingStudy-close after CR/DX reject failed`, err)
+    );
+  }
+  return true;
 }
 async function resolveAndApplyImagingStudyOpen(message) {
   if (!client) return;
   try {
-    const resolved = await Ui(client, message);
+    const resolved = await Gi(client, message);
     const event = resolved?.event ?? message.event;
     const ctx = event?.context;
     let items = imagingStudyContextItems(resolved);
@@ -18637,7 +20908,7 @@ async function resolveAndApplyImagingStudyOpen(message) {
       Array.isArray(ctx) ? ctx : ctx || items
     );
     if (sceneDoc) {
-      const files = Nn(event);
+      const files = Mn(event);
       sceneDoc = materializeLiveSceneBlobUrls(
         sceneDoc,
         files
@@ -18648,7 +20919,8 @@ async function resolveAndApplyImagingStudyOpen(message) {
       });
       items.push({ key: "scene", resource: sceneDoc });
     }
-    lastImagingStudyOpenContext = di(items);
+    if (rejectCrDxImagingStudyOpen(items, "websocket")) return;
+    lastImagingStudyOpenContext = Li(items);
     console.info(
       `${LOG} ImagingStudy-open context items=`,
       items.length,
@@ -18687,7 +20959,7 @@ async function requestStatusFromWorklist(opts) {
       "subscriber.actor": ID_ACTOR,
       "target.actor": "*",
       event: {
-        "hub.event": ke(statusDataType),
+        "hub.event": Ue(statusDataType),
         ...requestTopic ? { "hub.topic": requestTopic } : {},
         context: { dataType: statusDataType }
       }
@@ -18740,10 +21012,23 @@ async function requestStatusFromWorklist(opts) {
       statusRequestState = "done";
       return;
     }
-    const context = di(chosen.context);
+    const context = Li(chosen.context);
     if (!context.length) {
       console.warn(`${LOG} STATUS: ImagingStudy context empty`);
       if (!forceApply) statusRequestState = "idle";
+      return;
+    }
+    if (sameOpenImagingStudyContext(context, lastImagingStudyOpenContext)) {
+      console.warn(
+        `${LOG} STATUS: same study already open \u2014 skip ImagingStudy apply`,
+        forceApply ? "(follow host)" : ""
+      );
+      if (!forceApply) statusRequestState = "done";
+      bi(SKIP_STUDY_RELOAD_TOAST);
+      return;
+    }
+    if (rejectCrDxImagingStudyOpen(context, "STATUS")) {
+      if (!forceApply) statusRequestState = "done";
       return;
     }
     lastImagingStudyOpenContext = context;
@@ -18775,7 +21060,7 @@ function scheduleStatusRequestFromWorklist(delayMs) {
   }, delayMs);
 }
 function applyIraCastRadioVisual(statusEl) {
-  const visual = Cr(connection, {
+  const visual = Ur(connection, {
     conferenceActive: Boolean(conference)
   });
   statusEl.classList.remove(
@@ -18814,9 +21099,9 @@ async function connectIraCast() {
   }
   stripCastParamsFromUrl();
   setConnection("connecting", "Connecting to Cast hub\u2026");
-  subscriberName = ct("IRA");
+  subscriberName = bt("IRA");
   const hub = resolveHubConfig();
-  client = es.newInstance({
+  client = js.newInstance({
     hub,
     session: {
       subscriberName,
@@ -19167,7 +21452,7 @@ function buildIraLiveSceneDoc(input) {
     type: "layout",
     id: IRA_LAYOUT_NODE_ID,
     name: String(prevLayout?.name || "Layout"),
-    arrangementName: String(prevLayout?.arrangementName || "fourUp"),
+    arrangementName: String(prevLayout?.arrangementName || "threeOne"),
     maximizedCell
   };
   return {
@@ -19719,7 +22004,7 @@ function mergeSegLabelmaps(existing, incoming) {
   };
 }
 async function segLabelmapFromNiftiSendEvent(event, ctDims, ctIjkToRas) {
-  const files = Nn(event);
+  const files = Mn(event);
   let chosen = null;
   let bytes = null;
   for (const entry of files) {
@@ -19829,11 +22114,11 @@ function reconstructSeries(instances) {
   const rowDir = iop.slice(0, 3), colDir = iop.slice(3, 6), normal = cross2(rowDir, colDir);
   const slices = [...instances].sort((a, b) => dot4(a.imagePositionPatient, normal) - dot4(b.imagePositionPatient, normal));
   const s0 = slices[0], nz = slices.length, ny = s0.rows, nx = s0.columns;
-  const ps = s0.pixelSpacing;
+  const ps2 = s0.pixelSpacing;
   const p0 = slices[0].imagePositionPatient, p1 = slices[nz - 1].imagePositionPatient;
   const sliceSpacing = nz > 1 ? dot4(sub3(p1, p0), normal) / (nz - 1) : s0.sliceThickness || 1;
-  const c0 = lps2ras(rowDir.map((v) => v * ps[1]));
-  const c1 = lps2ras(colDir.map((v) => v * ps[0]));
+  const c0 = lps2ras(rowDir.map((v) => v * ps2[1]));
+  const c1 = lps2ras(colDir.map((v) => v * ps2[0]));
   const c2 = lps2ras(normal.map((v) => v * sliceSpacing));
   const o = lps2ras(p0);
   const ijkToRAS = [c0[0], c1[0], c2[0], o[0], c0[1], c1[1], c2[1], o[1], c0[2], c1[2], c2[2], o[2], 0, 0, 0, 1];
@@ -19919,42 +22204,42 @@ async function parseInstances(buffers) {
   const dcmjs = await loadDcmjs();
   const out = [];
   for (const buf of buffers) {
-    let ds;
+    let ds2;
     try {
-      ds = dcmjs.data.DicomMetaDictionary.naturalizeDataset(dcmjs.data.DicomMessage.readFile(buf).dict);
+      ds2 = dcmjs.data.DicomMetaDictionary.naturalizeDataset(dcmjs.data.DicomMessage.readFile(buf).dict);
     } catch {
       continue;
     }
-    if (!ds.PixelData || !ds.ImageOrientationPatient || !ds.ImagePositionPatient || !ds.PixelSpacing) continue;
-    let pd = ds.PixelData;
+    if (!ds2.PixelData || !ds2.ImageOrientationPatient || !ds2.ImagePositionPatient || !ds2.PixelSpacing) continue;
+    let pd = ds2.PixelData;
     if (Array.isArray(pd)) pd = pd[0];
     if (!pd) continue;
-    const signed = ds.PixelRepresentation === 1;
-    const rows2 = num(ds.Rows);
-    const columns = num(ds.Columns);
-    const bitsAllocated = num(ds.BitsAllocated, 16);
+    const signed = ds2.PixelRepresentation === 1;
+    const rows2 = num(ds2.Rows);
+    const columns = num(ds2.Columns);
+    const bitsAllocated = num(ds2.BitsAllocated, 16);
     const pixels = pixelsFromPixelData(pd, signed, bitsAllocated, rows2, columns);
     if (!pixels) continue;
     out.push({
-      seriesInstanceUID: String(ds.SeriesInstanceUID ?? "series"),
-      sopInstanceUID: ds.SOPInstanceUID,
+      seriesInstanceUID: String(ds2.SeriesInstanceUID ?? "series"),
+      sopInstanceUID: ds2.SOPInstanceUID,
       rows: rows2,
       columns,
-      pixelSpacing: ds.PixelSpacing.map(Number),
-      imageOrientationPatient: ds.ImageOrientationPatient.map(Number),
-      imagePositionPatient: ds.ImagePositionPatient.map(Number),
-      sliceThickness: ds.SliceThickness != null ? num(ds.SliceThickness) : void 0,
-      rescaleSlope: ds.RescaleSlope != null ? num(ds.RescaleSlope, 1) : 1,
-      rescaleIntercept: ds.RescaleIntercept != null ? num(ds.RescaleIntercept) : 0,
+      pixelSpacing: ds2.PixelSpacing.map(Number),
+      imageOrientationPatient: ds2.ImageOrientationPatient.map(Number),
+      imagePositionPatient: ds2.ImagePositionPatient.map(Number),
+      sliceThickness: ds2.SliceThickness != null ? num(ds2.SliceThickness) : void 0,
+      rescaleSlope: ds2.RescaleSlope != null ? num(ds2.RescaleSlope, 1) : 1,
+      rescaleIntercept: ds2.RescaleIntercept != null ? num(ds2.RescaleIntercept) : 0,
       pixelRepresentation: signed ? 1 : 0,
-      instanceNumber: ds.InstanceNumber != null ? num(ds.InstanceNumber) : void 0,
-      windowCenter: ds.WindowCenter != null ? num(ds.WindowCenter) : void 0,
-      windowWidth: ds.WindowWidth != null ? num(ds.WindowWidth) : void 0,
-      modality: ds.Modality,
+      instanceNumber: ds2.InstanceNumber != null ? num(ds2.InstanceNumber) : void 0,
+      windowCenter: ds2.WindowCenter != null ? num(ds2.WindowCenter) : void 0,
+      windowWidth: ds2.WindowWidth != null ? num(ds2.WindowWidth) : void 0,
+      modality: ds2.Modality,
       pixels,
-      patientName: typeof ds.PatientName === "object" ? ds.PatientName.Alphabetic : ds.PatientName,
-      studyInstanceUID: ds.StudyInstanceUID,
-      seriesDescription: ds.SeriesDescription
+      patientName: typeof ds2.PatientName === "object" ? ds2.PatientName.Alphabetic : ds2.PatientName,
+      studyInstanceUID: ds2.StudyInstanceUID,
+      seriesDescription: ds2.SeriesDescription
     });
   }
   return out;
@@ -20033,8 +22318,8 @@ function code(seq) {
     meaning: String(c.CodeMeaning || "")
   };
 }
-function pixelDataBits(ds) {
-  let pd = ds.PixelData;
+function pixelDataBits(ds2) {
+  let pd = ds2.PixelData;
   if (Array.isArray(pd)) pd = pd[0];
   if (pd instanceof ArrayBuffer) return new Uint8Array(pd);
   if (pd instanceof Uint8Array) return pd;
@@ -20044,10 +22329,10 @@ function pixelDataBits(ds) {
   }
   throw new Error("DICOM SEG has no PixelData");
 }
-function buildLabelmap(ds, bits, ct2, dcmjs) {
+function buildLabelmap(ds2, bits, ct2, dcmjs) {
   const [nx, ny, nz] = ct2.dims;
-  const segCols = Number(ds.Columns) || nx;
-  const segRows = Number(ds.Rows) || ny;
+  const segCols = Number(ds2.Columns) || nx;
+  const segRows = Number(ds2.Rows) || ny;
   const frameBytes = segCols * segRows >> 3;
   const lab = new Uint8Array(nx * ny * nz);
   const inv = invAffine(ct2.ijkToRAS);
@@ -20059,7 +22344,7 @@ function buildLabelmap(ds, bits, ct2, dcmjs) {
       inv[8] * r[0] + inv[9] * r[1] + inv[10] * r[2] + inv[11]
     ];
   };
-  const sharedSeq = asSeq(ds.SharedFunctionalGroupsSequence);
+  const sharedSeq = asSeq(ds2.SharedFunctionalGroupsSequence);
   const shared = sharedSeq[0] || {};
   const orientSeq = asSeq(shared.PlaneOrientationSequence);
   const orient0 = orientSeq[0] || {};
@@ -20074,7 +22359,7 @@ function buildLabelmap(ds, bits, ct2, dcmjs) {
   const colors = [];
   const names = {};
   const terminology = {};
-  for (const s of asSeq(ds.SegmentSequence)) {
+  for (const s of asSeq(ds2.SegmentSequence)) {
     const cie = s.RecommendedDisplayCIELabValue;
     let rgb = [1, 1, 1];
     if (Array.isArray(cie) && cie.length >= 3) {
@@ -20099,7 +22384,7 @@ function buildLabelmap(ds, bits, ct2, dcmjs) {
       region: code(s.AnatomicRegionSequence)
     };
   }
-  const perFrame = asSeq(ds.PerFrameFunctionalGroupsSequence);
+  const perFrame = asSeq(ds2.PerFrameFunctionalGroupsSequence);
   const firstFg = perFrame[0] || {};
   const firstPos = asSeq(
     firstFg.PlanePositionSequence
@@ -20133,24 +22418,24 @@ function buildLabelmap(ds, bits, ct2, dcmjs) {
         const p = rb + col;
         if (!(bits[fb + (p >> 3)] >> (p & 7) & 1)) continue;
         const i = Math.round(bi2 + col * diCol[0]);
-        const j2 = Math.round(bj + col * diCol[1]);
+        const j = Math.round(bj + col * diCol[1]);
         const k = Math.round(bk + col * diCol[2]);
-        if (i >= 0 && i < nx && j2 >= 0 && j2 < ny && k >= 0 && k < nz) {
-          lab[k * nx * ny + j2 * nx + i] = segNum;
+        if (i >= 0 && i < nx && j >= 0 && j < ny && k >= 0 && k < nz) {
+          lab[k * nx * ny + j * nx + i] = segNum;
         }
       }
     }
   }
   return { lab, colors, names, terminology };
 }
-function isDicomSeg(ds) {
-  const modality = String(ds.Modality || "").toUpperCase();
+function isDicomSeg(ds2) {
+  const modality = String(ds2.Modality || "").toUpperCase();
   if (modality === "SEG") return true;
-  const sop = String(ds.SOPClassUID || "");
+  const sop = String(ds2.SOPClassUID || "");
   return sop.includes("1.2.840.10008.5.1.4.1.1.66.4");
 }
 async function segLabelmapFromDicomSendEvent(event, ct2) {
-  const files = Nn(event);
+  const files = Mn(event);
   let chosen = null;
   let bytes = null;
   for (const entry of files) {
@@ -20169,11 +22454,11 @@ async function segLabelmapFromDicomSendEvent(event, ct2) {
     return { ok: false, error: "Open volume has no ijkToRAS \u2014 cannot align DICOM SEG" };
   }
   let dcmjs;
-  let ds;
+  let ds2;
   try {
     dcmjs = await loadDcmjs();
     const buf = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes.buffer : bytes.slice().buffer;
-    ds = dcmjs.data.DicomMetaDictionary.naturalizeDataset(
+    ds2 = dcmjs.data.DicomMetaDictionary.naturalizeDataset(
       dcmjs.data.DicomMessage.readFile(buf).dict
     );
   } catch (err) {
@@ -20182,8 +22467,8 @@ async function segLabelmapFromDicomSendEvent(event, ct2) {
       error: `DICOM parse failed: ${err?.message ?? err}`
     };
   }
-  if (!isDicomSeg(ds)) {
-    const mod = String(ds.Modality || "?");
+  if (!isDicomSeg(ds2)) {
+    const mod = String(ds2.Modality || "?");
     return {
       ok: false,
       error: `Expected DICOM SEG, got Modality=${mod} (RTSTRUCT is not supported)`
@@ -20191,13 +22476,13 @@ async function segLabelmapFromDicomSendEvent(event, ct2) {
   }
   let bits;
   try {
-    bits = pixelDataBits(ds);
+    bits = pixelDataBits(ds2);
   } catch (err) {
     return { ok: false, error: err?.message ?? String(err) };
   }
   let seg;
   try {
-    seg = buildLabelmap(ds, bits, ct2, dcmjs);
+    seg = buildLabelmap(ds2, bits, ct2, dcmjs);
   } catch (err) {
     return {
       ok: false,
@@ -20209,9 +22494,9 @@ async function segLabelmapFromDicomSendEvent(event, ct2) {
   if (!present.size) {
     return { ok: false, error: "DICOM SEG labelmap is empty after resample onto CT" };
   }
-  const referencedSeries = asSeq(ds.ReferencedSeriesSequence)[0];
-  seg.sopInstanceUID = String(ds.SOPInstanceUID || "");
-  seg.seriesInstanceUID = String(ds.SeriesInstanceUID || "");
+  const referencedSeries = asSeq(ds2.ReferencedSeriesSequence)[0];
+  seg.sopInstanceUID = String(ds2.SOPInstanceUID || "");
+  seg.seriesInstanceUID = String(ds2.SeriesInstanceUID || "");
   seg.sourceSeriesInstanceUID = String(
     referencedSeries?.SeriesInstanceUID || ""
   );
@@ -20223,1472 +22508,6 @@ async function segLabelmapFromDicomSendEvent(event, ct2) {
     labelCount: present.size,
     seg
   };
-}
-
-// ../i18n/storage.ts
-var LOCALE_STORAGE_KEY = "pw46.locale";
-var LEGACY_LOCALE_KEY = "wl-locale";
-var LOCALE_COOKIE = "pw46.locale";
-function isAppLocale(value) {
-  return value === "en" || value === "fr" || value === "es" || value === "ca" || value === "de" || value === "it" || value === "pt" || value === "ko" || value === "pl" || value === "uk" || value === "cs" || value === "nl" || value === "el" || value === "lv" || value === "hu" || value === "lt" || value === "ro" || value === "no";
-}
-function readCookie(name) {
-  if (typeof document === "undefined") return null;
-  const prefix = `${encodeURIComponent(name)}=`;
-  for (const part of document.cookie.split(";")) {
-    const s = part.trim();
-    if (s.startsWith(prefix)) {
-      try {
-        return decodeURIComponent(s.slice(prefix.length));
-      } catch {
-        return s.slice(prefix.length);
-      }
-    }
-  }
-  return null;
-}
-function writeCookie(name, value) {
-  if (typeof document === "undefined") return;
-  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(
-    value
-  )}; path=/; max-age=31536000; SameSite=Lax`;
-}
-function fromNavigator() {
-  const nav = (typeof navigator !== "undefined" ? navigator.language || "" : "").toLowerCase();
-  if (nav.startsWith("ca")) return "ca";
-  if (nav.startsWith("es")) return "es";
-  if (nav.startsWith("fr")) return "fr";
-  if (nav.startsWith("de")) return "de";
-  if (nav.startsWith("it")) return "it";
-  if (nav.startsWith("pt")) return "pt";
-  if (nav.startsWith("ko")) return "ko";
-  if (nav.startsWith("pl")) return "pl";
-  if (nav.startsWith("uk")) return "uk";
-  if (nav.startsWith("cs")) return "cs";
-  if (nav.startsWith("nl")) return "nl";
-  if (nav.startsWith("el")) return "el";
-  if (nav.startsWith("lv")) return "lv";
-  if (nav.startsWith("hu")) return "hu";
-  if (nav.startsWith("lt")) return "lt";
-  if (nav.startsWith("ro")) return "ro";
-  if (nav.startsWith("no") || nav.startsWith("nb") || nav.startsWith("nn"))
-    return "no";
-  return "en";
-}
-function resolveStoredLocale() {
-  const cookie = readCookie(LOCALE_COOKIE)?.trim().toLowerCase();
-  if (isAppLocale(cookie)) {
-    try {
-      localStorage.setItem(LOCALE_STORAGE_KEY, cookie);
-      localStorage.removeItem(LEGACY_LOCALE_KEY);
-    } catch {
-    }
-    return cookie;
-  }
-  try {
-    const stored = localStorage.getItem(LOCALE_STORAGE_KEY)?.trim().toLowerCase();
-    if (isAppLocale(stored)) {
-      try {
-        writeCookie(LOCALE_COOKIE, stored);
-      } catch {
-      }
-      return stored;
-    }
-  } catch {
-  }
-  try {
-    const legacy = localStorage.getItem(LEGACY_LOCALE_KEY)?.trim().toLowerCase();
-    if (isAppLocale(legacy)) {
-      persistLocale(legacy);
-      return legacy;
-    }
-  } catch {
-  }
-  return fromNavigator();
-}
-function persistLocale(code2) {
-  try {
-    localStorage.setItem(LOCALE_STORAGE_KEY, code2);
-    localStorage.removeItem(LEGACY_LOCALE_KEY);
-  } catch {
-  }
-  try {
-    writeCookie(LOCALE_COOKIE, code2);
-  } catch {
-  }
-  if (typeof document !== "undefined") {
-    document.documentElement.lang = code2;
-  }
-}
-
-// ../i18n/conference.ts
-var en2 = {
-  dialogTitle: "Conferencing",
-  close: "Close",
-  closeAria: "Close",
-  createSection: "Create a conference",
-  conferenceTitle: "Conference title",
-  selectConferenceTitle: "Select a conference title",
-  otherTitle: "Other\u2026",
-  customTitle: "Custom title",
-  customTitlePlaceholder: "Enter conference title",
-  users: "Users",
-  loadingUsers: "Loading users\u2026",
-  noUsers: "No users available",
-  createConference: "Create conference",
-  creating: "Creating\u2026",
-  joinSection: "Join a conference",
-  activeConferences: "Active conferences",
-  noConferences: "No conferences available",
-  selectConference: "Select a conference",
-  untitled: "Untitled",
-  joinConference: "Join conference",
-  joining: "Joining\u2026",
-  manageSection: "Manage conference",
-  titleLabel: "Title:",
-  na: "N/A",
-  participants: "Participants",
-  noPlaces: "No places",
-  leaveConference: "Leave conference",
-  endConference: "End conference",
-  ending: "Ending\u2026",
-  leaving: "Leaving\u2026",
-  conferenceEnded: "Conference ended.",
-  leftConference: "Left conference.",
-  connectHubFirst: "Connect to the Cast hub first.",
-  topicRequiredHost: "Cast topic is required to host a conference.",
-  topicRequiredJoin: "Cast topic is required to join a conference.",
-  titleRequired: "Conference title is required.",
-  selectAttendee: "Select at least one attendee topic.",
-  selectConferenceToJoin: "Select a conference to join.",
-  failedCreate: "Failed to create conference.",
-  failedJoin: "Failed to join conference.",
-  failedUpdate: "Failed to update conference.",
-  inviteTitle: "Conference invitation",
-  joinAndFollow: "Join and follow",
-  joinNoFollow: "Join but do not follow",
-  doNotJoin: "Do not join",
-  hostFallback: "host",
-  inviteLeadWithTitle: "{{title}} \u2014 join and follow {{host}}?",
-  inviteLeadNoTitle: "Join conference and follow {{host}}?",
-  joinAndFollowHost: "Join and follow {{host}}",
-  takeoverTitle: "Take over?",
-  takeoverBody: "The host and all participants will be notified that you are taking over. You will lead scene updates for this conference.",
-  cancel: "Cancel",
-  takeOver: "Take over",
-  conferencing: "Conferencing",
-  subscribeHubFirst: "Subscribe to the hub first",
-  stopFollowing: "Stop following",
-  resumeFollowing: "Resume following"
-};
-var de2 = {
-  dialogTitle: "Konferenz",
-  close: "Schlie\xDFen",
-  closeAria: "Schlie\xDFen",
-  createSection: "Konferenz erstellen",
-  conferenceTitle: "Konferenztitel",
-  selectConferenceTitle: "Titel ausw\xE4hlen",
-  otherTitle: "Andere\u2026",
-  customTitle: "Benutzerdefinierter Titel",
-  customTitlePlaceholder: "Konferenztitel eingeben",
-  users: "Benutzer",
-  loadingUsers: "Benutzer werden geladen\u2026",
-  noUsers: "Keine Benutzer verf\xFCgbar",
-  createConference: "Konferenz erstellen",
-  creating: "Wird erstellt\u2026",
-  joinSection: "An einer Konferenz teilnehmen",
-  activeConferences: "Aktive Konferenzen",
-  noConferences: "Keine Konferenzen verf\xFCgbar",
-  selectConference: "Konferenz ausw\xE4hlen",
-  untitled: "Ohne Titel",
-  joinConference: "Konferenz beitreten",
-  joining: "Beitritt\u2026",
-  manageSection: "Konferenz verwalten",
-  titleLabel: "Titel:",
-  na: "k. A.",
-  participants: "Teilnehmer",
-  noPlaces: "Keine Orte",
-  leaveConference: "Konferenz verlassen",
-  endConference: "Konferenz beenden",
-  ending: "Wird beendet\u2026",
-  leaving: "Verlassen\u2026",
-  conferenceEnded: "Konferenz beendet.",
-  leftConference: "Konferenz verlassen.",
-  connectHubFirst: "Stellen Sie zuerst eine Verbindung zum Cast-Hub her.",
-  topicRequiredHost: "Ein Cast-Topic ist erforderlich, um eine Konferenz zu hosten.",
-  topicRequiredJoin: "Ein Cast-Topic ist erforderlich, um einer Konferenz beizutreten.",
-  titleRequired: "Konferenztitel ist erforderlich.",
-  selectAttendee: "W\xE4hlen Sie mindestens einen Teilnehmer aus.",
-  selectConferenceToJoin: "W\xE4hlen Sie eine Konferenz zum Beitreten aus.",
-  failedCreate: "Konferenz konnte nicht erstellt werden.",
-  failedJoin: "Beitritt zur Konferenz fehlgeschlagen.",
-  failedUpdate: "Aktualisierung der Konferenz fehlgeschlagen.",
-  inviteTitle: "Konferenzeinladung",
-  joinAndFollow: "Beitreten und folgen",
-  joinNoFollow: "Beitreten, aber nicht folgen",
-  doNotJoin: "Nicht beitreten",
-  hostFallback: "Host",
-  inviteLeadWithTitle: "{{title}} \u2014 beitreten und {{host}} folgen?",
-  inviteLeadNoTitle: "Konferenz beitreten und {{host}} folgen?",
-  joinAndFollowHost: "Beitreten und {{host}} folgen",
-  takeoverTitle: "\xDCbernehmen?",
-  takeoverBody: "Der Host und alle Teilnehmer werden benachrichtigt, dass Sie die F\xFChrung \xFCbernehmen. Sie leiten dann die Szenenaktualisierungen f\xFCr diese Konferenz.",
-  cancel: "Abbrechen",
-  takeOver: "\xDCbernehmen",
-  conferencing: "Konferenz",
-  subscribeHubFirst: "Zuerst am Hub anmelden",
-  stopFollowing: "Folgen beenden",
-  resumeFollowing: "Folgen fortsetzen"
-};
-var fr2 = {
-  dialogTitle: "Conf\xE9rence",
-  close: "Fermer",
-  closeAria: "Fermer",
-  createSection: "Cr\xE9er une conf\xE9rence",
-  conferenceTitle: "Titre de la conf\xE9rence",
-  selectConferenceTitle: "S\xE9lectionner un titre",
-  otherTitle: "Autre\u2026",
-  customTitle: "Titre personnalis\xE9",
-  customTitlePlaceholder: "Saisir le titre de la conf\xE9rence",
-  users: "Utilisateurs",
-  loadingUsers: "Chargement des utilisateurs\u2026",
-  noUsers: "Aucun utilisateur disponible",
-  createConference: "Cr\xE9er la conf\xE9rence",
-  creating: "Cr\xE9ation\u2026",
-  joinSection: "Rejoindre une conf\xE9rence",
-  activeConferences: "Conf\xE9rences actives",
-  noConferences: "Aucune conf\xE9rence disponible",
-  selectConference: "S\xE9lectionner une conf\xE9rence",
-  untitled: "Sans titre",
-  joinConference: "Rejoindre la conf\xE9rence",
-  joining: "Connexion\u2026",
-  manageSection: "G\xE9rer la conf\xE9rence",
-  titleLabel: "Titre :",
-  na: "N/D",
-  participants: "Participants",
-  noPlaces: "Aucun lieu",
-  leaveConference: "Quitter la conf\xE9rence",
-  endConference: "Terminer la conf\xE9rence",
-  ending: "Fin\u2026",
-  leaving: "D\xE9part\u2026",
-  conferenceEnded: "Conf\xE9rence termin\xE9e.",
-  leftConference: "Vous avez quitt\xE9 la conf\xE9rence.",
-  connectHubFirst: "Connectez-vous d\u2019abord au hub Cast.",
-  topicRequiredHost: "Un topic Cast est requis pour animer une conf\xE9rence.",
-  topicRequiredJoin: "Un topic Cast est requis pour rejoindre une conf\xE9rence.",
-  titleRequired: "Le titre de la conf\xE9rence est requis.",
-  selectAttendee: "S\xE9lectionnez au moins un participant.",
-  selectConferenceToJoin: "S\xE9lectionnez une conf\xE9rence \xE0 rejoindre.",
-  failedCreate: "\xC9chec de la cr\xE9ation de la conf\xE9rence.",
-  failedJoin: "\xC9chec de la connexion \xE0 la conf\xE9rence.",
-  failedUpdate: "\xC9chec de la mise \xE0 jour de la conf\xE9rence.",
-  inviteTitle: "Invitation \xE0 la conf\xE9rence",
-  joinAndFollow: "Rejoindre et suivre",
-  joinNoFollow: "Rejoindre sans suivre",
-  doNotJoin: "Ne pas rejoindre",
-  hostFallback: "h\xF4te",
-  inviteLeadWithTitle: "{{title}} \u2014 rejoindre et suivre {{host}} ?",
-  inviteLeadNoTitle: "Rejoindre la conf\xE9rence et suivre {{host}} ?",
-  joinAndFollowHost: "Rejoindre et suivre {{host}}",
-  takeoverTitle: "Prendre la main ?",
-  takeoverBody: "L\u2019h\xF4te et tous les participants seront inform\xE9s que vous prenez la main. Vous dirigerez les mises \xE0 jour de sc\xE8ne pour cette conf\xE9rence.",
-  cancel: "Annuler",
-  takeOver: "Prendre la main",
-  conferencing: "Conf\xE9rence",
-  subscribeHubFirst: "Abonnez-vous d\u2019abord au hub",
-  stopFollowing: "Arr\xEAter de suivre",
-  resumeFollowing: "Reprendre le suivi"
-};
-var es2 = {
-  dialogTitle: "Conferencia",
-  close: "Cerrar",
-  closeAria: "Cerrar",
-  createSection: "Crear una conferencia",
-  conferenceTitle: "T\xEDtulo de la conferencia",
-  selectConferenceTitle: "Seleccionar un t\xEDtulo",
-  otherTitle: "Otro\u2026",
-  customTitle: "T\xEDtulo personalizado",
-  customTitlePlaceholder: "Introducir el t\xEDtulo de la conferencia",
-  users: "Usuarios",
-  loadingUsers: "Cargando usuarios\u2026",
-  noUsers: "No hay usuarios disponibles",
-  createConference: "Crear conferencia",
-  creating: "Creando\u2026",
-  joinSection: "Unirse a una conferencia",
-  activeConferences: "Conferencias activas",
-  noConferences: "No hay conferencias disponibles",
-  selectConference: "Seleccionar una conferencia",
-  untitled: "Sin t\xEDtulo",
-  joinConference: "Unirse a la conferencia",
-  joining: "Uni\xE9ndose\u2026",
-  manageSection: "Gestionar conferencia",
-  titleLabel: "T\xEDtulo:",
-  na: "N/D",
-  participants: "Participantes",
-  noPlaces: "Sin lugares",
-  leaveConference: "Abandonar la conferencia",
-  endConference: "Terminar la conferencia",
-  ending: "Terminando\u2026",
-  leaving: "Saliendo\u2026",
-  conferenceEnded: "Conferencia terminada.",
-  leftConference: "Has abandonado la conferencia.",
-  connectHubFirst: "Con\xE9ctate primero al hub Cast.",
-  topicRequiredHost: "Se requiere un topic Cast para organizar una conferencia.",
-  topicRequiredJoin: "Se requiere un topic Cast para unirse a una conferencia.",
-  titleRequired: "El t\xEDtulo de la conferencia es obligatorio.",
-  selectAttendee: "Selecciona al menos un participante.",
-  selectConferenceToJoin: "Selecciona una conferencia a la que unirte.",
-  failedCreate: "Error al crear la conferencia.",
-  failedJoin: "Error al unirse a la conferencia.",
-  failedUpdate: "Error al actualizar la conferencia.",
-  inviteTitle: "Invitaci\xF3n a la conferencia",
-  joinAndFollow: "Unirse y seguir",
-  joinNoFollow: "Unirse sin seguir",
-  doNotJoin: "No unirse",
-  hostFallback: "anfitri\xF3n",
-  inviteLeadWithTitle: "{{title}} \u2014 \xBFunirse y seguir a {{host}}?",
-  inviteLeadNoTitle: "\xBFUnirse a la conferencia y seguir a {{host}}?",
-  joinAndFollowHost: "Unirse y seguir a {{host}}",
-  takeoverTitle: "\xBFTomar el control?",
-  takeoverBody: "Se notificar\xE1 al anfitri\xF3n y a todos los participantes de que tomas el control. Dirigir\xE1s las actualizaciones de escena de esta conferencia.",
-  cancel: "Cancelar",
-  takeOver: "Tomar el control",
-  conferencing: "Conferencia",
-  subscribeHubFirst: "Suscr\xEDbete primero al hub",
-  stopFollowing: "Dejar de seguir",
-  resumeFollowing: "Reanudar el seguimiento"
-};
-var ca = {
-  dialogTitle: "Confer\xE8ncia",
-  close: "Tancar",
-  closeAria: "Tancar",
-  createSection: "Crear una confer\xE8ncia",
-  conferenceTitle: "T\xEDtol de la confer\xE8ncia",
-  selectConferenceTitle: "Seleccionar un t\xEDtol",
-  otherTitle: "Altre\u2026",
-  customTitle: "T\xEDtol personalitzat",
-  customTitlePlaceholder: "Introdu\xEFu el t\xEDtol de la confer\xE8ncia",
-  users: "Usuaris",
-  loadingUsers: "S\u2019estan carregant els usuaris\u2026",
-  noUsers: "No hi ha usuaris disponibles",
-  createConference: "Crear la confer\xE8ncia",
-  creating: "S\u2019est\xE0 creant\u2026",
-  joinSection: "Unir-se a una confer\xE8ncia",
-  activeConferences: "Confer\xE8ncies actives",
-  noConferences: "No hi ha confer\xE8ncies disponibles",
-  selectConference: "Seleccionar una confer\xE8ncia",
-  untitled: "Sense t\xEDtol",
-  joinConference: "Unir-se a la confer\xE8ncia",
-  joining: "S\u2019est\xE0 unint\u2026",
-  manageSection: "Gestionar la confer\xE8ncia",
-  titleLabel: "T\xEDtol:",
-  na: "N/D",
-  participants: "Participants",
-  noPlaces: "Sense llocs",
-  leaveConference: "Sortir de la confer\xE8ncia",
-  endConference: "Acabar la confer\xE8ncia",
-  ending: "S\u2019est\xE0 acabant\u2026",
-  leaving: "S\u2019est\xE0 sortint\u2026",
-  conferenceEnded: "Confer\xE8ncia acabada.",
-  leftConference: "Heu sortit de la confer\xE8ncia.",
-  connectHubFirst: "Connecteu-vos primer al hub Cast.",
-  topicRequiredHost: "Cal un topic Cast per organitzar una confer\xE8ncia.",
-  topicRequiredJoin: "Cal un topic Cast per unir-se a una confer\xE8ncia.",
-  titleRequired: "El t\xEDtol de la confer\xE8ncia \xE9s obligatori.",
-  selectAttendee: "Seleccioneu almenys un participant.",
-  selectConferenceToJoin: "Seleccioneu una confer\xE8ncia a la qual unir-vos.",
-  failedCreate: "No s\u2019ha pogut crear la confer\xE8ncia.",
-  failedJoin: "No s\u2019ha pogut unir a la confer\xE8ncia.",
-  failedUpdate: "No s\u2019ha pogut actualitzar la confer\xE8ncia.",
-  inviteTitle: "Invitaci\xF3 a la confer\xE8ncia",
-  joinAndFollow: "Unir-se i seguir",
-  joinNoFollow: "Unir-se sense seguir",
-  doNotJoin: "No unir-se",
-  hostFallback: "amfitri\xF3",
-  inviteLeadWithTitle: "{{title}} \u2014 unir-se i seguir {{host}}?",
-  inviteLeadNoTitle: "Unir-se a la confer\xE8ncia i seguir {{host}}?",
-  joinAndFollowHost: "Unir-se i seguir {{host}}",
-  takeoverTitle: "Prendre el control?",
-  takeoverBody: "Se notificar\xE0 a l\u2019amfitri\xF3 i a tots els participants que preneu el control. Direccioneu les actualitzacions d\u2019escena d\u2019aquesta confer\xE8ncia.",
-  cancel: "Cancel\xB7lar",
-  takeOver: "Prendre el control",
-  conferencing: "Confer\xE8ncia",
-  subscribeHubFirst: "Subscriviu-vos primer al hub",
-  stopFollowing: "Deixar de seguir",
-  resumeFollowing: "Reprendre el seguiment"
-};
-var it2 = {
-  dialogTitle: "Conferenza",
-  close: "Chiudi",
-  closeAria: "Chiudi",
-  createSection: "Crea una conferenza",
-  conferenceTitle: "Titolo della conferenza",
-  selectConferenceTitle: "Seleziona un titolo",
-  otherTitle: "Altro\u2026",
-  customTitle: "Titolo personalizzato",
-  customTitlePlaceholder: "Inserisci il titolo della conferenza",
-  users: "Utenti",
-  loadingUsers: "Caricamento utenti\u2026",
-  noUsers: "Nessun utente disponibile",
-  createConference: "Crea conferenza",
-  creating: "Creazione\u2026",
-  joinSection: "Partecipa a una conferenza",
-  activeConferences: "Conferenze attive",
-  noConferences: "Nessuna conferenza disponibile",
-  selectConference: "Seleziona una conferenza",
-  untitled: "Senza titolo",
-  joinConference: "Partecipa alla conferenza",
-  joining: "Accesso\u2026",
-  manageSection: "Gestisci conferenza",
-  titleLabel: "Titolo:",
-  na: "N/D",
-  participants: "Partecipanti",
-  noPlaces: "Nessun luogo",
-  leaveConference: "Lascia la conferenza",
-  endConference: "Termina la conferenza",
-  ending: "Chiusura\u2026",
-  leaving: "Uscita\u2026",
-  conferenceEnded: "Conferenza terminata.",
-  leftConference: "Hai lasciato la conferenza.",
-  connectHubFirst: "Connettiti prima all\u2019hub Cast.",
-  topicRequiredHost: "\xC8 richiesto un topic Cast per ospitare una conferenza.",
-  topicRequiredJoin: "\xC8 richiesto un topic Cast per partecipare a una conferenza.",
-  titleRequired: "Il titolo della conferenza \xE8 obbligatorio.",
-  selectAttendee: "Seleziona almeno un partecipante.",
-  selectConferenceToJoin: "Seleziona una conferenza a cui partecipare.",
-  failedCreate: "Creazione della conferenza non riuscita.",
-  failedJoin: "Partecipazione alla conferenza non riuscita.",
-  failedUpdate: "Aggiornamento della conferenza non riuscito.",
-  inviteTitle: "Invito alla conferenza",
-  joinAndFollow: "Partecipa e segui",
-  joinNoFollow: "Partecipa senza seguire",
-  doNotJoin: "Non partecipare",
-  hostFallback: "host",
-  inviteLeadWithTitle: "{{title}} \u2014 partecipare e seguire {{host}}?",
-  inviteLeadNoTitle: "Partecipare alla conferenza e seguire {{host}}?",
-  joinAndFollowHost: "Partecipa e segui {{host}}",
-  takeoverTitle: "Prendere il controllo?",
-  takeoverBody: "L\u2019host e tutti i partecipanti saranno avvisati che stai prendendo il controllo. Dirigerai gli aggiornamenti di scena di questa conferenza.",
-  cancel: "Annulla",
-  takeOver: "Prendi il controllo",
-  conferencing: "Conferenza",
-  subscribeHubFirst: "Iscriviti prima all\u2019hub",
-  stopFollowing: "Smetti di seguire",
-  resumeFollowing: "Riprendi a seguire"
-};
-var pt2 = {
-  dialogTitle: "Confer\xEAncia",
-  close: "Fechar",
-  closeAria: "Fechar",
-  createSection: "Criar uma confer\xEAncia",
-  conferenceTitle: "T\xEDtulo da confer\xEAncia",
-  selectConferenceTitle: "Selecionar um t\xEDtulo",
-  otherTitle: "Outro\u2026",
-  customTitle: "T\xEDtulo personalizado",
-  customTitlePlaceholder: "Introduza o t\xEDtulo da confer\xEAncia",
-  users: "Utilizadores",
-  loadingUsers: "A carregar utilizadores\u2026",
-  noUsers: "Nenhum utilizador dispon\xEDvel",
-  createConference: "Criar confer\xEAncia",
-  creating: "A criar\u2026",
-  joinSection: "Participar numa confer\xEAncia",
-  activeConferences: "Confer\xEAncias ativas",
-  noConferences: "Nenhuma confer\xEAncia dispon\xEDvel",
-  selectConference: "Selecionar uma confer\xEAncia",
-  untitled: "Sem t\xEDtulo",
-  joinConference: "Participar na confer\xEAncia",
-  joining: "A participar\u2026",
-  manageSection: "Gerir confer\xEAncia",
-  titleLabel: "T\xEDtulo:",
-  na: "N/D",
-  participants: "Participantes",
-  noPlaces: "Sem locais",
-  leaveConference: "Sair da confer\xEAncia",
-  endConference: "Terminar a confer\xEAncia",
-  ending: "A terminar\u2026",
-  leaving: "A sair\u2026",
-  conferenceEnded: "Confer\xEAncia terminada.",
-  leftConference: "Saiu da confer\xEAncia.",
-  connectHubFirst: "Ligue-se primeiro ao hub Cast.",
-  topicRequiredHost: "\xC9 necess\xE1rio um topic Cast para organizar uma confer\xEAncia.",
-  topicRequiredJoin: "\xC9 necess\xE1rio um topic Cast para participar numa confer\xEAncia.",
-  titleRequired: "O t\xEDtulo da confer\xEAncia \xE9 obrigat\xF3rio.",
-  selectAttendee: "Selecione pelo menos um participante.",
-  selectConferenceToJoin: "Selecione uma confer\xEAncia a que participar.",
-  failedCreate: "Falha ao criar a confer\xEAncia.",
-  failedJoin: "Falha ao participar na confer\xEAncia.",
-  failedUpdate: "Falha ao atualizar a confer\xEAncia.",
-  inviteTitle: "Convite para a confer\xEAncia",
-  joinAndFollow: "Participar e seguir",
-  joinNoFollow: "Participar sem seguir",
-  doNotJoin: "N\xE3o participar",
-  hostFallback: "anfitri\xE3o",
-  inviteLeadWithTitle: "{{title}} \u2014 participar e seguir {{host}}?",
-  inviteLeadNoTitle: "Participar na confer\xEAncia e seguir {{host}}?",
-  joinAndFollowHost: "Participar e seguir {{host}}",
-  takeoverTitle: "Assumir o controlo?",
-  takeoverBody: "O anfitri\xE3o e todos os participantes ser\xE3o notificados de que est\xE1 a assumir o controlo. Passar\xE1 a liderar as atualiza\xE7\xF5es de cena desta confer\xEAncia.",
-  cancel: "Cancelar",
-  takeOver: "Assumir o controlo",
-  conferencing: "Confer\xEAncia",
-  subscribeHubFirst: "Subscreva primeiro o hub",
-  stopFollowing: "Parar de seguir",
-  resumeFollowing: "Retomar o seguimento"
-};
-var ko2 = {
-  dialogTitle: "\uD654\uC0C1\uD68C\uC758",
-  close: "\uB2EB\uAE30",
-  closeAria: "\uB2EB\uAE30",
-  createSection: "\uD68C\uC758 \uB9CC\uB4E4\uAE30",
-  conferenceTitle: "\uD68C\uC758 \uC81C\uBAA9",
-  selectConferenceTitle: "\uC81C\uBAA9 \uC120\uD0DD",
-  otherTitle: "\uAE30\uD0C0\u2026",
-  customTitle: "\uC0AC\uC6A9\uC790 \uC9C0\uC815 \uC81C\uBAA9",
-  customTitlePlaceholder: "\uD68C\uC758 \uC81C\uBAA9 \uC785\uB825",
-  users: "\uC0AC\uC6A9\uC790",
-  loadingUsers: "\uC0AC\uC6A9\uC790 \uBD88\uB7EC\uC624\uB294 \uC911\u2026",
-  noUsers: "\uC0AC\uC6A9 \uAC00\uB2A5\uD55C \uC0AC\uC6A9\uC790 \uC5C6\uC74C",
-  createConference: "\uD68C\uC758 \uB9CC\uB4E4\uAE30",
-  creating: "\uB9CC\uB4DC\uB294 \uC911\u2026",
-  joinSection: "\uD68C\uC758 \uCC38\uAC00",
-  activeConferences: "\uC9C4\uD589 \uC911\uC778 \uD68C\uC758",
-  noConferences: "\uC0AC\uC6A9 \uAC00\uB2A5\uD55C \uD68C\uC758 \uC5C6\uC74C",
-  selectConference: "\uD68C\uC758 \uC120\uD0DD",
-  untitled: "\uC81C\uBAA9 \uC5C6\uC74C",
-  joinConference: "\uD68C\uC758 \uCC38\uAC00",
-  joining: "\uCC38\uAC00 \uC911\u2026",
-  manageSection: "\uD68C\uC758 \uAD00\uB9AC",
-  titleLabel: "\uC81C\uBAA9:",
-  na: "\uD574\uB2F9 \uC5C6\uC74C",
-  participants: "\uCC38\uAC00\uC790",
-  noPlaces: "\uC7A5\uC18C \uC5C6\uC74C",
-  leaveConference: "\uD68C\uC758 \uB098\uAC00\uAE30",
-  endConference: "\uD68C\uC758 \uC885\uB8CC",
-  ending: "\uC885\uB8CC \uC911\u2026",
-  leaving: "\uB098\uAC00\uB294 \uC911\u2026",
-  conferenceEnded: "\uD68C\uC758\uAC00 \uC885\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.",
-  leftConference: "\uD68C\uC758\uC5D0\uC11C \uB098\uAC14\uC2B5\uB2C8\uB2E4.",
-  connectHubFirst: "\uBA3C\uC800 Cast \uD5C8\uBE0C\uC5D0 \uC5F0\uACB0\uD558\uC138\uC694.",
-  topicRequiredHost: "\uD68C\uC758\uB97C \uC8FC\uCD5C\uD558\uB824\uBA74 Cast \uD1A0\uD53D\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.",
-  topicRequiredJoin: "\uD68C\uC758\uC5D0 \uCC38\uAC00\uD558\uB824\uBA74 Cast \uD1A0\uD53D\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.",
-  titleRequired: "\uD68C\uC758 \uC81C\uBAA9\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.",
-  selectAttendee: "\uCC38\uAC00\uC790\uB97C \uD55C \uBA85 \uC774\uC0C1 \uC120\uD0DD\uD558\uC138\uC694.",
-  selectConferenceToJoin: "\uCC38\uAC00\uD560 \uD68C\uC758\uB97C \uC120\uD0DD\uD558\uC138\uC694.",
-  failedCreate: "\uD68C\uC758\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
-  failedJoin: "\uD68C\uC758\uC5D0 \uCC38\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
-  failedUpdate: "\uD68C\uC758\uB97C \uC5C5\uB370\uC774\uD2B8\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
-  inviteTitle: "\uD68C\uC758 \uCD08\uB300",
-  joinAndFollow: "\uCC38\uAC00\uD558\uACE0 \uB530\uB77C\uAC00\uAE30",
-  joinNoFollow: "\uCC38\uAC00\uD558\uB418 \uB530\uB77C\uAC00\uC9C0 \uC54A\uAE30",
-  doNotJoin: "\uCC38\uAC00\uD558\uC9C0 \uC54A\uAE30",
-  hostFallback: "\uD638\uC2A4\uD2B8",
-  inviteLeadWithTitle: "{{title}} \u2014 \uCC38\uAC00\uD558\uACE0 {{host}}\uB97C \uB530\uB77C\uAC08\uAE4C\uC694?",
-  inviteLeadNoTitle: "\uD68C\uC758\uC5D0 \uCC38\uAC00\uD558\uACE0 {{host}}\uB97C \uB530\uB77C\uAC08\uAE4C\uC694?",
-  joinAndFollowHost: "{{host}}\uB97C \uB530\uB77C\uAC00\uBA70 \uCC38\uAC00",
-  takeoverTitle: "\uC8FC\uB3C4\uAD8C\uC744 \uAC00\uC838\uC62C\uAE4C\uC694?",
-  takeoverBody: "\uD638\uC2A4\uD2B8\uC640 \uBAA8\uB4E0 \uCC38\uAC00\uC790\uC5D0\uAC8C \uC8FC\uB3C4\uAD8C\uC744 \uAC00\uC838\uAC04\uB2E4\uB294 \uC54C\uB9BC\uC774 \uAC11\uB2C8\uB2E4. \uC774 \uD68C\uC758\uC758 \uC7A5\uBA74 \uC5C5\uB370\uC774\uD2B8\uB97C \uC774\uB04C\uAC8C \uB429\uB2C8\uB2E4.",
-  cancel: "\uCDE8\uC18C",
-  takeOver: "\uC8FC\uB3C4\uAD8C \uAC00\uC838\uC624\uAE30",
-  conferencing: "\uD654\uC0C1\uD68C\uC758",
-  subscribeHubFirst: "\uBA3C\uC800 \uD5C8\uBE0C\uC5D0 \uAD6C\uB3C5\uD558\uC138\uC694",
-  stopFollowing: "\uB530\uB77C\uAC00\uAE30 \uC911\uC9C0",
-  resumeFollowing: "\uB530\uB77C\uAC00\uAE30 \uC7AC\uAC1C"
-};
-var pl = {
-  dialogTitle: "Konferencja",
-  close: "Zamknij",
-  closeAria: "Zamknij",
-  createSection: "Utw\xF3rz konferencj\u0119",
-  conferenceTitle: "Tytu\u0142 konferencji",
-  selectConferenceTitle: "Wybierz tytu\u0142",
-  otherTitle: "Inny\u2026",
-  customTitle: "Tytu\u0142 niestandardowy",
-  customTitlePlaceholder: "Wpisz tytu\u0142 konferencji",
-  users: "U\u017Cytkownicy",
-  loadingUsers: "\u0141adowanie u\u017Cytkownik\xF3w\u2026",
-  noUsers: "Brak dost\u0119pnych u\u017Cytkownik\xF3w",
-  createConference: "Utw\xF3rz konferencj\u0119",
-  creating: "Tworzenie\u2026",
-  joinSection: "Do\u0142\u0105cz do konferencji",
-  activeConferences: "Aktywne konferencje",
-  noConferences: "Brak dost\u0119pnych konferencji",
-  selectConference: "Wybierz konferencj\u0119",
-  untitled: "Bez tytu\u0142u",
-  joinConference: "Do\u0142\u0105cz do konferencji",
-  joining: "Do\u0142\u0105czanie\u2026",
-  manageSection: "Zarz\u0105dzaj konferencj\u0105",
-  titleLabel: "Tytu\u0142:",
-  na: "nd.",
-  participants: "Uczestnicy",
-  noPlaces: "Brak miejsc",
-  leaveConference: "Opu\u015B\u0107 konferencj\u0119",
-  endConference: "Zako\u0144cz konferencj\u0119",
-  ending: "Ko\u0144czenie\u2026",
-  leaving: "Opuszczanie\u2026",
-  conferenceEnded: "Konferencja zako\u0144czona.",
-  leftConference: "Opuszczono konferencj\u0119.",
-  connectHubFirst: "Najpierw po\u0142\u0105cz si\u0119 z hubem Cast.",
-  topicRequiredHost: "Do prowadzenia konferencji wymagany jest topic Cast.",
-  topicRequiredJoin: "Do do\u0142\u0105czenia do konferencji wymagany jest topic Cast.",
-  titleRequired: "Tytu\u0142 konferencji jest wymagany.",
-  selectAttendee: "Wybierz co najmniej jednego uczestnika.",
-  selectConferenceToJoin: "Wybierz konferencj\u0119, do kt\xF3rej chcesz do\u0142\u0105czy\u0107.",
-  failedCreate: "Nie uda\u0142o si\u0119 utworzy\u0107 konferencji.",
-  failedJoin: "Nie uda\u0142o si\u0119 do\u0142\u0105czy\u0107 do konferencji.",
-  failedUpdate: "Nie uda\u0142o si\u0119 zaktualizowa\u0107 konferencji.",
-  inviteTitle: "Zaproszenie na konferencj\u0119",
-  joinAndFollow: "Do\u0142\u0105cz i \u015Bled\u017A",
-  joinNoFollow: "Do\u0142\u0105cz, ale nie \u015Bled\u017A",
-  doNotJoin: "Nie do\u0142\u0105czaj",
-  hostFallback: "host",
-  inviteLeadWithTitle: "{{title}} \u2014 do\u0142\u0105czy\u0107 i \u015Bledzi\u0107 {{host}}?",
-  inviteLeadNoTitle: "Do\u0142\u0105czy\u0107 do konferencji i \u015Bledzi\u0107 {{host}}?",
-  joinAndFollowHost: "Do\u0142\u0105cz i \u015Bled\u017A {{host}}",
-  takeoverTitle: "Przej\u0105\u0107 prowadzenie?",
-  takeoverBody: "Host i wszyscy uczestnicy zostan\u0105 powiadomieni, \u017Ce przejmujesz prowadzenie. B\u0119dziesz kierowa\u0107 aktualizacjami sceny tej konferencji.",
-  cancel: "Anuluj",
-  takeOver: "Przejmij",
-  conferencing: "Konferencja",
-  subscribeHubFirst: "Najpierw zasubskrybuj hub",
-  stopFollowing: "Przesta\u0144 \u015Bledzi\u0107",
-  resumeFollowing: "Wzn\xF3w \u015Bledzenie"
-};
-var uk = {
-  dialogTitle: "\u041A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044F",
-  close: "\u0417\u0430\u043A\u0440\u0438\u0442\u0438",
-  closeAria: "\u0417\u0430\u043A\u0440\u0438\u0442\u0438",
-  createSection: "\u0421\u0442\u0432\u043E\u0440\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
-  conferenceTitle: "\u041D\u0430\u0437\u0432\u0430 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
-  selectConferenceTitle: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043D\u0430\u0437\u0432\u0443",
-  otherTitle: "\u0406\u043D\u0448\u0435\u2026",
-  customTitle: "\u0412\u043B\u0430\u0441\u043D\u0430 \u043D\u0430\u0437\u0432\u0430",
-  customTitlePlaceholder: "\u0412\u0432\u0435\u0434\u0456\u0442\u044C \u043D\u0430\u0437\u0432\u0443 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
-  users: "\u041A\u043E\u0440\u0438\u0441\u0442\u0443\u0432\u0430\u0447\u0456",
-  loadingUsers: "\u0417\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0435\u043D\u043D\u044F \u043A\u043E\u0440\u0438\u0441\u0442\u0443\u0432\u0430\u0447\u0456\u0432\u2026",
-  noUsers: "\u041D\u0435\u043C\u0430\u0454 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0445 \u043A\u043E\u0440\u0438\u0441\u0442\u0443\u0432\u0430\u0447\u0456\u0432",
-  createConference: "\u0421\u0442\u0432\u043E\u0440\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
-  creating: "\u0421\u0442\u0432\u043E\u0440\u0435\u043D\u043D\u044F\u2026",
-  joinSection: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
-  activeConferences: "\u0410\u043A\u0442\u0438\u0432\u043D\u0456 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
-  noConferences: "\u041D\u0435\u043C\u0430\u0454 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0445 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0439",
-  selectConference: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
-  untitled: "\u0411\u0435\u0437 \u043D\u0430\u0437\u0432\u0438",
-  joinConference: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
-  joining: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u043D\u043D\u044F\u2026",
-  manageSection: "\u041A\u0435\u0440\u0443\u0432\u0430\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0454\u044E",
-  titleLabel: "\u041D\u0430\u0437\u0432\u0430:",
-  na: "\u043D/\u0434",
-  participants: "\u0423\u0447\u0430\u0441\u043D\u0438\u043A\u0438",
-  noPlaces: "\u041D\u0435\u043C\u0430\u0454 \u043C\u0456\u0441\u0446\u044C",
-  leaveConference: "\u0412\u0438\u0439\u0442\u0438 \u0437 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457",
-  endConference: "\u0417\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
-  ending: "\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043D\u044F\u2026",
-  leaving: "\u0412\u0438\u0445\u0456\u0434\u2026",
-  conferenceEnded: "\u041A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E.",
-  leftConference: "\u0412\u0438 \u0432\u0438\u0439\u0448\u043B\u0438 \u0437 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
-  connectHubFirst: "\u0421\u043F\u043E\u0447\u0430\u0442\u043A\u0443 \u043F\u0456\u0434\u043A\u043B\u044E\u0447\u0456\u0442\u044C\u0441\u044F \u0434\u043E Cast-\u0445\u0430\u0431\u0443.",
-  topicRequiredHost: "\u0414\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0434\u0435\u043D\u043D\u044F \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457 \u043F\u043E\u0442\u0440\u0456\u0431\u0435\u043D Cast topic.",
-  topicRequiredJoin: "\u0429\u043E\u0431 \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457, \u043F\u043E\u0442\u0440\u0456\u0431\u0435\u043D Cast topic.",
-  titleRequired: "\u041F\u043E\u0442\u0440\u0456\u0431\u043D\u0430 \u043D\u0430\u0437\u0432\u0430 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
-  selectAttendee: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043F\u0440\u0438\u043D\u0430\u0439\u043C\u043D\u0456 \u043E\u0434\u043D\u043E\u0433\u043E \u0443\u0447\u0430\u0441\u043D\u0438\u043A\u0430.",
-  selectConferenceToJoin: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E, \u0434\u043E \u044F\u043A\u043E\u0457 \u0445\u043E\u0447\u0435\u0442\u0435 \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F.",
-  failedCreate: "\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u0441\u0442\u0432\u043E\u0440\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E.",
-  failedJoin: "\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
-  failedUpdate: "\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u043E\u043D\u043E\u0432\u0438\u0442\u0438 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E.",
-  inviteTitle: "\u0417\u0430\u043F\u0440\u043E\u0448\u0435\u043D\u043D\u044F \u043D\u0430 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044E",
-  joinAndFollow: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438",
-  joinNoFollow: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F, \u0430\u043B\u0435 \u043D\u0435 \u0441\u0442\u0435\u0436\u0438\u0442\u0438",
-  doNotJoin: "\u041D\u0435 \u043F\u0440\u0438\u0454\u0434\u043D\u0443\u0432\u0430\u0442\u0438\u0441\u044F",
-  hostFallback: "\u0432\u0435\u0434\u0443\u0447\u0438\u0439",
-  inviteLeadWithTitle: "{{title}} \u2014 \u043F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438 \u0437\u0430 {{host}}?",
-  inviteLeadNoTitle: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457 \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438 \u0437\u0430 {{host}}?",
-  joinAndFollowHost: "\u041F\u0440\u0438\u0454\u0434\u043D\u0430\u0442\u0438\u0441\u044F \u0439 \u0441\u0442\u0435\u0436\u0438\u0442\u0438 \u0437\u0430 {{host}}",
-  takeoverTitle: "\u041F\u0435\u0440\u0435\u0445\u043E\u043F\u0438\u0442\u0438 \u043A\u0435\u0440\u0443\u0432\u0430\u043D\u043D\u044F?",
-  takeoverBody: "\u0412\u0435\u0434\u0443\u0447\u043E\u0433\u043E \u0442\u0430 \u0432\u0441\u0456\u0445 \u0443\u0447\u0430\u0441\u043D\u0438\u043A\u0456\u0432 \u0431\u0443\u0434\u0435 \u043F\u043E\u0432\u0456\u0434\u043E\u043C\u043B\u0435\u043D\u043E, \u0449\u043E \u0432\u0438 \u043F\u0435\u0440\u0435\u0445\u043E\u043F\u043B\u044E\u0454\u0442\u0435 \u043A\u0435\u0440\u0443\u0432\u0430\u043D\u043D\u044F. \u0412\u0438 \u043A\u0435\u0440\u0443\u0432\u0430\u0442\u0438\u043C\u0435\u0442\u0435 \u043E\u043D\u043E\u0432\u043B\u0435\u043D\u043D\u044F\u043C\u0438 \u0441\u0446\u0435\u043D\u0438 \u0446\u0456\u0454\u0457 \u043A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u0457.",
-  cancel: "\u0421\u043A\u0430\u0441\u0443\u0432\u0430\u0442\u0438",
-  takeOver: "\u041F\u0435\u0440\u0435\u0445\u043E\u043F\u0438\u0442\u0438",
-  conferencing: "\u041A\u043E\u043D\u0444\u0435\u0440\u0435\u043D\u0446\u0456\u044F",
-  subscribeHubFirst: "\u0421\u043F\u043E\u0447\u0430\u0442\u043A\u0443 \u043F\u0456\u0434\u043F\u0438\u0448\u0456\u0442\u044C\u0441\u044F \u043D\u0430 \u0445\u0430\u0431",
-  stopFollowing: "\u041F\u0440\u0438\u043F\u0438\u043D\u0438\u0442\u0438 \u0441\u0442\u0435\u0436\u0435\u043D\u043D\u044F",
-  resumeFollowing: "\u0412\u0456\u0434\u043D\u043E\u0432\u0438\u0442\u0438 \u0441\u0442\u0435\u0436\u0435\u043D\u043D\u044F"
-};
-var cs = {
-  dialogTitle: "Konference",
-  close: "Zav\u0159\xEDt",
-  closeAria: "Zav\u0159\xEDt",
-  createSection: "Vytvo\u0159it konferenci",
-  conferenceTitle: "N\xE1zev konference",
-  selectConferenceTitle: "Vyberte n\xE1zev",
-  otherTitle: "Jin\xFD\u2026",
-  customTitle: "Vlastn\xED n\xE1zev",
-  customTitlePlaceholder: "Zadejte n\xE1zev konference",
-  users: "U\u017Eivatel\xE9",
-  loadingUsers: "Na\u010D\xEDt\xE1n\xED u\u017Eivatel\u016F\u2026",
-  noUsers: "\u017D\xE1dn\xED dostupn\xED u\u017Eivatel\xE9",
-  createConference: "Vytvo\u0159it konferenci",
-  creating: "Vytv\xE1\u0159en\xED\u2026",
-  joinSection: "P\u0159ipojit se ke konferenci",
-  activeConferences: "Aktivn\xED konference",
-  noConferences: "\u017D\xE1dn\xE9 dostupn\xE9 konference",
-  selectConference: "Vyberte konferenci",
-  untitled: "Bez n\xE1zvu",
-  joinConference: "P\u0159ipojit se ke konferenci",
-  joining: "P\u0159ipojov\xE1n\xED\u2026",
-  manageSection: "Spravovat konferenci",
-  titleLabel: "N\xE1zev:",
-  na: "n/a",
-  participants: "\xDA\u010Dastn\xEDci",
-  noPlaces: "\u017D\xE1dn\xE1 m\xEDsta",
-  leaveConference: "Opustit konferenci",
-  endConference: "Ukon\u010Dit konferenci",
-  ending: "Ukon\u010Dov\xE1n\xED\u2026",
-  leaving: "Opou\u0161t\u011Bn\xED\u2026",
-  conferenceEnded: "Konference ukon\u010Dena.",
-  leftConference: "Opustili jste konferenci.",
-  connectHubFirst: "Nejprve se p\u0159ipojte k Cast hubu.",
-  topicRequiredHost: "Pro po\u0159\xE1d\xE1n\xED konference je vy\u017Eadov\xE1n Cast topic.",
-  topicRequiredJoin: "Pro p\u0159ipojen\xED ke konferenci je vy\u017Eadov\xE1n Cast topic.",
-  titleRequired: "N\xE1zev konference je povinn\xFD.",
-  selectAttendee: "Vyberte alespo\u0148 jednoho \xFA\u010Dastn\xEDka.",
-  selectConferenceToJoin: "Vyberte konferenci, ke kter\xE9 se chcete p\u0159ipojit.",
-  failedCreate: "Vytvo\u0159en\xED konference se nezda\u0159ilo.",
-  failedJoin: "P\u0159ipojen\xED ke konferenci se nezda\u0159ilo.",
-  failedUpdate: "Aktualizace konference se nezda\u0159ila.",
-  inviteTitle: "Pozv\xE1nka na konferenci",
-  joinAndFollow: "P\u0159ipojit se a sledovat",
-  joinNoFollow: "P\u0159ipojit se, ale nesledovat",
-  doNotJoin: "Nep\u0159ipojovat se",
-  hostFallback: "hostitel",
-  inviteLeadWithTitle: "{{title}} \u2014 p\u0159ipojit se a sledovat {{host}}?",
-  inviteLeadNoTitle: "P\u0159ipojit se ke konferenci a sledovat {{host}}?",
-  joinAndFollowHost: "P\u0159ipojit se a sledovat {{host}}",
-  takeoverTitle: "P\u0159evz\xEDt veden\xED?",
-  takeoverBody: "Hostitel a v\u0161ichni \xFA\u010Dastn\xEDci budou upozorn\u011Bni, \u017Ee p\u0159eb\xEDr\xE1te veden\xED. Budete \u0159\xEDdit aktualizace sc\xE9ny t\xE9to konference.",
-  cancel: "Zru\u0161it",
-  takeOver: "P\u0159evz\xEDt",
-  conferencing: "Konference",
-  subscribeHubFirst: "Nejprve se p\u0159ihlaste k hubu",
-  stopFollowing: "P\u0159estat sledovat",
-  resumeFollowing: "Obnovit sledov\xE1n\xED"
-};
-var nl = {
-  dialogTitle: "Conferentie",
-  close: "Sluiten",
-  closeAria: "Sluiten",
-  createSection: "Een conferentie maken",
-  conferenceTitle: "Conferentietitel",
-  selectConferenceTitle: "Selecteer een titel",
-  otherTitle: "Anders\u2026",
-  customTitle: "Aangepaste titel",
-  customTitlePlaceholder: "Voer de conferentietitel in",
-  users: "Gebruikers",
-  loadingUsers: "Gebruikers laden\u2026",
-  noUsers: "Geen gebruikers beschikbaar",
-  createConference: "Conferentie maken",
-  creating: "Bezig met maken\u2026",
-  joinSection: "Deelnemen aan een conferentie",
-  activeConferences: "Actieve conferenties",
-  noConferences: "Geen conferenties beschikbaar",
-  selectConference: "Selecteer een conferentie",
-  untitled: "Zonder titel",
-  joinConference: "Deelnemen aan conferentie",
-  joining: "Bezig met deelnemen\u2026",
-  manageSection: "Conferentie beheren",
-  titleLabel: "Titel:",
-  na: "n.v.t.",
-  participants: "Deelnemers",
-  noPlaces: "Geen plaatsen",
-  leaveConference: "Conferentie verlaten",
-  endConference: "Conferentie be\xEBindigen",
-  ending: "Be\xEBindigen\u2026",
-  leaving: "Verlaten\u2026",
-  conferenceEnded: "Conferentie be\xEBindigd.",
-  leftConference: "U hebt de conferentie verlaten.",
-  connectHubFirst: "Maak eerst verbinding met de Cast-hub.",
-  topicRequiredHost: "Een Cast-topic is vereist om een conferentie te hosten.",
-  topicRequiredJoin: "Een Cast-topic is vereist om aan een conferentie deel te nemen.",
-  titleRequired: "Conferentietitel is verplicht.",
-  selectAttendee: "Selecteer minstens \xE9\xE9n deelnemer.",
-  selectConferenceToJoin: "Selecteer een conferentie om deel te nemen.",
-  failedCreate: "Conferentie maken mislukt.",
-  failedJoin: "Deelnemen aan conferentie mislukt.",
-  failedUpdate: "Conferentie bijwerken mislukt.",
-  inviteTitle: "Conferentie-uitnodiging",
-  joinAndFollow: "Deelnemen en volgen",
-  joinNoFollow: "Deelnemen maar niet volgen",
-  doNotJoin: "Niet deelnemen",
-  hostFallback: "host",
-  inviteLeadWithTitle: "{{title}} \u2014 deelnemen en {{host}} volgen?",
-  inviteLeadNoTitle: "Deelnemen aan de conferentie en {{host}} volgen?",
-  joinAndFollowHost: "Deelnemen en {{host}} volgen",
-  takeoverTitle: "Overname?",
-  takeoverBody: "De host en alle deelnemers worden ge\xEFnformeerd dat u de leiding overneemt. U leidt dan de sc\xE8ne-updates voor deze conferentie.",
-  cancel: "Annuleren",
-  takeOver: "Overnemen",
-  conferencing: "Conferentie",
-  subscribeHubFirst: "Abonneer u eerst op de hub",
-  stopFollowing: "Stoppen met volgen",
-  resumeFollowing: "Volgen hervatten"
-};
-var el = {
-  dialogTitle: "\u0394\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
-  close: "\u039A\u03BB\u03B5\u03AF\u03C3\u03B9\u03BC\u03BF",
-  closeAria: "\u039A\u03BB\u03B5\u03AF\u03C3\u03B9\u03BC\u03BF",
-  createSection: "\u0394\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
-  conferenceTitle: "\u03A4\u03AF\u03C4\u03BB\u03BF\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
-  selectConferenceTitle: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03C4\u03AF\u03C4\u03BB\u03BF",
-  otherTitle: "\u0386\u03BB\u03BB\u03BF\u2026",
-  customTitle: "\u03A0\u03C1\u03BF\u03C3\u03B1\u03C1\u03BC\u03BF\u03C3\u03BC\u03AD\u03BD\u03BF\u03C2 \u03C4\u03AF\u03C4\u03BB\u03BF\u03C2",
-  customTitlePlaceholder: "\u0395\u03B9\u03C3\u03B1\u03B3\u03AC\u03B3\u03B5\u03C4\u03B5 \u03C4\u03BF\u03BD \u03C4\u03AF\u03C4\u03BB\u03BF \u03C4\u03B7\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
-  users: "\u03A7\u03C1\u03AE\u03C3\u03C4\u03B5\u03C2",
-  loadingUsers: "\u03A6\u03CC\u03C1\u03C4\u03C9\u03C3\u03B7 \u03C7\u03C1\u03B7\u03C3\u03C4\u03CE\u03BD\u2026",
-  noUsers: "\u0394\u03B5\u03BD \u03C5\u03C0\u03AC\u03C1\u03C7\u03BF\u03C5\u03BD \u03B4\u03B9\u03B1\u03B8\u03AD\u03C3\u03B9\u03BC\u03BF\u03B9 \u03C7\u03C1\u03AE\u03C3\u03C4\u03B5\u03C2",
-  createConference: "\u0394\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
-  creating: "\u0394\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1\u2026",
-  joinSection: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
-  activeConferences: "\u0395\u03BD\u03B5\u03C1\u03B3\u03AD\u03C2 \u03B4\u03B9\u03B1\u03C3\u03BA\u03AD\u03C8\u03B5\u03B9\u03C2",
-  noConferences: "\u0394\u03B5\u03BD \u03C5\u03C0\u03AC\u03C1\u03C7\u03BF\u03C5\u03BD \u03B4\u03B9\u03B1\u03B8\u03AD\u03C3\u03B9\u03BC\u03B5\u03C2 \u03B4\u03B9\u03B1\u03C3\u03BA\u03AD\u03C8\u03B5\u03B9\u03C2",
-  selectConference: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
-  untitled: "\u03A7\u03C9\u03C1\u03AF\u03C2 \u03C4\u03AF\u03C4\u03BB\u03BF",
-  joinConference: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
-  joining: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE\u2026",
-  manageSection: "\u0394\u03B9\u03B1\u03C7\u03B5\u03AF\u03C1\u03B9\u03C3\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
-  titleLabel: "\u03A4\u03AF\u03C4\u03BB\u03BF\u03C2:",
-  na: "\u0394/\u03A5",
-  participants: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03AD\u03C7\u03BF\u03BD\u03C4\u03B5\u03C2",
-  noPlaces: "\u03A7\u03C9\u03C1\u03AF\u03C2 \u03B8\u03AD\u03C3\u03B5\u03B9\u03C2",
-  leaveConference: "\u0391\u03C0\u03BF\u03C7\u03CE\u03C1\u03B7\u03C3\u03B7 \u03B1\u03C0\u03CC \u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
-  endConference: "\u03A4\u03B5\u03C1\u03BC\u03B1\u03C4\u03B9\u03C3\u03BC\u03CC\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2",
-  ending: "\u03A4\u03B5\u03C1\u03BC\u03B1\u03C4\u03B9\u03C3\u03BC\u03CC\u03C2\u2026",
-  leaving: "\u0391\u03C0\u03BF\u03C7\u03CE\u03C1\u03B7\u03C3\u03B7\u2026",
-  conferenceEnded: "\u0397 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7 \u03C4\u03B5\u03C1\u03BC\u03B1\u03C4\u03AF\u03C3\u03C4\u03B7\u03BA\u03B5.",
-  leftConference: "\u0391\u03C0\u03BF\u03C7\u03C9\u03C1\u03AE\u03C3\u03B1\u03C4\u03B5 \u03B1\u03C0\u03CC \u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7.",
-  connectHubFirst: "\u03A3\u03C5\u03BD\u03B4\u03B5\u03B8\u03B5\u03AF\u03C4\u03B5 \u03C0\u03C1\u03CE\u03C4\u03B1 \u03C3\u03C4\u03BF Cast hub.",
-  topicRequiredHost: "\u0391\u03C0\u03B1\u03B9\u03C4\u03B5\u03AF\u03C4\u03B1\u03B9 Cast topic \u03B3\u03B9\u03B1 \u03C6\u03B9\u03BB\u03BF\u03BE\u03B5\u03BD\u03AF\u03B1 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
-  topicRequiredJoin: "\u0391\u03C0\u03B1\u03B9\u03C4\u03B5\u03AF\u03C4\u03B1\u03B9 Cast topic \u03B3\u03B9\u03B1 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7.",
-  titleRequired: "\u0391\u03C0\u03B1\u03B9\u03C4\u03B5\u03AF\u03C4\u03B1\u03B9 \u03C4\u03AF\u03C4\u03BB\u03BF\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
-  selectAttendee: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03C4\u03BF\u03C5\u03BB\u03AC\u03C7\u03B9\u03C3\u03C4\u03BF\u03BD \u03AD\u03BD\u03B1\u03BD \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03AD\u03C7\u03BF\u03BD\u03C4\u03B1.",
-  selectConferenceToJoin: "\u0395\u03C0\u03B9\u03BB\u03AD\u03BE\u03C4\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7 \u03B3\u03B9\u03B1 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE.",
-  failedCreate: "\u0391\u03C0\u03BF\u03C4\u03C5\u03C7\u03AF\u03B1 \u03B4\u03B7\u03BC\u03B9\u03BF\u03C5\u03C1\u03B3\u03AF\u03B1\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
-  failedJoin: "\u0391\u03C0\u03BF\u03C4\u03C5\u03C7\u03AF\u03B1 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE\u03C2 \u03C3\u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7.",
-  failedUpdate: "\u0391\u03C0\u03BF\u03C4\u03C5\u03C7\u03AF\u03B1 \u03B5\u03BD\u03B7\u03BC\u03AD\u03C1\u03C9\u03C3\u03B7\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
-  inviteTitle: "\u03A0\u03C1\u03CC\u03C3\u03BA\u03BB\u03B7\u03C3\u03B7 \u03C3\u03B5 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
-  joinAndFollow: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7",
-  joinNoFollow: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C7\u03C9\u03C1\u03AF\u03C2 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7",
-  doNotJoin: "\u038C\u03C7\u03B9 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE",
-  hostFallback: "\u03BF\u03B9\u03BA\u03BF\u03B4\u03B5\u03C3\u03C0\u03CC\u03C4\u03B7\u03C2",
-  inviteLeadWithTitle: "{{title}} \u2014 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7 \u03C4\u03BF\u03C5 {{host}};",
-  inviteLeadNoTitle: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03C3\u03C4\u03B7 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7 \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7 \u03C4\u03BF\u03C5 {{host}};",
-  joinAndFollowHost: "\u03A3\u03C5\u03BC\u03BC\u03B5\u03C4\u03BF\u03C7\u03AE \u03BA\u03B1\u03B9 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7 \u03C4\u03BF\u03C5 {{host}}",
-  takeoverTitle: "\u0391\u03BD\u03AC\u03BB\u03B7\u03C8\u03B7 \u03B5\u03BB\u03AD\u03B3\u03C7\u03BF\u03C5;",
-  takeoverBody: "\u039F \u03BF\u03B9\u03BA\u03BF\u03B4\u03B5\u03C3\u03C0\u03CC\u03C4\u03B7\u03C2 \u03BA\u03B1\u03B9 \u03CC\u03BB\u03BF\u03B9 \u03BF\u03B9 \u03C3\u03C5\u03BC\u03BC\u03B5\u03C4\u03AD\u03C7\u03BF\u03BD\u03C4\u03B5\u03C2 \u03B8\u03B1 \u03B5\u03B9\u03B4\u03BF\u03C0\u03BF\u03B9\u03B7\u03B8\u03BF\u03CD\u03BD \u03CC\u03C4\u03B9 \u03B1\u03BD\u03B1\u03BB\u03B1\u03BC\u03B2\u03AC\u03BD\u03B5\u03C4\u03B5 \u03C4\u03BF\u03BD \u03AD\u03BB\u03B5\u03B3\u03C7\u03BF. \u0398\u03B1 \u03BF\u03B4\u03B7\u03B3\u03B5\u03AF\u03C4\u03B5 \u03C4\u03B9\u03C2 \u03B5\u03BD\u03B7\u03BC\u03B5\u03C1\u03CE\u03C3\u03B5\u03B9\u03C2 \u03C3\u03BA\u03B7\u03BD\u03AE\u03C2 \u03B1\u03C5\u03C4\u03AE\u03C2 \u03C4\u03B7\u03C2 \u03B4\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7\u03C2.",
-  cancel: "\u0391\u03BA\u03CD\u03C1\u03C9\u03C3\u03B7",
-  takeOver: "\u0391\u03BD\u03AC\u03BB\u03B7\u03C8\u03B7",
-  conferencing: "\u0394\u03B9\u03AC\u03C3\u03BA\u03B5\u03C8\u03B7",
-  subscribeHubFirst: "\u0395\u03B3\u03B3\u03C1\u03B1\u03C6\u03B5\u03AF\u03C4\u03B5 \u03C0\u03C1\u03CE\u03C4\u03B1 \u03C3\u03C4\u03BF hub",
-  stopFollowing: "\u0394\u03B9\u03B1\u03BA\u03BF\u03C0\u03AE \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7\u03C2",
-  resumeFollowing: "\u0395\u03C0\u03B1\u03BD\u03AC\u03BB\u03B7\u03C8\u03B7 \u03C0\u03B1\u03C1\u03B1\u03BA\u03BF\u03BB\u03BF\u03CD\u03B8\u03B7\u03C3\u03B7\u03C2"
-};
-var lv = {
-  dialogTitle: "Konference",
-  close: "Aizv\u0113rt",
-  closeAria: "Aizv\u0113rt",
-  createSection: "Izveidot konferenci",
-  conferenceTitle: "Konferences nosaukums",
-  selectConferenceTitle: "Atlas\u012Bt nosaukumu",
-  otherTitle: "Cits\u2026",
-  customTitle: "Piel\u0101gots nosaukums",
-  customTitlePlaceholder: "Ievadiet konferences nosaukumu",
-  users: "Lietot\u0101ji",
-  loadingUsers: "Iel\u0101d\u0113 lietot\u0101jus\u2026",
-  noUsers: "Nav pieejamu lietot\u0101ju",
-  createConference: "Izveidot konferenci",
-  creating: "Izveido\u2026",
-  joinSection: "Pievienoties konferencei",
-  activeConferences: "Akt\u012Bv\u0101s konferences",
-  noConferences: "Nav pieejamu konferen\u010Du",
-  selectConference: "Atlas\u012Bt konferenci",
-  untitled: "Bez nosaukuma",
-  joinConference: "Pievienoties konferencei",
-  joining: "Pievienojas\u2026",
-  manageSection: "P\u0101rvald\u012Bt konferenci",
-  titleLabel: "Nosaukums:",
-  na: "n/a",
-  participants: "Dal\u012Bbnieki",
-  noPlaces: "Nav vietu",
-  leaveConference: "Atst\u0101t konferenci",
-  endConference: "Beigt konferenci",
-  ending: "Beidz\u2026",
-  leaving: "Atst\u0101j\u2026",
-  conferenceEnded: "Konference beigusies.",
-  leftConference: "J\u016Bs atst\u0101j\u0101t konferenci.",
-  connectHubFirst: "Vispirms piesl\u0113dzieties Cast hub.",
-  topicRequiredHost: "Lai r\u012Bkotu konferenci, nepiecie\u0161ams Cast topic.",
-  topicRequiredJoin: "Lai pievienotos konferencei, nepiecie\u0161ams Cast topic.",
-  titleRequired: "Nepiecie\u0161ams konferences nosaukums.",
-  selectAttendee: "Atlasiet vismaz vienu dal\u012Bbnieku.",
-  selectConferenceToJoin: "Atlasiet konferenci, kurai pievienoties.",
-  failedCreate: "Neizdev\u0101s izveidot konferenci.",
-  failedJoin: "Neizdev\u0101s pievienoties konferencei.",
-  failedUpdate: "Neizdev\u0101s atjaunin\u0101t konferenci.",
-  inviteTitle: "Uzaicin\u0101jums uz konferenci",
-  joinAndFollow: "Pievienoties un sekot",
-  joinNoFollow: "Pievienoties, bet nesekot",
-  doNotJoin: "Nepievienoties",
-  hostFallback: "vad\u012Bt\u0101js",
-  inviteLeadWithTitle: "{{title}} \u2014 pievienoties un sekot {{host}}?",
-  inviteLeadNoTitle: "Pievienoties konferencei un sekot {{host}}?",
-  joinAndFollowHost: "Pievienoties un sekot {{host}}",
-  takeoverTitle: "P\u0101r\u0146emt vad\u012Bbu?",
-  takeoverBody: "Vad\u012Bt\u0101js un visi dal\u012Bbnieki tiks inform\u0113ti, ka j\u016Bs p\u0101r\u0146emat vad\u012Bbu. J\u016Bs vad\u012Bsiet \u0161\u012Bs konferences ainas atjaunin\u0101jumus.",
-  cancel: "Atcelt",
-  takeOver: "P\u0101r\u0146emt",
-  conferencing: "Konference",
-  subscribeHubFirst: "Vispirms abon\u0113jiet hub",
-  stopFollowing: "P\u0101rtraukt seko\u0161anu",
-  resumeFollowing: "Ats\u0101kt seko\u0161anu"
-};
-var hu = {
-  dialogTitle: "Konferencia",
-  close: "Bez\xE1r\xE1s",
-  closeAria: "Bez\xE1r\xE1s",
-  createSection: "Konferencia l\xE9trehoz\xE1sa",
-  conferenceTitle: "Konferencia c\xEDme",
-  selectConferenceTitle: "C\xEDm kiv\xE1laszt\xE1sa",
-  otherTitle: "Egy\xE9b\u2026",
-  customTitle: "Egy\xE9ni c\xEDm",
-  customTitlePlaceholder: "Adja meg a konferencia c\xEDm\xE9t",
-  users: "Felhaszn\xE1l\xF3k",
-  loadingUsers: "Felhaszn\xE1l\xF3k bet\xF6lt\xE9se\u2026",
-  noUsers: "Nincs el\xE9rhet\u0151 felhaszn\xE1l\xF3",
-  createConference: "Konferencia l\xE9trehoz\xE1sa",
-  creating: "L\xE9trehoz\xE1s\u2026",
-  joinSection: "Csatlakoz\xE1s konferenci\xE1hoz",
-  activeConferences: "Akt\xEDv konferenci\xE1k",
-  noConferences: "Nincs el\xE9rhet\u0151 konferencia",
-  selectConference: "Konferencia kiv\xE1laszt\xE1sa",
-  untitled: "N\xE9vtelen",
-  joinConference: "Csatlakoz\xE1s a konferenci\xE1hoz",
-  joining: "Csatlakoz\xE1s\u2026",
-  manageSection: "Konferencia kezel\xE9se",
-  titleLabel: "C\xEDm:",
-  na: "n/a",
-  participants: "R\xE9sztvev\u0151k",
-  noPlaces: "Nincs hely",
-  leaveConference: "Kil\xE9p\xE9s a konferenci\xE1b\xF3l",
-  endConference: "Konferencia befejez\xE9se",
-  ending: "Befejez\xE9s\u2026",
-  leaving: "Kil\xE9p\xE9s\u2026",
-  conferenceEnded: "A konferencia v\xE9get \xE9rt.",
-  leftConference: "Kil\xE9pett a konferenci\xE1b\xF3l.",
-  connectHubFirst: "El\u0151sz\xF6r csatlakozzon a Cast hubhoz.",
-  topicRequiredHost: "Konferencia ind\xEDt\xE1s\xE1hoz Cast topic sz\xFCks\xE9ges.",
-  topicRequiredJoin: "Konferenci\xE1hoz csatlakoz\xE1shoz Cast topic sz\xFCks\xE9ges.",
-  titleRequired: "A konferencia c\xEDme k\xF6telez\u0151.",
-  selectAttendee: "V\xE1lasszon legal\xE1bb egy r\xE9sztvev\u0151t.",
-  selectConferenceToJoin: "V\xE1lasszon konferenci\xE1t a csatlakoz\xE1shoz.",
-  failedCreate: "Nem siker\xFClt l\xE9trehozni a konferenci\xE1t.",
-  failedJoin: "Nem siker\xFClt csatlakozni a konferenci\xE1hoz.",
-  failedUpdate: "Nem siker\xFClt friss\xEDteni a konferenci\xE1t.",
-  inviteTitle: "Konferenciamegh\xEDv\xF3",
-  joinAndFollow: "Csatlakoz\xE1s \xE9s k\xF6vet\xE9s",
-  joinNoFollow: "Csatlakoz\xE1s k\xF6vet\xE9s n\xE9lk\xFCl",
-  doNotJoin: "Nem csatlakozom",
-  hostFallback: "h\xE1zigazda",
-  inviteLeadWithTitle: "{{title}} \u2014 csatlakoz\xE1s \xE9s {{host}} k\xF6vet\xE9se?",
-  inviteLeadNoTitle: "Csatlakoz\xE1s a konferenci\xE1hoz \xE9s {{host}} k\xF6vet\xE9se?",
-  joinAndFollowHost: "Csatlakoz\xE1s \xE9s {{host}} k\xF6vet\xE9se",
-  takeoverTitle: "\xC1tv\xE9tel?",
-  takeoverBody: "A h\xE1zigazda \xE9s minden r\xE9sztvev\u0151 \xE9rtes\xEDt\xE9st kap, hogy \xD6n \xE1tveszi a vezet\xE9st. \xD6n ir\xE1ny\xEDtja majd a konferencia jelenetfriss\xEDt\xE9seit.",
-  cancel: "M\xE9gse",
-  takeOver: "\xC1tv\xE9tel",
-  conferencing: "Konferencia",
-  subscribeHubFirst: "El\u0151sz\xF6r iratkozzon fel a hubra",
-  stopFollowing: "K\xF6vet\xE9s le\xE1ll\xEDt\xE1sa",
-  resumeFollowing: "K\xF6vet\xE9s folytat\xE1sa"
-};
-var lt2 = {
-  dialogTitle: "Konferencija",
-  close: "U\u017Edaryti",
-  closeAria: "U\u017Edaryti",
-  createSection: "Sukurti konferencij\u0105",
-  conferenceTitle: "Konferencijos pavadinimas",
-  selectConferenceTitle: "Pasirinkite pavadinim\u0105",
-  otherTitle: "Kita\u2026",
-  customTitle: "Pasirinktinis pavadinimas",
-  customTitlePlaceholder: "\u012Eveskite konferencijos pavadinim\u0105",
-  users: "Naudotojai",
-  loadingUsers: "\u012Ekeliami naudotojai\u2026",
-  noUsers: "N\u0117ra galim\u0173 naudotoj\u0173",
-  createConference: "Sukurti konferencij\u0105",
-  creating: "Kuriama\u2026",
-  joinSection: "Prisijungti prie konferencijos",
-  activeConferences: "Aktyvios konferencijos",
-  noConferences: "N\u0117ra galim\u0173 konferencij\u0173",
-  selectConference: "Pasirinkite konferencij\u0105",
-  untitled: "Be pavadinimo",
-  joinConference: "Prisijungti prie konferencijos",
-  joining: "Jungiamasi\u2026",
-  manageSection: "Tvarkyti konferencij\u0105",
-  titleLabel: "Pavadinimas:",
-  na: "n/d",
-  participants: "Dalyviai",
-  noPlaces: "N\u0117ra viet\u0173",
-  leaveConference: "I\u0161eiti i\u0161 konferencijos",
-  endConference: "Baigti konferencij\u0105",
-  ending: "Baigiama\u2026",
-  leaving: "I\u0161einama\u2026",
-  conferenceEnded: "Konferencija baigta.",
-  leftConference: "I\u0161\u0117jote i\u0161 konferencijos.",
-  connectHubFirst: "Pirmiausia prisijunkite prie Cast hub.",
-  topicRequiredHost: "Konferencijai vesti reikalingas Cast topic.",
-  topicRequiredJoin: "Norint prisijungti prie konferencijos, reikalingas Cast topic.",
-  titleRequired: "Reikalingas konferencijos pavadinimas.",
-  selectAttendee: "Pasirinkite bent vien\u0105 dalyv\u012F.",
-  selectConferenceToJoin: "Pasirinkite konferencij\u0105, prie kurios jungtis.",
-  failedCreate: "Nepavyko sukurti konferencijos.",
-  failedJoin: "Nepavyko prisijungti prie konferencijos.",
-  failedUpdate: "Nepavyko atnaujinti konferencijos.",
-  inviteTitle: "Kvietimas \u012F konferencij\u0105",
-  joinAndFollow: "Prisijungti ir sekti",
-  joinNoFollow: "Prisijungti, bet nesekti",
-  doNotJoin: "Neprisijungti",
-  hostFallback: "ved\u0117jas",
-  inviteLeadWithTitle: "{{title}} \u2014 prisijungti ir sekti {{host}}?",
-  inviteLeadNoTitle: "Prisijungti prie konferencijos ir sekti {{host}}?",
-  joinAndFollowHost: "Prisijungti ir sekti {{host}}",
-  takeoverTitle: "Perimti valdym\u0105?",
-  takeoverBody: "Ved\u0117jas ir visi dalyviai bus informuoti, kad perimate valdym\u0105. V\u0117site \u0161ios konferencijos scenos atnaujinimus.",
-  cancel: "At\u0161aukti",
-  takeOver: "Perimti",
-  conferencing: "Konferencija",
-  subscribeHubFirst: "Pirmiausia u\u017Esiprenumeruokite hub",
-  stopFollowing: "Nustoti sekti",
-  resumeFollowing: "T\u0119sti sekim\u0105"
-};
-var ro2 = {
-  dialogTitle: "Conferin\u021B\u0103",
-  close: "\xCEnchide",
-  closeAria: "\xCEnchide",
-  createSection: "Creeaz\u0103 o conferin\u021B\u0103",
-  conferenceTitle: "Titlul conferin\u021Bei",
-  selectConferenceTitle: "Selecteaz\u0103 un titlu",
-  otherTitle: "Altul\u2026",
-  customTitle: "Titlu personalizat",
-  customTitlePlaceholder: "Introduce\u021Bi titlul conferin\u021Bei",
-  users: "Utilizatori",
-  loadingUsers: "Se \xEEncarc\u0103 utilizatorii\u2026",
-  noUsers: "Nu exist\u0103 utilizatori disponibili",
-  createConference: "Creeaz\u0103 conferin\u021Ba",
-  creating: "Se creeaz\u0103\u2026",
-  joinSection: "Particip\u0103 la o conferin\u021B\u0103",
-  activeConferences: "Conferin\u021Be active",
-  noConferences: "Nu exist\u0103 conferin\u021Be disponibile",
-  selectConference: "Selecteaz\u0103 o conferin\u021B\u0103",
-  untitled: "F\u0103r\u0103 titlu",
-  joinConference: "Particip\u0103 la conferin\u021B\u0103",
-  joining: "Se particip\u0103\u2026",
-  manageSection: "Gestioneaz\u0103 conferin\u021Ba",
-  titleLabel: "Titlu:",
-  na: "N/A",
-  participants: "Participan\u021Bi",
-  noPlaces: "F\u0103r\u0103 locuri",
-  leaveConference: "P\u0103r\u0103se\u0219te conferin\u021Ba",
-  endConference: "\xCEncheie conferin\u021Ba",
-  ending: "Se \xEEncheie\u2026",
-  leaving: "Se p\u0103r\u0103se\u0219te\u2026",
-  conferenceEnded: "Conferin\u021Ba s-a \xEEncheiat.",
-  leftConference: "A\u021Bi p\u0103r\u0103sit conferin\u021Ba.",
-  connectHubFirst: "Conecta\u021Bi-v\u0103 mai \xEEnt\xE2i la hub-ul Cast.",
-  topicRequiredHost: "Este necesar un topic Cast pentru a g\u0103zdui o conferin\u021B\u0103.",
-  topicRequiredJoin: "Este necesar un topic Cast pentru a participa la o conferin\u021B\u0103.",
-  titleRequired: "Titlul conferin\u021Bei este obligatoriu.",
-  selectAttendee: "Selecta\u021Bi cel pu\u021Bin un participant.",
-  selectConferenceToJoin: "Selecta\u021Bi o conferin\u021B\u0103 la care s\u0103 participa\u021Bi.",
-  failedCreate: "Crearea conferin\u021Bei a e\u0219uat.",
-  failedJoin: "Participarea la conferin\u021B\u0103 a e\u0219uat.",
-  failedUpdate: "Actualizarea conferin\u021Bei a e\u0219uat.",
-  inviteTitle: "Invita\u021Bie la conferin\u021B\u0103",
-  joinAndFollow: "Particip\u0103 \u0219i urmeaz\u0103",
-  joinNoFollow: "Particip\u0103, dar nu urma",
-  doNotJoin: "Nu participa",
-  hostFallback: "gazd\u0103",
-  inviteLeadWithTitle: "{{title}} \u2014 participa\u021Bi \u0219i urma\u021Bi pe {{host}}?",
-  inviteLeadNoTitle: "Participa\u021Bi la conferin\u021B\u0103 \u0219i urma\u021Bi pe {{host}}?",
-  joinAndFollowHost: "Particip\u0103 \u0219i urmeaz\u0103 pe {{host}}",
-  takeoverTitle: "Preia controlul?",
-  takeoverBody: "Gazda \u0219i to\u021Bi participan\u021Bii vor fi anun\u021Ba\u021Bi c\u0103 prelua\u021Bi controlul. Ve\u021Bi conduce actualiz\u0103rile de scen\u0103 ale acestei conferin\u021Be.",
-  cancel: "Anuleaz\u0103",
-  takeOver: "Preia",
-  conferencing: "Conferin\u021B\u0103",
-  subscribeHubFirst: "Abona\u021Bi-v\u0103 mai \xEEnt\xE2i la hub",
-  stopFollowing: "Opre\u0219te urm\u0103rirea",
-  resumeFollowing: "Reia urm\u0103rirea"
-};
-var no2 = {
-  dialogTitle: "Konferanse",
-  close: "Lukk",
-  closeAria: "Lukk",
-  createSection: "Opprett en konferanse",
-  conferenceTitle: "Konferansetittel",
-  selectConferenceTitle: "Velg en tittel",
-  otherTitle: "Annet\u2026",
-  customTitle: "Egendefinert tittel",
-  customTitlePlaceholder: "Skriv inn konferansetittel",
-  users: "Brukere",
-  loadingUsers: "Laster brukere\u2026",
-  noUsers: "Ingen brukere tilgjengelig",
-  createConference: "Opprett konferanse",
-  creating: "Oppretter\u2026",
-  joinSection: "Bli med i en konferanse",
-  activeConferences: "Aktive konferanser",
-  noConferences: "Ingen konferanser tilgjengelig",
-  selectConference: "Velg en konferanse",
-  untitled: "Uten tittel",
-  joinConference: "Bli med i konferansen",
-  joining: "Blir med\u2026",
-  manageSection: "Administrer konferanse",
-  titleLabel: "Tittel:",
-  na: "i/t",
-  participants: "Deltakere",
-  noPlaces: "Ingen steder",
-  leaveConference: "Forlat konferansen",
-  endConference: "Avslutt konferansen",
-  ending: "Avslutter\u2026",
-  leaving: "Forlater\u2026",
-  conferenceEnded: "Konferansen er avsluttet.",
-  leftConference: "Du forlot konferansen.",
-  connectHubFirst: "Koble til Cast-huben f\xF8rst.",
-  topicRequiredHost: "Cast-topic kreves for \xE5 v\xE6re vert for en konferanse.",
-  topicRequiredJoin: "Cast-topic kreves for \xE5 bli med i en konferanse.",
-  titleRequired: "Konferansetittel er p\xE5krevd.",
-  selectAttendee: "Velg minst \xE9n deltaker.",
-  selectConferenceToJoin: "Velg en konferanse \xE5 bli med i.",
-  failedCreate: "Kunne ikke opprette konferansen.",
-  failedJoin: "Kunne ikke bli med i konferansen.",
-  failedUpdate: "Kunne ikke oppdatere konferansen.",
-  inviteTitle: "Konferanseinvitasjon",
-  joinAndFollow: "Bli med og f\xF8lg",
-  joinNoFollow: "Bli med, men ikke f\xF8lg",
-  doNotJoin: "Ikke bli med",
-  hostFallback: "vert",
-  inviteLeadWithTitle: "{{title}} \u2014 bli med og f\xF8lge {{host}}?",
-  inviteLeadNoTitle: "Bli med i konferansen og f\xF8lge {{host}}?",
-  joinAndFollowHost: "Bli med og f\xF8lg {{host}}",
-  takeoverTitle: "Ta over?",
-  takeoverBody: "Verten og alle deltakere blir varslet om at du tar over. Du vil lede sceneoppdateringene for denne konferansen.",
-  cancel: "Avbryt",
-  takeOver: "Ta over",
-  conferencing: "Konferanse",
-  subscribeHubFirst: "Abonner p\xE5 huben f\xF8rst",
-  stopFollowing: "Stopp \xE5 f\xF8lge",
-  resumeFollowing: "Fortsett \xE5 f\xF8lge"
-};
-var CONFERENCE_BY_LOCALE = {
-  en: en2,
-  fr: fr2,
-  es: es2,
-  ca,
-  de: de2,
-  it: it2,
-  pt: pt2,
-  ko: ko2,
-  pl,
-  uk,
-  cs,
-  nl,
-  el,
-  lv,
-  hu,
-  lt: lt2,
-  ro: ro2,
-  no: no2
-};
-function conferenceStringsFor(locale) {
-  const code2 = locale || resolveStoredLocale();
-  return { ...CONFERENCE_BY_LOCALE[code2] };
-}
-
-// ../i18n/header.ts
-var en3 = {
-  worklistLabel: "Worklist:",
-  reportingLabel: "Reporting:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Open SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Open DICOM SR reporting client",
-  remoteAi: "Remote AI",
-  remoteAiTitle: "Remote AI \u2014 inference servers",
-  loadStudy: "Load study",
-  loadStudyTitle: "Load study",
-  sessionInfo: "Session info"
-};
-var de3 = {
-  worklistLabel: "Worklist:",
-  reportingLabel: "Reporting:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "SlicerWorklist \xF6ffnen",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "DICOM-SR-Reporting-Client \xF6ffnen",
-  remoteAi: "Remote-KI",
-  remoteAiTitle: "Remote-KI \u2014 Inferenzserver",
-  loadStudy: "Studie laden",
-  loadStudyTitle: "Studie laden",
-  sessionInfo: "Sitzungsinfo"
-};
-var fr3 = {
-  worklistLabel: "Liste de travail :",
-  reportingLabel: "Reporting :",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Ouvrir SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Ouvrir le client de reporting DICOM SR",
-  remoteAi: "IA distante",
-  remoteAiTitle: "IA distante \u2014 serveurs d\u2019inf\xE9rence",
-  loadStudy: "Charger une \xE9tude",
-  loadStudyTitle: "Charger une \xE9tude",
-  sessionInfo: "Info session"
-};
-var es3 = {
-  worklistLabel: "Lista de trabajo:",
-  reportingLabel: "Informes:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Abrir SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Abrir el cliente de reporting DICOM SR",
-  remoteAi: "IA remota",
-  remoteAiTitle: "IA remota \u2014 servidores de inferencia",
-  loadStudy: "Cargar estudio",
-  loadStudyTitle: "Cargar estudio",
-  sessionInfo: "Info de sesi\xF3n"
-};
-var ca2 = {
-  worklistLabel: "Llista de treball:",
-  reportingLabel: "Informes:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Obrir SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Obrir el client de reporting DICOM SR",
-  remoteAi: "IA remota",
-  remoteAiTitle: "IA remota \u2014 servidors d\u2019infer\xE8ncia",
-  loadStudy: "Carregar estudi",
-  loadStudyTitle: "Carregar estudi",
-  sessionInfo: "Info de sessi\xF3"
-};
-var it3 = {
-  worklistLabel: "Worklist:",
-  reportingLabel: "Reporting:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Apri SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Apri il client di reporting DICOM SR",
-  remoteAi: "IA remota",
-  remoteAiTitle: "IA remota \u2014 server di inferenza",
-  loadStudy: "Carica studio",
-  loadStudyTitle: "Carica studio",
-  sessionInfo: "Info sessione"
-};
-var pt3 = {
-  worklistLabel: "Worklist:",
-  reportingLabel: "Reporting:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Abrir SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Abrir o cliente de reporting DICOM SR",
-  remoteAi: "IA remota",
-  remoteAiTitle: "IA remota \u2014 servidores de infer\xEAncia",
-  loadStudy: "Carregar estudo",
-  loadStudyTitle: "Carregar estudo",
-  sessionInfo: "Info da sess\xE3o"
-};
-var ko3 = {
-  worklistLabel: "\uC6CC\uD06C\uB9AC\uC2A4\uD2B8:",
-  reportingLabel: "\uB9AC\uD3EC\uD305:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "SlicerWorklist \uC5F4\uAE30",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "DICOM SR \uB9AC\uD3EC\uD305 \uD074\uB77C\uC774\uC5B8\uD2B8 \uC5F4\uAE30",
-  remoteAi: "\uC6D0\uACA9 AI",
-  remoteAiTitle: "\uC6D0\uACA9 AI \u2014 \uCD94\uB860 \uC11C\uBC84",
-  loadStudy: "\uAC80\uC0AC \uBD88\uB7EC\uC624\uAE30",
-  loadStudyTitle: "\uAC80\uC0AC \uBD88\uB7EC\uC624\uAE30",
-  sessionInfo: "\uC138\uC158 \uC815\uBCF4"
-};
-var pl2 = {
-  worklistLabel: "Worklist:",
-  reportingLabel: "Reporting:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Otw\xF3rz SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Otw\xF3rz klienta reportingowego DICOM SR",
-  remoteAi: "Zdalne AI",
-  remoteAiTitle: "Zdalne AI \u2014 serwery wnioskowania",
-  loadStudy: "Wczytaj badanie",
-  loadStudyTitle: "Wczytaj badanie",
-  sessionInfo: "Info o sesji"
-};
-var uk2 = {
-  worklistLabel: "\u0420\u043E\u0431\u043E\u0447\u0438\u0439 \u0441\u043F\u0438\u0441\u043E\u043A:",
-  reportingLabel: "\u0417\u0432\u0456\u0442\u0443\u0432\u0430\u043D\u043D\u044F:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "\u0412\u0456\u0434\u043A\u0440\u0438\u0442\u0438 SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "\u0412\u0456\u0434\u043A\u0440\u0438\u0442\u0438 \u043A\u043B\u0456\u0454\u043D\u0442 \u0437\u0432\u0456\u0442\u0443\u0432\u0430\u043D\u043D\u044F DICOM SR",
-  remoteAi: "\u0412\u0456\u0434\u0434\u0430\u043B\u0435\u043D\u0438\u0439 \u0428\u0406",
-  remoteAiTitle: "\u0412\u0456\u0434\u0434\u0430\u043B\u0435\u043D\u0438\u0439 \u0428\u0406 \u2014 \u0441\u0435\u0440\u0432\u0435\u0440\u0438 \u0432\u0438\u0441\u043D\u043E\u0432\u043A\u0443",
-  loadStudy: "\u0417\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0438\u0442\u0438 \u0434\u043E\u0441\u043B\u0456\u0434\u0436\u0435\u043D\u043D\u044F",
-  loadStudyTitle: "\u0417\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0438\u0442\u0438 \u0434\u043E\u0441\u043B\u0456\u0434\u0436\u0435\u043D\u043D\u044F",
-  sessionInfo: "\u0406\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0456\u044F \u043F\u0440\u043E \u0441\u0435\u0430\u043D\u0441"
-};
-var cs2 = {
-  worklistLabel: "Worklist:",
-  reportingLabel: "Reporting:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Otev\u0159\xEDt SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Otev\u0159\xEDt reporting klienta DICOM SR",
-  remoteAi: "Vzd\xE1len\xE1 AI",
-  remoteAiTitle: "Vzd\xE1len\xE1 AI \u2014 inferen\u010Dn\xED servery",
-  loadStudy: "Na\u010D\xEDst studii",
-  loadStudyTitle: "Na\u010D\xEDst studii",
-  sessionInfo: "Info o relaci"
-};
-var nl2 = {
-  worklistLabel: "Worklist:",
-  reportingLabel: "Reporting:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "SlicerWorklist openen",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "DICOM SR-reportingclient openen",
-  remoteAi: "Externe AI",
-  remoteAiTitle: "Externe AI \u2014 inferentieservers",
-  loadStudy: "Studie laden",
-  loadStudyTitle: "Studie laden",
-  sessionInfo: "Sessie-info"
-};
-var el2 = {
-  worklistLabel: "\u039B\u03AF\u03C3\u03C4\u03B1 \u03B5\u03C1\u03B3\u03B1\u03C3\u03AF\u03B1\u03C2:",
-  reportingLabel: "\u0391\u03BD\u03B1\u03C6\u03BF\u03C1\u03AD\u03C2:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "\u0386\u03BD\u03BF\u03B9\u03B3\u03BC\u03B1 SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "\u0386\u03BD\u03BF\u03B9\u03B3\u03BC\u03B1 \u03C0\u03B5\u03BB\u03AC\u03C4\u03B7 \u03B1\u03BD\u03B1\u03C6\u03BF\u03C1\u03CE\u03BD DICOM SR",
-  remoteAi: "\u0391\u03C0\u03BF\u03BC\u03B1\u03BA\u03C1\u03C5\u03C3\u03BC\u03AD\u03BD\u03B7 \u03A4\u039D",
-  remoteAiTitle: "\u0391\u03C0\u03BF\u03BC\u03B1\u03BA\u03C1\u03C5\u03C3\u03BC\u03AD\u03BD\u03B7 \u03A4\u039D \u2014 \u03B4\u03B9\u03B1\u03BA\u03BF\u03BC\u03B9\u03C3\u03C4\u03AD\u03C2 \u03C3\u03C5\u03BC\u03C0\u03B5\u03C1\u03B1\u03C3\u03BC\u03BF\u03CD",
-  loadStudy: "\u03A6\u03CC\u03C1\u03C4\u03C9\u03C3\u03B7 \u03BC\u03B5\u03BB\u03AD\u03C4\u03B7\u03C2",
-  loadStudyTitle: "\u03A6\u03CC\u03C1\u03C4\u03C9\u03C3\u03B7 \u03BC\u03B5\u03BB\u03AD\u03C4\u03B7\u03C2",
-  sessionInfo: "\u03A0\u03BB\u03B7\u03C1\u03BF\u03C6\u03BF\u03C1\u03AF\u03B5\u03C2 \u03C3\u03C5\u03BD\u03B5\u03B4\u03C1\u03AF\u03B1\u03C2"
-};
-var lv2 = {
-  worklistLabel: "Darba saraksts:",
-  reportingLabel: "Zi\u0146o\u0161ana:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Atv\u0113rt SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Atv\u0113rt DICOM SR zi\u0146o\u0161anas klientu",
-  remoteAi: "Att\u0101lais MI",
-  remoteAiTitle: "Att\u0101lais MI \u2014 secin\u0101\u0161anas serveri",
-  loadStudy: "Iel\u0101d\u0113t p\u0113t\u012Bjumu",
-  loadStudyTitle: "Iel\u0101d\u0113t p\u0113t\u012Bjumu",
-  sessionInfo: "Sesijas info"
-};
-var hu2 = {
-  worklistLabel: "Munkalista:",
-  reportingLabel: "Jelent\xE9s:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "SlicerWorklist megnyit\xE1sa",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "DICOM SR jelent\xE9skliens megnyit\xE1sa",
-  remoteAi: "T\xE1voli MI",
-  remoteAiTitle: "T\xE1voli MI \u2014 k\xF6vetkeztet\u0151 kiszolg\xE1l\xF3k",
-  loadStudy: "Vizsg\xE1lat bet\xF6lt\xE9se",
-  loadStudyTitle: "Vizsg\xE1lat bet\xF6lt\xE9se",
-  sessionInfo: "Munkamenet-inf\xF3"
-};
-var lt3 = {
-  worklistLabel: "Darb\u0173 s\u0105ra\u0161as:",
-  reportingLabel: "Ataskaitos:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Atidaryti SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Atidaryti DICOM SR ataskait\u0173 klient\u0105",
-  remoteAi: "Nuotolinis DI",
-  remoteAiTitle: "Nuotolinis DI \u2014 i\u0161vad\u0173 serveriai",
-  loadStudy: "\u012Ekelti tyrim\u0105",
-  loadStudyTitle: "\u012Ekelti tyrim\u0105",
-  sessionInfo: "Sesijos info"
-};
-var ro3 = {
-  worklistLabel: "List\u0103 de lucru:",
-  reportingLabel: "Raportare:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "Deschide SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "Deschide clientul de raportare DICOM SR",
-  remoteAi: "IA la distan\u021B\u0103",
-  remoteAiTitle: "IA la distan\u021B\u0103 \u2014 servere de inferen\u021B\u0103",
-  loadStudy: "\xCEncarc\u0103 studiul",
-  loadStudyTitle: "\xCEncarc\u0103 studiul",
-  sessionInfo: "Info sesiune"
-};
-var noNb = {
-  worklistLabel: "Worklist:",
-  reportingLabel: "Reporting:",
-  slicerWorklist: "SlicerWorklist",
-  slicerWorklistTitle: "\xC5pne SlicerWorklist",
-  dicomSr: "DICOM SR",
-  dicomSrTitle: "\xC5pne DICOM SR-rapporteringsklient",
-  remoteAi: "Ekstern AI",
-  remoteAiTitle: "Ekstern AI \u2014 inferensservere",
-  loadStudy: "Last studie",
-  loadStudyTitle: "Last studie",
-  sessionInfo: "\xD8ktinfo"
-};
-var HEADER_BY_LOCALE = {
-  en: en3,
-  fr: fr3,
-  es: es3,
-  ca: ca2,
-  de: de3,
-  it: it3,
-  pt: pt3,
-  ko: ko3,
-  pl: pl2,
-  uk: uk2,
-  cs: cs2,
-  nl: nl2,
-  el: el2,
-  lv: lv2,
-  hu: hu2,
-  lt: lt3,
-  ro: ro3,
-  no: noNb
-};
-function headerChromeFor(locale) {
-  const code2 = locale || resolveStoredLocale();
-  return { ...HEADER_BY_LOCALE[code2] };
-}
-function applyHeaderChrome(root = document, locale) {
-  const h = headerChromeFor(locale);
-  root.querySelectorAll("[data-i18n-header]").forEach((el3) => {
-    const key = el3.getAttribute("data-i18n-header");
-    if (!key || !(key in h)) return;
-    el3.textContent = h[key];
-  });
-  root.querySelectorAll("[data-i18n-header-title]").forEach((el3) => {
-    const key = el3.getAttribute(
-      "data-i18n-header-title"
-    );
-    if (!key || !(key in h)) return;
-    el3.title = h[key];
-  });
-  root.querySelectorAll("[data-i18n-header-aria]").forEach((el3) => {
-    const key = el3.getAttribute(
-      "data-i18n-header-aria"
-    );
-    if (!key || !(key in h)) return;
-    el3.setAttribute("aria-label", h[key]);
-  });
 }
 
 // render/demos/ira/totalseg-tasks.ts
@@ -23236,8 +24055,78 @@ function resolveOpenStudyTotalSegModality() {
   };
 }
 
+// render/demos/ira/ira-flexray-models.ts
+var FLEXRAY_MANIFEST_URL = "https://flexray.csail.mit.edu/demo/demo_manifest.json";
+function formatFlexrayDownloadSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n >= 1e9) {
+    const gb = n / 1e9;
+    return `${gb >= 10 ? Math.round(gb) : gb.toFixed(1).replace(/\.0$/, "")} GB`;
+  }
+  if (n >= 1e6) return `${Math.round(n / 1e6)} MB`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)} KB`;
+  return `${n} B`;
+}
+function listCheckpoints(manifest) {
+  const rec = manifest && typeof manifest === "object" ? manifest : {};
+  const defaultModel = rec.model && typeof rec.model === "object" ? rec.model : null;
+  const defaultId = String(defaultModel?.id || "").trim();
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const push = (raw, isDefault) => {
+    if (!raw) return;
+    const id = String(raw.id || "").trim();
+    const url = String(raw.url || "").trim();
+    if (!id || !url || seen.has(id)) return;
+    seen.add(id);
+    out.push({
+      id,
+      sizeBytes: Number(raw.size_bytes) || 0,
+      isDefault: isDefault || id === defaultId
+    });
+  };
+  push(defaultModel, true);
+  const ensemble = rec.ensemble && typeof rec.ensemble === "object" ? rec.ensemble : null;
+  const members = Array.isArray(ensemble?.members) ? ensemble.members : [];
+  for (const member of members) {
+    if (member && typeof member === "object") {
+      push(member, false);
+    }
+  }
+  return out;
+}
+function listFlexrayModelChoices(manifest) {
+  const all = listCheckpoints(manifest);
+  const sum = (items) => items.reduce((s, m) => s + m.sizeBytes, 0);
+  const low = all.filter((m) => m.isDefault);
+  const lowModels = low.length ? low : all.slice(0, 1);
+  const lowBytes = sum(lowModels);
+  const highBytes = sum(all);
+  return [
+    {
+      id: "low",
+      sizeBytes: lowBytes,
+      isDefault: true,
+      optionLabel: `Low \u2014 ${formatFlexrayDownloadSize(lowBytes)}`
+    },
+    {
+      id: "high",
+      sizeBytes: highBytes,
+      isDefault: false,
+      optionLabel: `High \u2014 ${formatFlexrayDownloadSize(highBytes)}`
+    }
+  ];
+}
+async function fetchFlexrayModelChoices() {
+  const res = await fetch(FLEXRAY_MANIFEST_URL, { mode: "cors" });
+  if (!res.ok) {
+    throw new Error(`FleXray manifest HTTP ${res.status}`);
+  }
+  return listFlexrayModelChoices(await res.json());
+}
+
 // render/demos/ira/ira-inference.ts
-var INFERENCE_SERVERS = [...z];
+var INFERENCE_SERVERS = [...W];
 var MAX_INFERENCE_DICOM_FILES = 300;
 var selectedId = null;
 var rows = [];
@@ -23252,6 +24141,10 @@ var mhubFindQuery = "";
 var mhubFindBound = false;
 var mhubBodyPartUserSet = false;
 var mhubAutoBodyPart = "";
+var flexrayChoices = [];
+var flexrayModelsLoading = false;
+var flexrayModelsLoaded = false;
+var jobRunning = false;
 var floatPos = null;
 function $(id) {
   return document.getElementById(id);
@@ -23363,7 +24256,7 @@ function toggleInferenceDialogMinimized() {
 }
 function volumeFilesFromOpenStudy() {
   const ctx = getIraImagingStudyOpenContext();
-  const files = K(ctx);
+  const files = re(ctx);
   const out = [];
   for (const f of files) {
     const role = String(f.role || "").toLowerCase();
@@ -23443,7 +24336,8 @@ async function expandVolumeFilesForSend(files) {
   }
   return out;
 }
-function availabilityLabel(probe, probing) {
+function availabilityLabel(def, probe, probing) {
+  if (ks(def)) return "Available";
   if (probing) return "Checking\u2026";
   if (!probe) return "Unknown";
   if (probe.error) return "Error";
@@ -23456,7 +24350,7 @@ function availabilityLabel(probe, probing) {
 function orderedRows() {
   const catalogIndex = (def) => INFERENCE_SERVERS.findIndex((s) => s.id === def.id);
   const sortKey = (row) => {
-    if (row.probe?.online) return 0;
+    if (ks(row.def) || row.probe?.online) return 0;
     if (row.probing || !row.probe) return 1;
     return 2;
   };
@@ -23844,9 +24738,10 @@ function renderList() {
     meta.className = "ira-inference-row-meta";
     const status2 = document.createElement("span");
     status2.className = "ira-inference-avail";
-    if (row.probe?.online) status2.classList.add("is-online");
+    const localCapable = ks(row.def);
+    if (localCapable || row.probe?.online) status2.classList.add("is-online");
     else if (row.probe && !row.probing) status2.classList.add("is-offline");
-    status2.textContent = availabilityLabel(row.probe, row.probing);
+    status2.textContent = availabilityLabel(row.def, row.probe, row.probing);
     meta.append(status2);
     const loc = document.createElement("span");
     loc.className = "ira-inference-location";
@@ -23871,9 +24766,11 @@ function updateDetail() {
     detail.className = "ira-inference-detail";
     detail.textContent = "Select an inference server.";
     runBtn.disabled = true;
+    runBtn.textContent = "Run";
     if (note) note.textContent = "";
     syncTotalSegOptionsVisibility();
     syncMhubOptionsVisibility();
+    populateFlexrayModelSelect();
     return;
   }
   const opLines = [];
@@ -23886,17 +24783,18 @@ function updateDetail() {
     }
   }
   detail.className = "ira-inference-detail ira-inference-detail-card";
-  detail.innerHTML = qo(row.def) + (opLines.length ? `<pre class="ira-inference-op-notes">${opLines.map(
+  detail.innerHTML = $s(row.def) + (opLines.length ? `<pre class="ira-inference-op-notes">${opLines.map(
     (l) => l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   ).join("\n")}</pre>` : "");
   const info = getIraCastSessionInfo();
   const connected = info.connection === "connected";
   const files = volumeFilesFromOpenStudy();
-  const online = Boolean(row.probe?.online);
+  const online = ks(row.def) || Boolean(row.probe?.online);
   const needsNifti = row.def.hubEvent === "nifti-send";
   const hasNifti = files.some(looksLikeNiftiVolumeFile);
   syncTotalSegOptionsVisibility();
   syncMhubOptionsVisibility();
+  void ensureFlexrayModelOptions();
   let disableReason = "";
   if (!connected) disableReason = "Connect to Cast (open from the worklist) to run inference.";
   else if (!online) disableReason = "Server is offline \u2014 refresh status or start the resource server.";
@@ -23912,10 +24810,13 @@ function updateDetail() {
       disableReason = "Select at least one MHub model.";
     }
   }
-  runBtn.disabled = Boolean(disableReason);
+  runBtn.disabled = jobRunning || Boolean(disableReason);
+  runBtn.textContent = jobRunning ? "Running\u2026" : "Run";
   if (note) {
     if (disableReason) {
       note.textContent = disableReason;
+    } else if (ks(row.def)) {
+      note.textContent = "Local-capable Evidence Creator \u2014 Available (local or remote).";
     } else if (row.def.id === "totalseg") {
       note.textContent = totalSegAssumed ? "Assuming CT \u2014 open an MR study for MR tasks." : "";
     } else if (row.def.id === "mhub") {
@@ -23957,10 +24858,56 @@ function onInferenceStatusUpdate(message, level) {
   }
 }
 function selectPreferredOnlineServer() {
-  const online = orderedRows().filter((r) => r.probe?.online);
+  const online = orderedRows().filter(
+    (r) => ks(r.def) || Boolean(r.probe?.online)
+  );
   if (!online.length) return;
   if (selectedId && online.some((r) => r.def.id === selectedId)) return;
   selectedId = online[0].def.id;
+}
+function populateFlexrayModelSelect() {
+  const sel = $("iraFlexrayModel");
+  if (!sel) return;
+  const show = selectedId === "flexray";
+  sel.hidden = !show;
+  if (!show) return;
+  const prev = sel.value;
+  sel.replaceChildren();
+  if (!flexrayChoices.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = flexrayModelsLoading ? "Loading models\u2026" : "No models listed";
+    sel.append(opt);
+    return;
+  }
+  for (const choice of flexrayChoices) {
+    const opt = document.createElement("option");
+    opt.value = choice.id;
+    opt.textContent = choice.optionLabel;
+    sel.append(opt);
+  }
+  if (prev && flexrayChoices.some((c) => c.id === prev)) sel.value = prev;
+  else sel.value = "low";
+}
+async function ensureFlexrayModelOptions() {
+  populateFlexrayModelSelect();
+  if (selectedId !== "flexray" || flexrayModelsLoaded || flexrayModelsLoading) {
+    return;
+  }
+  flexrayModelsLoading = true;
+  populateFlexrayModelSelect();
+  try {
+    flexrayChoices = await fetchFlexrayModelChoices();
+    flexrayModelsLoaded = true;
+  } catch (err) {
+    flexrayChoices = [];
+    appendLog(
+      `FleXray model list: ${err instanceof Error ? err.message : String(err)}`
+    );
+  } finally {
+    flexrayModelsLoading = false;
+    populateFlexrayModelSelect();
+  }
 }
 async function probeAll() {
   const info = getIraCastSessionInfo();
@@ -23968,22 +24915,29 @@ async function probeAll() {
   if (info.connection !== "connected" || !client2) {
     for (const row of rows) {
       row.probing = false;
-      row.probe = { online: false, items: [], error: "Not connected to Cast" };
+      row.probe = ks(row.def) ? { online: true, items: [] } : { online: false, items: [], error: "Not connected to Cast" };
     }
+    selectPreferredOnlineServer();
     renderList();
     updateDetail();
-    appendLog("Not connected \u2014 cannot probe inference servers.");
+    appendLog("Not connected \u2014 cannot probe remote inference servers.");
     return;
   }
   for (const row of rows) {
-    row.probing = true;
-    row.probe = null;
+    if (ks(row.def)) {
+      row.probing = false;
+      row.probe = { online: true, items: [] };
+    } else {
+      row.probing = true;
+      row.probe = null;
+    }
   }
+  selectPreferredOnlineServer();
   renderList();
   updateDetail();
   appendLog("Probing inference servers\u2026");
   try {
-    const results = await Zo(client2, {
+    const results = await Ps(client2, {
       subscriberName: info.subscriberName,
       subscriberProductName: "SLICERLIVE-IRA",
       subscriberActor: "ID",
@@ -23991,24 +24945,29 @@ async function probeAll() {
     });
     const byId = new Map(results.map((r) => [r.server.id, r.probe]));
     for (const row of rows) {
-      row.probe = byId.get(row.def.id) || {
-        online: false,
-        items: [],
-        error: "No STATUS response"
-      };
+      const probe = byId.get(row.def.id);
+      if (ks(row.def)) {
+        row.probe = { online: true, items: probe?.items || [] };
+      } else {
+        row.probe = probe || {
+          online: false,
+          items: [],
+          error: "No STATUS response"
+        };
+      }
       row.probing = false;
     }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     for (const row of rows) {
-      row.probe = { online: false, items: [], error };
+      row.probe = ks(row.def) ? { online: true, items: [] } : { online: false, items: [], error };
       row.probing = false;
     }
   }
   selectPreferredOnlineServer();
   renderList();
   updateDetail();
-  const online = rows.filter((r) => r.probe?.online).map((r) => r.def.title);
+  const online = rows.filter((r) => ks(r.def) || r.probe?.online).map((r) => r.def.title);
   appendLog(
     online.length ? `Online: ${online.join(", ")}` : "No inference servers responded online."
   );
@@ -24017,7 +24976,11 @@ async function runSelected() {
   const row = rows.find((r) => r.def.id === selectedId);
   if (!row) return;
   const runBtn = $("iraInferenceRunBtn");
-  if (runBtn) runBtn.disabled = true;
+  if (runBtn) {
+    runBtn.disabled = true;
+    runBtn.textContent = "Running\u2026";
+  }
+  jobRunning = true;
   keepDialogOpenAfterJob = false;
   if (closeAfterJobTimer != null) {
     window.clearTimeout(closeAfterJobTimer);
@@ -24053,6 +25016,7 @@ async function runSelected() {
     keepDialogOpenAfterJob = true;
     appendLog(`Run error: ${err instanceof Error ? err.message : String(err)}`);
   }
+  jobRunning = false;
   updateDetail();
 }
 function openMedicalInferenceDialog() {
@@ -24081,6 +25045,7 @@ function openMedicalInferenceDialog() {
   if (panel) applyFloatPos(modal, panel);
   try {
     ensureTotalSegUiBindings();
+    selectPreferredOnlineServer();
     renderList();
     updateDetail();
   } catch (err) {
@@ -24182,9 +25147,9 @@ function u32(view, o) {
   return view.getUint32(o, true);
 }
 async function inflateRaw(bytes) {
-  const ds = new DecompressionStream("deflate-raw");
+  const ds2 = new DecompressionStream("deflate-raw");
   return new Uint8Array(
-    await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer()
+    await new Response(new Blob([bytes]).stream().pipeThrough(ds2)).arrayBuffer()
   );
 }
 function findCentralDirectory(view) {
@@ -24537,12 +25502,12 @@ async function requestIraConferenceTakeover() {
   const view = info.conference;
   if (!view || info.connection !== "connected" || !info.topic) return;
   if (view.selfRole === "leading" || info.conferenceFollowHost) return;
-  const ok = await Xr({
+  const ok = await hi({
     strings: iraConferenceStrings()
   });
   if (!ok) return;
   try {
-    await jr(
+    await ni(
       info.hubEndpoint,
       view.hostTopic,
       info.topic,
@@ -24550,19 +25515,21 @@ async function requestIraConferenceTakeover() {
     );
   } catch (err) {
     console.error("[ira] take over failed", err);
-    Qr(
+    bi(
       err instanceof Error ? err.message : "Failed to take over"
     );
   }
 }
+var iraSessionStatusControl = null;
+var iraSessionStatusLabel = null;
 function renderConferenceChips(view) {
-  const statusControl = document.getElementById("iraCastStatusBtn");
-  const statusLabelEl = document.getElementById("iraCastStatus");
+  const statusControl = iraSessionStatusControl;
+  const statusLabelEl = iraSessionStatusLabel;
   if (!(statusControl instanceof HTMLElement)) {
     return;
   }
   const info = getIraCastSessionInfo();
-  zr({
+  oi({
     view,
     statusControl,
     statusLabelEl,
@@ -24573,7 +25540,7 @@ function renderConferenceChips(view) {
 }
 function refreshConferenceHeaderActions(view) {
   const info = getIraCastSessionInfo();
-  Vr({
+  ci({
     view,
     followHost: Boolean(info.conferenceFollowHost),
     connected: info.connection === "connected",
@@ -24596,7 +25563,7 @@ function refreshConferenceHeaderActions(view) {
   });
 }
 function refreshRadio() {
-  const statusEl = document.getElementById("iraCastStatus");
+  const statusEl = iraSessionStatusLabel;
   if (statusEl) applyIraCastRadioVisual(statusEl);
   const view = getIraCastSessionInfo().conference;
   renderConferenceChips(view);
@@ -24605,12 +25572,9 @@ function refreshRadio() {
 function installIraHeader(opts = {}) {
   onMountLocalSeries = opts.onMountLocalSeries;
   const locale = resolveStoredLocale();
-  document.documentElement.lang = locale;
+  applyDocumentLocale(locale);
   applyHeaderChrome(document, locale);
   applyTheme(getStoredTheme());
-  refreshRadio();
-  setIraCastStatusListener(() => refreshRadio());
-  const castBtn = document.getElementById("iraCastStatusBtn");
   const helpBtn = document.getElementById("iraSettingsBtn");
   const sessionModal = document.getElementById("iraSessionModal");
   const sceneViewModal = document.getElementById("iraSceneViewModal");
@@ -24619,13 +25583,16 @@ function installIraHeader(opts = {}) {
   const sessionDl = document.getElementById("iraSessionDl");
   installMedicalInferenceUi();
   installLoadLocalStudyUi();
-  if (!castBtn) return;
+  let conferenceDialog = null;
+  let inviteController = null;
   let openConferenceDialog = (_anchor) => {
     console.warn("[ira] conference dialog not available");
   };
   try {
-    const conferenceDialog = Zr({
+    conferenceDialog = ui({
       classPrefix: "cast-conference",
+      // Right-align under Conferencing so the panel opens left of the viz card.
+      anchorAlign: "end",
       strings: iraConferenceStrings(),
       getSession: () => {
         const info = getIraCastSessionInfo();
@@ -24642,14 +25609,34 @@ function installIraHeader(opts = {}) {
       },
       onFollowChange: (followHost) => {
         setIraConferenceFollowHost(followHost);
+      },
+      onSessionControlClick: (btn) => {
+        const info = getIraCastSessionInfo();
+        const view = info.conference;
+        if (view?.places?.length) {
+          ai({
+            anchor: btn,
+            view,
+            followHost: Boolean(info.conferenceFollowHost),
+            classPrefix: "ira-conference"
+          });
+          return;
+        }
+        if (sessionDl) fillSessionDl(sessionDl);
+        if (sessionModal) sessionModal.hidden = false;
       }
     });
+    const sessionControl = conferenceDialog.getSessionControl();
+    iraSessionStatusControl = sessionControl.button;
+    iraSessionStatusLabel = sessionControl.label;
     openConferenceDialog = (anchor) => conferenceDialog.open(anchor ?? null);
   } catch (err) {
     console.error("[ira] conference dialog init failed", err);
   }
+  refreshRadio();
+  setIraCastStatusListener(() => refreshRadio());
   try {
-    const inviteController = Kr({
+    inviteController = di({
       classPrefix: "cast-conference-invite",
       strings: iraConferenceStrings(),
       getSession: () => {
@@ -24662,7 +25649,7 @@ function installIraHeader(opts = {}) {
           connected: info.connection === "connected"
         };
       },
-      shouldShow: () => Yr({
+      shouldShow: () => fi({
         selfActors: [ID_ACTOR2]
       }),
       onConferenceChange: (view) => {
@@ -24677,7 +25664,7 @@ function installIraHeader(opts = {}) {
       },
       onLeadChange: (info) => {
         const label = String(info?.leaderLabel || info?.leaderUserName || "").trim() || "Someone";
-        Qr(`${label} took over`);
+        bi(`${label} took over`);
       }
     });
     setIraConferenceHubHandler(
@@ -24686,21 +25673,17 @@ function installIraHeader(opts = {}) {
   } catch (err) {
     console.error("[ira] conference invite init failed", err);
   }
-  castBtn.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    const info = getIraCastSessionInfo();
-    const view = info.conference;
-    if (view?.places?.length) {
-      Gr({
-        anchor: castBtn,
-        view,
-        followHost: Boolean(info.conferenceFollowHost),
-        classPrefix: "ira-conference"
-      });
-      return;
+  wireLanguagePicker({
+    getLocale: resolveStoredLocale,
+    setLocale: (code2) => {
+      persistLocale(code2);
+      applyHeaderChrome(document, code2);
+      const strings = conferenceStringsFor(code2);
+      conferenceDialog?.setStrings?.(strings);
+      inviteController?.setStrings?.(strings);
+      refreshRadio();
+      refreshIraSegLabelsForLocale();
     }
-    if (sessionDl) fillSessionDl(sessionDl);
-    if (sessionModal) sessionModal.hidden = false;
   });
   helpBtn?.addEventListener("click", (ev) => {
     ev.stopPropagation();
@@ -24716,7 +25699,6 @@ function installIraHeader(opts = {}) {
   });
   document.getElementById("iraStartConferenceBtn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    if (getIraCastSessionInfo().conference) return;
     const btn = ev.currentTarget instanceof HTMLElement ? ev.currentTarget : null;
     openConferenceDialog(btn);
   });
@@ -24745,7 +25727,7 @@ function installIraHeader(opts = {}) {
       leaveBtn.disabled = true;
       leaveBtn.textContent = hostAction ? "Ending\u2026" : "Leaving\u2026";
     }
-    void pt(
+    void Tt(
       info.hubEndpoint,
       view.hostTopic,
       hostAction ? void 0 : info.topic
@@ -24812,7 +25794,7 @@ function isSegFile(f) {
   return role === "seg" || label === "seg" || name.includes("seg");
 }
 function sourceFromIdcOpenContext(context) {
-  const plan = ci(context);
+  const plan = Ei(context);
   if (!plan || plan.mode !== "idc") {
     return null;
   }
@@ -25449,11 +26431,11 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         }
         applyIdcGeom?.(meta.ijkToRAS);
       },
-      onCTFocus: (z2) => {
+      onCTFocus: (z) => {
         if (signal?.aborted) return;
-        if (!Number.isFinite(z2)) return;
-        if (applyIdcFocusZ) applyIdcFocusZ(z2);
-        else pendingIdcFocusZ = z2;
+        if (!Number.isFinite(z)) return;
+        if (applyIdcFocusZ) applyIdcFocusZ(z);
+        else pendingIdcFocusZ = z;
       },
       onCTSlab: (info) => {
         if (signal?.aborted) return;
@@ -25790,24 +26772,24 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     redraw: () => draw3d(),
     maxCards: 12,
     reserved: () => {
-      const cr2 = cv.threeD.getBoundingClientRect();
-      if (!cr2.width || !cr2.height) return [];
-      const sx = cv.threeD.width / cr2.width;
-      const sy = cv.threeD.height / cr2.height;
+      const cr = cv.threeD.getBoundingClientRect();
+      if (!cr.width || !cr.height) return [];
+      const sx = cv.threeD.width / cr.width;
+      const sy = cv.threeD.height / cr.height;
       const pad = 6;
       const out = [];
       for (const sel of ["#sl-badge", ".lab.threeD"]) {
         const el3 = document.querySelector(sel);
         if (!el3) continue;
         const r = el3.getBoundingClientRect();
-        const x0 = Math.max(r.left, cr2.left);
-        const y0 = Math.max(r.top, cr2.top);
-        const x1 = Math.min(r.right, cr2.right);
-        const y1 = Math.min(r.bottom, cr2.bottom);
+        const x0 = Math.max(r.left, cr.left);
+        const y0 = Math.max(r.top, cr.top);
+        const x1 = Math.min(r.right, cr.right);
+        const y1 = Math.min(r.bottom, cr.bottom);
         if (x1 <= x0 || y1 <= y0) continue;
         out.push({
-          x: (x0 - cr2.left) * sx - pad,
-          y: (y0 - cr2.top) * sy - pad,
+          x: (x0 - cr.left) * sx - pad,
+          y: (y0 - cr.top) * sy - pad,
           w: (x1 - x0) * sx + 2 * pad,
           h: (y1 - y0) * sy + 2 * pad
         });
@@ -25816,12 +26798,45 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     },
     segVisible: (num2) => sc.isSegmentVisible(num2)
   });
-  segCards.setScene(ct2, seg ?? null, sc.segments);
-  drawAll = () => {
-    for (const p of PLANES) drawSlice(p);
-    draw3d();
-    xhair?.redraw();
+  const segmentsForUi = () => sc.segments.map((s) => ({
+    ...s,
+    englishName: s.name,
+    name: segmentDisplayNameSync(s.name) || s.name
+  }));
+  const hubOriginForTranslate = () => {
+    const ep = resolveHubConfig().hub_endpoint || "";
+    return String(ep).replace(/\/api\/hub\/?$/, "").replace(/\/$/, "");
   };
+  const refreshSegLabelTranslations = () => {
+    void (async () => {
+      const applyUi = () => {
+        segCards.setScene(ct2, seg ?? null, segmentsForUi());
+        chromeApi?.refresh();
+        drawAll();
+      };
+      if (!sc.segments.length) {
+        applyUi();
+        return;
+      }
+      const locale = resolveStoredLocale();
+      if (locale !== "en") {
+        const origin = hubOriginForTranslate();
+        if (origin) {
+          try {
+            await ensureSegmentLabelsTranslated(
+              sc.segments.map((s) => ({ label: s.name })),
+              { hubOrigin: origin, locale }
+            );
+          } catch {
+          }
+        }
+      }
+      applyUi();
+    })();
+  };
+  setIraSegLocaleRefreshHandler(refreshSegLabelTranslations);
+  segCards.setScene(ct2, seg ?? null, segmentsForUi());
+  refreshSegLabelTranslations();
   let vrShift = 0;
   let vrPreset = null;
   let applyVrPresetFn = (name) => {
@@ -25963,12 +26978,14 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       if (typeof result.labelsVisible === "boolean") {
         labelsOn = result.labelsVisible;
       }
-      for (const [num2, op] of result.segmentOpacity) {
-        sc.setSegmentOpacity(num2, op);
-      }
-      for (const [num2, visible] of result.segmentVisibility) {
-        sc.setSegmentVisible(num2, visible);
-      }
+      const opacityEntries = [...result.segmentOpacity].filter(
+        ([num2, op]) => sc.segmentOpacity(num2) !== op
+      );
+      const visibilityEntries = [...result.segmentVisibility].filter(
+        ([num2, visible]) => sc.isSegmentVisible(num2) !== visible
+      );
+      if (opacityEntries.length) sc.setSegmentOpacities(opacityEntries);
+      if (visibilityEntries.length) sc.setSegmentVisibilities(visibilityEntries);
       if (typeof result.opacity === "number" && Number.isFinite(result.opacity)) {
         sc.setSegOpacity(result.opacity);
         sc.slice.setOverlayOpacity(result.opacity * SEG_FILL);
@@ -26031,7 +27048,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   const refreshSegChrome = (labmap) => {
     seg = labmap;
     sc.setVolumeOpacity(0.5);
-    segCards.setScene(ct2, seg, sc.segments);
+    segCards.setScene(ct2, seg, segmentsForUi());
+    refreshSegLabelTranslations();
     setIraSegCatalog(buildSegCatalog(labmap, sc.ijkToRAS));
     syncLiveScene();
     if (sc.segDisplayMode() === "colorize") {
@@ -26042,9 +27060,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     }
     for (const p of PLANES) {
       const cell = document.querySelector(`[data-cell="${p}"]`);
-      const tr2 = cell?.querySelector(".ann.tr");
-      if (tr2) {
-        tr2.innerHTML = `${ct2.modality} \xB7 ${sc.dims[2]} slices${sc.hasSeg ? " \xB7 SEG" : ""}<br>${sc.dims[0]}\xD7${sc.dims[1]}`;
+      const tr = cell?.querySelector(".ann.tr");
+      if (tr) {
+        tr.innerHTML = `${ct2.modality} \xB7 ${sc.dims[2]} slices${sc.hasSeg ? " \xB7 SEG" : ""}<br>${sc.dims[0]}\xD7${sc.dims[1]}`;
       }
     }
     drawAll();
@@ -26163,9 +27181,9 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     sliceIx = new SliceInteractor({ ijkToRAS: sc.ijkToRAS, rasLo: sc.rasLo, rasHi: sc.rasHi });
     drawAll();
   };
-  applyIdcFocusZ = (z2) => {
+  applyIdcFocusZ = (z) => {
     const [nx, ny, nz] = sc.dims;
-    const zz = Math.max(0, Math.min(nz - 1, Math.round(z2)));
+    const zz = Math.max(0, Math.min(nz - 1, Math.round(z)));
     const ijk = [(nx - 1) / 2, (ny - 1) / 2, zz];
     const M2 = sc.ijkToRAS;
     const ras = [
@@ -26366,7 +27384,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       canvas: () => cv.threeD,
       pick: (u, v) => sc.scene.pick(u, v),
       worldToDisplay: (ras, w, h) => camera.worldToDisplay(ras, w, h),
-      displayToWorldAtDepth: (x, y, depth, w, h) => camera.displayToWorldAtDepth(x, y, depth, w, h)
+      displayToWorldAtDepth: (x, y2, depth, w, h) => camera.displayToWorldAtDepth(x, y2, depth, w, h)
     },
     extraTools: [
       {
@@ -26392,7 +27410,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
               status("No segmentation loaded \u2014 open a study with SEG to export STL.");
               return;
             }
-            const picked = await pickSegment(sc.segments);
+            const picked = await pickSegment(segmentsForUi());
             if (!picked) return;
             try {
               status(`Meshing ${picked.name}\u2026`);
@@ -26611,15 +27629,24 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
   const restoreSurfaceSegmentOpacities = () => {
     sc.setSegmentOpacities(sc.segments.map((s) => [s.num, 1]));
   };
+  let outlineBeforeColorize = null;
   const setColorizeMode = (on2) => {
     if (on2) {
       if (!sc.hasSeg) return;
       sc.setSegDisplayMode("colorize");
       applyColorizeGroupDefaults();
+      if (outlineBeforeColorize === null) outlineBeforeColorize = sliceOutline;
+      sliceOutline = true;
+      sc.slice.setOverlayOutline(true);
     } else {
       sc.setSegDisplayMode("surface");
       restoreSurfaceSegmentOpacities();
       clearColorizeGroupState();
+      if (outlineBeforeColorize !== null) {
+        sliceOutline = outlineBeforeColorize;
+        outlineBeforeColorize = null;
+        sc.slice.setOverlayOutline(sliceOutline);
+      }
     }
     syncLiveScene();
     drawAll();
@@ -26775,7 +27802,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       controls: buildVizControls(),
       anchor: cv.threeD.parentElement ?? void 0,
       segments: {
-        list: () => sc.segments.map((s) => ({ num: s.num, name: s.name, color: s.color })),
+        list: () => segmentsForUi().map((s) => ({ num: s.num, name: s.name, color: s.color })),
         get: (num2) => sc.segmentOpacity(num2),
         set: (num2, o) => {
           sc.setSegmentOpacity(num2, o);
@@ -26886,6 +27913,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       }
       setIraSegCatalog(EMPTY_SEG_CATALOG);
       labelsOn = false;
+      setIraSegLocaleRefreshHandler(null);
       setIraSceneUpdateHandler(null);
       setIraConferenceHostHandler(null);
       setIraPngFullSizeCaptureHandler(null);

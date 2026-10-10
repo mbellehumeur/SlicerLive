@@ -2,6 +2,7 @@
 import {
   CAST_INFERENCE_SERVERS,
   extractImagingStudyFiles,
+  isLocalCapableInferenceServer,
   probeCastInferenceServers,
   renderInferenceServerInfoCardHtml,
   type CastInferenceServerDef,
@@ -36,6 +37,10 @@ import {
   mhubContextHintsFromImagingStudy,
   type MhubModelDef,
 } from "./mhub-models.ts";
+import {
+  fetchFlexrayModelChoices,
+  type FlexrayModelChoice,
+} from "./ira-flexray-models.ts";
 
 export type InferenceServerDef = CastInferenceServerDef;
 export type InferenceProbeResult = CastProductStatusProbe;
@@ -67,6 +72,11 @@ let mhubFindBound = false;
 /** True after the user manually changes body-part (skip auto-seed). */
 let mhubBodyPartUserSet = false;
 let mhubAutoBodyPart = "";
+
+let flexrayChoices: FlexrayModelChoice[] = [];
+let flexrayModelsLoading = false;
+let flexrayModelsLoaded = false;
+let jobRunning = false;
 
 /** Remember last floating-window position across open/close. */
 let floatPos: { left: number; top: number } | null = null;
@@ -305,7 +315,12 @@ async function expandVolumeFilesForSend(
   return out;
 }
 
-function availabilityLabel(probe: InferenceProbeResult | null, probing: boolean): string {
+function availabilityLabel(
+  def: InferenceServerDef,
+  probe: InferenceProbeResult | null,
+  probing: boolean
+): string {
+  if (isLocalCapableInferenceServer(def)) return "Available";
   if (probing) return "Checking…";
   if (!probe) return "Unknown";
   if (probe.error) return "Error";
@@ -321,7 +336,7 @@ function orderedRows(): RowState[] {
   const catalogIndex = (def: InferenceServerDef) =>
     INFERENCE_SERVERS.findIndex((s) => s.id === def.id);
   const sortKey = (row: RowState): number => {
-    if (row.probe?.online) return 0;
+    if (isLocalCapableInferenceServer(row.def) || row.probe?.online) return 0;
     if (row.probing || !row.probe) return 1;
     return 2;
   };
@@ -794,9 +809,10 @@ function renderList(): void {
     meta.className = "ira-inference-row-meta";
     const status = document.createElement("span");
     status.className = "ira-inference-avail";
-    if (row.probe?.online) status.classList.add("is-online");
+    const localCapable = isLocalCapableInferenceServer(row.def);
+    if (localCapable || row.probe?.online) status.classList.add("is-online");
     else if (row.probe && !row.probing) status.classList.add("is-offline");
-    status.textContent = availabilityLabel(row.probe, row.probing);
+    status.textContent = availabilityLabel(row.def, row.probe, row.probing);
     meta.append(status);
     const loc = document.createElement("span");
     loc.className = "ira-inference-location";
@@ -824,9 +840,11 @@ function updateDetail(): void {
     detail.className = "ira-inference-detail";
     detail.textContent = "Select an inference server.";
     runBtn.disabled = true;
+    runBtn.textContent = "Run";
     if (note) note.textContent = "";
     syncTotalSegOptionsVisibility();
     syncMhubOptionsVisibility();
+    populateFlexrayModelSelect();
     return;
   }
 
@@ -857,13 +875,15 @@ function updateDetail(): void {
   const info = getIraCastSessionInfo();
   const connected = info.connection === "connected";
   const files = volumeFilesFromOpenStudy();
-  const online = Boolean(row.probe?.online);
+  const online =
+    isLocalCapableInferenceServer(row.def) || Boolean(row.probe?.online);
   const needsNifti = row.def.hubEvent === "nifti-send";
   const hasNifti = files.some(looksLikeNiftiVolumeFile);
 
-  // Refresh TotalSeg / MHub option UIs before Run enablement checks.
+  // Refresh TotalSeg / MHub / FleXray option UIs before Run enablement checks.
   syncTotalSegOptionsVisibility();
   syncMhubOptionsVisibility();
+  void ensureFlexrayModelOptions();
 
   let disableReason = "";
   if (!connected) disableReason = "Connect to Cast (open from the worklist) to run inference.";
@@ -884,10 +904,13 @@ function updateDetail(): void {
     }
   }
 
-  runBtn.disabled = Boolean(disableReason);
+  runBtn.disabled = jobRunning || Boolean(disableReason);
+  runBtn.textContent = jobRunning ? "Running…" : "Run";
   if (note) {
     if (disableReason) {
       note.textContent = disableReason;
+    } else if (isLocalCapableInferenceServer(row.def)) {
+      note.textContent = "Local-capable Evidence Creator — Available (local or remote).";
     } else if (row.def.id === "totalseg") {
       note.textContent = totalSegAssumed
         ? "Assuming CT — open an MR study for MR tasks."
@@ -948,12 +971,60 @@ function onInferenceStatusUpdate(message: string, level: string): void {
   }
 }
 
-/** Prefer keeping the current selection if it is online; else pick the first online server. */
+/** Prefer keeping the current selection if it is available; else pick the first available server. */
 function selectPreferredOnlineServer(): void {
-  const online = orderedRows().filter((r) => r.probe?.online);
+  const online = orderedRows().filter(
+    (r) => isLocalCapableInferenceServer(r.def) || Boolean(r.probe?.online),
+  );
   if (!online.length) return;
   if (selectedId && online.some((r) => r.def.id === selectedId)) return;
   selectedId = online[0]!.def.id;
+}
+
+function populateFlexrayModelSelect(): void {
+  const sel = $("iraFlexrayModel") as HTMLSelectElement | null;
+  if (!sel) return;
+  const show = selectedId === "flexray";
+  sel.hidden = !show;
+  if (!show) return;
+  const prev = sel.value;
+  sel.replaceChildren();
+  if (!flexrayChoices.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = flexrayModelsLoading ? "Loading models…" : "No models listed";
+    sel.append(opt);
+    return;
+  }
+  for (const choice of flexrayChoices) {
+    const opt = document.createElement("option");
+    opt.value = choice.id;
+    opt.textContent = choice.optionLabel;
+    sel.append(opt);
+  }
+  if (prev && flexrayChoices.some((c) => c.id === prev)) sel.value = prev;
+  else sel.value = "low";
+}
+
+async function ensureFlexrayModelOptions(): Promise<void> {
+  populateFlexrayModelSelect();
+  if (selectedId !== "flexray" || flexrayModelsLoaded || flexrayModelsLoading) {
+    return;
+  }
+  flexrayModelsLoading = true;
+  populateFlexrayModelSelect();
+  try {
+    flexrayChoices = await fetchFlexrayModelChoices();
+    flexrayModelsLoaded = true;
+  } catch (err) {
+    flexrayChoices = [];
+    appendLog(
+      `FleXray model list: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    flexrayModelsLoading = false;
+    populateFlexrayModelSelect();
+  }
 }
 
 async function probeAll(): Promise<void> {
@@ -962,18 +1033,27 @@ async function probeAll(): Promise<void> {
   if (info.connection !== "connected" || !client) {
     for (const row of rows) {
       row.probing = false;
-      row.probe = { online: false, items: [], error: "Not connected to Cast" };
+      row.probe = isLocalCapableInferenceServer(row.def)
+        ? { online: true, items: [] }
+        : { online: false, items: [], error: "Not connected to Cast" };
     }
+    selectPreferredOnlineServer();
     renderList();
     updateDetail();
-    appendLog("Not connected — cannot probe inference servers.");
+    appendLog("Not connected — cannot probe remote inference servers.");
     return;
   }
 
   for (const row of rows) {
-    row.probing = true;
-    row.probe = null;
+    if (isLocalCapableInferenceServer(row.def)) {
+      row.probing = false;
+      row.probe = { online: true, items: [] };
+    } else {
+      row.probing = true;
+      row.probe = null;
+    }
   }
+  selectPreferredOnlineServer();
   renderList();
   updateDetail();
   appendLog("Probing inference servers…");
@@ -987,17 +1067,24 @@ async function probeAll(): Promise<void> {
     });
     const byId = new Map(results.map((r) => [r.server.id, r.probe]));
     for (const row of rows) {
-      row.probe = byId.get(row.def.id) || {
-        online: false,
-        items: [],
-        error: "No STATUS response",
-      };
+      const probe = byId.get(row.def.id);
+      if (isLocalCapableInferenceServer(row.def)) {
+        row.probe = { online: true, items: probe?.items || [] };
+      } else {
+        row.probe = probe || {
+          online: false,
+          items: [],
+          error: "No STATUS response",
+        };
+      }
       row.probing = false;
     }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     for (const row of rows) {
-      row.probe = { online: false, items: [], error };
+      row.probe = isLocalCapableInferenceServer(row.def)
+        ? { online: true, items: [] }
+        : { online: false, items: [], error };
       row.probing = false;
     }
   }
@@ -1005,7 +1092,9 @@ async function probeAll(): Promise<void> {
   selectPreferredOnlineServer();
   renderList();
   updateDetail();
-  const online = rows.filter((r) => r.probe?.online).map((r) => r.def.title);
+  const online = rows
+    .filter((r) => isLocalCapableInferenceServer(r.def) || r.probe?.online)
+    .map((r) => r.def.title);
   appendLog(
     online.length
       ? `Online: ${online.join(", ")}`
@@ -1017,7 +1106,11 @@ async function runSelected(): Promise<void> {
   const row = rows.find((r) => r.def.id === selectedId);
   if (!row) return;
   const runBtn = $("iraInferenceRunBtn") as HTMLButtonElement | null;
-  if (runBtn) runBtn.disabled = true;
+  if (runBtn) {
+    runBtn.disabled = true;
+    runBtn.textContent = "Running…";
+  }
+  jobRunning = true;
   keepDialogOpenAfterJob = false;
   if (closeAfterJobTimer != null) {
     window.clearTimeout(closeAfterJobTimer);
@@ -1060,6 +1153,7 @@ async function runSelected(): Promise<void> {
     keepDialogOpenAfterJob = true;
     appendLog(`Run error: ${err instanceof Error ? err.message : String(err)}`);
   }
+  jobRunning = false;
   updateDetail();
 }
 
@@ -1089,6 +1183,7 @@ export function openMedicalInferenceDialog(): void {
   if (panel) applyFloatPos(modal, panel);
   try {
     ensureTotalSegUiBindings();
+    selectPreferredOnlineServer();
     renderList();
     updateDetail();
   } catch (err) {

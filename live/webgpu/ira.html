@@ -47,6 +47,30 @@
     cursor: not-allowed;
   }
   .ira-icon-btn:disabled:hover { background: var(--ira-surface); }
+  .ira-lang-wrap { position: relative; }
+  .ira-lang-menu {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 4px);
+    z-index: 40;
+    margin: 0;
+    padding: 4px 0;
+    list-style: none;
+    min-width: 132px;
+    border: 1px solid var(--ira-border);
+    border-radius: 6px;
+    background: var(--ira-surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  }
+  .ira-lang-menu li {
+    padding: 7px 12px;
+    font: 600 13px/1.3 -apple-system, system-ui, sans-serif;
+    color: var(--ira-fg);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .ira-lang-menu li:hover,
+  .ira-lang-menu li.is-active { background: var(--ira-surface-2); }
   .ira-text-btn {
     width: auto;
     min-width: 34px;
@@ -230,7 +254,7 @@
   #iraInferenceModal.ira-floating-window[hidden] { display: none !important; }
   #iraInferenceModal .ira-modal-inference {
     pointer-events: auto;
-    width: min(686px, calc(100vw - 24px));
+    width: min(380px, calc(100vw - 24px));
     max-height: min(95vh, 936px);
     overflow: auto;
     resize: both;
@@ -289,9 +313,9 @@
   .ira-inference-body { padding-top: 10px; }
   .ira-inference-layout {
     display: grid;
-    grid-template-columns: minmax(12rem, 0.7fr) minmax(28rem, 1.8fr);
-    gap: 12px;
-    min-height: 23rem;
+    grid-template-columns: minmax(10rem, 0.85fr) minmax(14rem, 1.2fr);
+    gap: 10px;
+    min-height: 20rem;
   }
   .ira-inference-toolbar { margin-bottom: 8px; }
   .ira-inference-list {
@@ -372,8 +396,28 @@
     height: 16px;
     object-fit: contain;
   }
-  .ira-inference-run-btn {
+  .ira-inference-run-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
     margin-top: 6px;
+  }
+  .ira-inference-run-row #iraFlexrayModel {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 36px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--ira-border);
+    background: var(--ira-surface);
+    color: var(--ira-fg);
+    font-size: 13px;
+  }
+  .ira-inference-run-row #iraFlexrayModel[hidden] {
+    display: none !important;
+  }
+  .ira-inference-run-btn {
+    margin-top: 0;
     min-height: 36px;
     padding: 0 18px;
     background: var(--ira-accent);
@@ -557,7 +601,7 @@
   @media (max-width: 900px) {
     .ira-inference-layout { grid-template-columns: 1fr; }
     #iraInferenceModal .ira-modal-inference {
-      width: min(100vw - 16px, 686px);
+      width: min(100vw - 16px, 380px);
     }
   }
   .ira-menu {
@@ -616,7 +660,8 @@
   }
   .cast-conference-overlay[hidden] { display: none !important; }
   .cast-conference-dialog {
-    width: min(21rem, 100%); max-height: min(90vh, 36rem); overflow-y: auto;
+    display: flex; flex-direction: column;
+    width: min(21rem, 100%); max-height: min(90vh, 36rem); overflow: visible;
     background: var(--ira-bar); border: 1px solid var(--ira-border); border-radius: 6px;
     box-shadow: 0 8px 28px rgba(0,0,0,.45); color: var(--ira-fg); outline: none;
   }
@@ -633,12 +678,56 @@
     font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
   }
   .cast-conference-close:hover { color: var(--ira-fg); }
-  .cast-conference-body { padding: 14px; }
+  .cast-conference-body {
+    flex: 1 1 auto; min-height: 0; padding: 14px;
+    overflow-x: hidden; overflow-y: auto;
+  }
   .cast-conference-section {
     margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--ira-border);
   }
   .cast-conference-section:last-child {
     margin-bottom: 0; padding-bottom: 0; border-bottom: 0;
+  }
+  .cast-conference-section-session {
+    flex: 0 0 auto; margin: 0; padding: 10px 14px 14px;
+    border-bottom: 0; border-top: 1px solid var(--ira-border); overflow: visible;
+  }
+  .cast-conference-session-row {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .cast-conference-session-close { margin-left: auto; }
+  .cast-conference-lang-wrap { position: relative; flex: 0 0 auto; }
+  .cast-conference-lang-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 0;
+    border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); color: var(--ira-fg); cursor: pointer;
+  }
+  .cast-conference-lang-btn:hover { filter: brightness(1.08); }
+  .cast-conference-lang-menu {
+    position: absolute; right: 0; left: auto; bottom: calc(100% + 4px); top: auto;
+    z-index: 80; margin: 0; padding: 4px 0; list-style: none;
+    min-width: 10rem; width: max-content; max-height: 14rem;
+    overflow-x: visible; overflow-y: auto;
+    border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  }
+  .cast-conference-lang-menu li {
+    padding: 7px 12px; font: 600 13px/1.3 -apple-system, system-ui, sans-serif;
+    color: var(--ira-fg); cursor: pointer; white-space: nowrap;
+  }
+  .cast-conference-lang-menu li:hover,
+  .cast-conference-lang-menu li.is-active { background: var(--ira-surface-2); }
+  .cast-conference-topic-btn {
+    display: inline-flex; align-items: center; max-width: 100%;
+    border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); color: var(--ira-fg);
+    padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .cast-conference-topic-btn:hover { filter: brightness(1.08); }
+  .cast-conference-session-label {
+    display: inline-flex; max-width: 16rem; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
   }
   .cast-conference-section-title {
     margin: 0 0 8px; font: 650 12px/1.2 -apple-system, system-ui, sans-serif;
@@ -658,6 +747,11 @@
   .cast-conference-topic-row {
     display: flex; align-items: center; gap: 8px; padding: 4px 0;
     font-size: 12px; cursor: pointer;
+  }
+  .cast-conference-topic-label { flex: 1 1 auto; min-width: 0; }
+  .cast-conference-topic-timezone {
+    flex: 0 1 auto; margin-left: auto; font-size: 11px;
+    color: var(--ira-fg-muted); white-space: nowrap;
   }
   .cast-conference-muted { margin: 0; font-size: 12px; color: var(--ira-fg-muted); }
   .cast-conference-status { margin: 0 0 10px; font-size: 12px; line-height: 1.4; }
@@ -747,6 +841,20 @@
   #grid.layout-dental [data-cell="sagittal"] { grid-area: sa; }
   #grid.layout-dental [data-cell="threeD"] { grid-area: td; }
   #grid.layout-dental [data-cell="oblique"] { grid-area: ob; }
+  /* 3+1: MPR stacked left, large 3D right. */
+  #grid.layout-threeOne {
+    grid-template-columns: 1fr 2fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    grid-template-areas:
+      "ax td"
+      "co td"
+      "sa td";
+  }
+  #grid.layout-threeOne [data-cell="axial"] { grid-area: ax; }
+  #grid.layout-threeOne [data-cell="coronal"] { grid-area: co; }
+  #grid.layout-threeOne [data-cell="sagittal"] { grid-area: sa; }
+  #grid.layout-threeOne [data-cell="threeD"] { grid-area: td; }
+  #grid.layout-threeOne [data-cell="oblique"] { display: none; }
   #grid.has-max .cell { display: none; }
   #grid.has-max .cell.max { display: block; grid-area: 1 / 1 / -1 / -1; }
   .cell { position: relative; min-width: 0; min-height: 0; background: #000; }
@@ -771,11 +879,60 @@
     <div id="ira-bar">
       <div class="ira-bar-start">
         <span class="brand">SlicerLive - IRA</span>
-        <button type="button" id="iraCastStatusBtn" class="ira-icon-btn ira-text-btn"
-          data-i18n-header-aria="sessionInfo"
-          data-i18n-header-title="sessionInfo"
-          aria-label="Session info" title="Session info">
-          <span id="iraCastStatus" class="ira-cast-status ira-cast-idle">—</span>
+      </div>
+      <span id="info"></span>
+      <select id="wl-readout" style="display:none"></select>
+      <div class="ira-bar-spacer"></div>
+      <div class="ira-bar-actions">
+        <span class="ira-viewer-label ira-viewer-label-first" data-i18n-header="worklistLabel">Worklist:</span>
+        <button
+          type="button"
+          id="iraWorklistBtn"
+          class="ira-icon-btn ira-text-btn"
+          data-i18n-header="slicerWorklist"
+          data-i18n-header-aria="slicerWorklistTitle"
+          data-i18n-header-title="slicerWorklistTitle"
+          aria-label="Open SlicerWorklist"
+          title="Open SlicerWorklist"
+        >
+          SlicerWorklist
+        </button>
+        <span class="ira-viewer-label" data-i18n-header="reportingLabel">Reporting:</span>
+        <button
+          type="button"
+          id="iraReportingBtn"
+          class="ira-icon-btn ira-text-btn"
+          data-i18n-header="dicomSr"
+          data-i18n-header-aria="dicomSrTitle"
+          data-i18n-header-title="dicomSrTitle"
+          aria-label="Open DICOM SR reporting"
+          title="Open DICOM SR Report Creator"
+        >
+          DICOM SR
+        </button>
+        <button
+          type="button"
+          id="iraMedicalInferenceBtn"
+          class="ira-icon-btn ira-text-btn"
+          data-i18n-header="remoteAi"
+          data-i18n-header-aria="remoteAi"
+          data-i18n-header-title="remoteAiTitle"
+          aria-label="Evidence Creators"
+          title="Evidence Creators — inference servers"
+        >
+          Evidence Creators
+        </button>
+        <button
+          type="button"
+          id="iraLoadLocalStudyBtn"
+          class="ira-icon-btn ira-text-btn"
+          data-i18n-header="loadStudy"
+          data-i18n-header-aria="loadStudy"
+          data-i18n-header-title="loadStudyTitle"
+          aria-label="Load study"
+          title="Load study"
+        >
+          Load study
         </button>
         <button
           type="button"
@@ -827,67 +984,12 @@
         >
           Take over
         </button>
-      </div>
-      <span id="info"></span>
-      <select id="wl-readout" style="display:none"></select>
-      <div class="ira-bar-spacer"></div>
-      <div class="ira-bar-actions">
-        <span class="ira-viewer-label ira-viewer-label-first" data-i18n-header="worklistLabel">Worklist:</span>
-        <button
-          type="button"
-          id="iraWorklistBtn"
-          class="ira-icon-btn ira-text-btn"
-          data-i18n-header="slicerWorklist"
-          data-i18n-header-aria="slicerWorklistTitle"
-          data-i18n-header-title="slicerWorklistTitle"
-          aria-label="Open SlicerWorklist"
-          title="Open SlicerWorklist"
-        >
-          SlicerWorklist
-        </button>
-        <span class="ira-viewer-label" data-i18n-header="reportingLabel">Reporting:</span>
-        <button
-          type="button"
-          id="iraReportingBtn"
-          class="ira-icon-btn ira-text-btn"
-          data-i18n-header="dicomSr"
-          data-i18n-header-aria="dicomSrTitle"
-          data-i18n-header-title="dicomSrTitle"
-          aria-label="Open DICOM SR reporting"
-          title="Open DICOM SR reporting client"
-        >
-          DICOM SR
-        </button>
-        <button
-          type="button"
-          id="iraMedicalInferenceBtn"
-          class="ira-icon-btn ira-text-btn"
-          data-i18n-header="remoteAi"
-          data-i18n-header-aria="remoteAi"
-          data-i18n-header-title="remoteAiTitle"
-          aria-label="Remote AI"
-          title="Remote AI — inference servers"
-        >
-          Remote AI
-        </button>
-        <button
-          type="button"
-          id="iraLoadLocalStudyBtn"
-          class="ira-icon-btn ira-text-btn"
-          data-i18n-header="loadStudy"
-          data-i18n-header-aria="loadStudy"
-          data-i18n-header-title="loadStudyTitle"
-          aria-label="Load study"
-          title="Load study"
-        >
-          Load study
-        </button>
         <button type="button" id="iraSettingsBtn" class="ira-icon-btn" aria-label="Controls & key bindings"
           title="Controls & key bindings"
           style="font:700 15px -apple-system,system-ui,sans-serif">?</button>
       </div>
     </div>
-    <div id="grid">
+    <div id="grid" class="layout-threeOne">
       <div class="cell" data-cell="axial">
         <canvas id="c-axial"></canvas><span class="lab axial">Axial</span>
         <span class="orient o-t">A</span><span class="orient o-b">P</span><span class="orient o-l">R</span><span class="orient o-r">L</span>
@@ -938,7 +1040,7 @@
   <div id="iraInferenceModal" class="ira-floating-window" hidden>
     <div class="ira-modal ira-modal-inference" role="dialog" aria-labelledby="iraInferenceTitle">
       <div class="ira-modal-header ira-floating-drag-handle" data-ira-inference-drag>
-        <h2 id="iraInferenceTitle">Remote AI - inference servers</h2>
+        <h2 id="iraInferenceTitle">Evidence Creators</h2>
         <div class="ira-modal-header-actions">
           <button
             type="button"
@@ -1020,7 +1122,10 @@
                 aria-label="Applicable MHub models"
               ></div>
             </div>
-            <button type="button" id="iraInferenceRunBtn" class="ira-icon-btn ira-text-btn ira-inference-run-btn" disabled>Run</button>
+            <div class="ira-inference-run-row">
+              <select id="iraFlexrayModel" hidden aria-label="FleXray quality"></select>
+              <button type="button" id="iraInferenceRunBtn" class="ira-icon-btn ira-text-btn ira-inference-run-btn" disabled>Run</button>
+            </div>
             <pre id="iraInferenceLog" class="ira-inference-log" aria-live="polite"></pre>
           </div>
         </div>

@@ -28,6 +28,8 @@ import {
 import { toF16Array } from "./cine-field.ts";
 import type { Field } from "./fields.ts";
 
+const COLORIZE_CT_BYTES_PER_VOXEL = 2; // r16float
+
 export interface ColorizeFieldOpts {
   clim: [number, number];                 // HU range the CT LUT spans
   ijkToRAS?: ArrayLike<number>;
@@ -136,8 +138,33 @@ export class ColorizeField implements Field {
    *  60 MB CT is still streaming. */
   setCT(ct: ArrayLike<number>) {
     this.dev.queue.writeTexture({ texture: this.ctTex }, toF16Array(ct),
-      { bytesPerRow: this.dims[0] * 2, rowsPerImage: this.dims[1] }, this.dims as [number, number, number]);
+      { bytesPerRow: this.dims[0] * COLORIZE_CT_BYTES_PER_VOXEL, rowsPerImage: this.dims[1] },
+      this.dims as [number, number, number]);
     this.hasCt = true;
+  }
+  /** Patch a z-range from a full-volume Float32Array (progressive zarr / LOD slabs). */
+  updateScalars(data: Float32Array, zStart: number, zCount: number) {
+    const [nx, ny] = this.dims;
+    const slice = data.subarray(zStart * nx * ny, (zStart + zCount) * nx * ny);
+    this.dev.queue.writeTexture(
+      { texture: this.ctTex, origin: [0, 0, zStart] },
+      toF16Array(slice),
+      { bytesPerRow: nx * COLORIZE_CT_BYTES_PER_VOXEL, rowsPerImage: ny },
+      [nx, ny, zCount],
+    );
+    this.hasCt = true;
+  }
+  /** Remap patient geometry after progressive load finalizes true ijkToRAS. */
+  setIjkToRAS(ijkToRAS: ArrayLike<number>) {
+    this.p2t = patientToTextureFromIjkToRAS(ijkToRAS, this.dims);
+    this.box = volumeAABBFromIjkToRAS(ijkToRAS, this.dims);
+    this.stepMm = Math.min(...spacingFromIjkToRAS(ijkToRAS));
+  }
+  /** Free GPU textures (call when leaving colorize mode or replacing the field). */
+  destroy() {
+    this.ctTex.destroy();
+    this.labTex.destroy();
+    this.lutTex.destroy();
   }
   private hasCt = false;
   get ctLoaded(): boolean { return this.hasCt; }

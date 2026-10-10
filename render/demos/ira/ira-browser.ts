@@ -31,6 +31,11 @@ import {
 } from "./colorize-groups.ts";
 import { buildFontAtlas } from "../../sdf-text.ts";
 import { mountSegmentCards } from "../../segment-cards.ts";
+import {
+  ensureSegmentLabelsTranslated,
+  resolveStoredLocale,
+  segmentDisplayNameSync,
+} from "../../../../i18n/index.ts";
 import { loadSeries } from "../../vendor/idc_tools/index.js";
 import type { CTVolume, SegLabelmap } from "../../vendor/idc_tools/types.js";
 import { type IraApi, ensureIraToolbarShell, mountIra, type IraLayout, type Plane, resetIraToolbarShell } from "./ira.ts";
@@ -50,6 +55,7 @@ import {
   getIraLiveScene,
   isIraConferenceHost,
   publishIraSceneUpdate,
+  resolveHubConfig,
   setIraConferenceHostHandler,
   setIraDicomSendHandler,
   setIraImagingStudyCloseHandler,
@@ -60,6 +66,7 @@ import {
   setIraPngFullSizeCaptureHandler,
   setIraSceneUpdateHandler,
   setIraSegCatalog,
+  setIraSegLocaleRefreshHandler,
   syncIraStudyUrl,
   publishIraImagingStudyTransition,
 } from "./ira-cast.ts";
@@ -1246,12 +1253,52 @@ async function mountStudyFromSource(
     },
     segVisible: (num) => sc.isSegmentVisible(num),
   });
-  segCards.setScene(ct, seg ?? null, sc.segments);
-  drawAll = () => {
-    for (const p of PLANES) drawSlice(p);
-    draw3d();
-    xhair?.redraw();
+
+  /** Display-only names for cards/chrome; wire/scene keep English on sc.segments. */
+  const segmentsForUi = () =>
+    sc.segments.map((s) => ({
+      ...s,
+      englishName: s.name,
+      name: segmentDisplayNameSync(s.name) || s.name,
+    }));
+
+  const hubOriginForTranslate = (): string => {
+    const ep = resolveHubConfig().hub_endpoint || "";
+    return String(ep).replace(/\/api\/hub\/?$/, "").replace(/\/$/, "");
   };
+
+  const refreshSegLabelTranslations = (): void => {
+    void (async () => {
+      const applyUi = () => {
+        segCards.setScene(ct, seg ?? null, segmentsForUi());
+        chromeApi?.refresh();
+        drawAll();
+      };
+      if (!sc.segments.length) {
+        applyUi();
+        return;
+      }
+      const locale = resolveStoredLocale();
+      if (locale !== "en") {
+        const origin = hubOriginForTranslate();
+        if (origin) {
+          try {
+            await ensureSegmentLabelsTranslated(
+              sc.segments.map((s) => ({ label: s.name })),
+              { hubOrigin: origin, locale },
+            );
+          } catch {
+            /* keep sync/cache or English */
+          }
+        }
+      }
+      applyUi();
+    })();
+  };
+
+  setIraSegLocaleRefreshHandler(refreshSegLabelTranslations);
+  segCards.setScene(ct, seg ?? null, segmentsForUi());
+  refreshSegLabelTranslations();
 
   // Shared with VR chrome (declared early so syncLiveScene / scene-update can use it).
   let vrShift = 0;
@@ -1409,12 +1456,16 @@ async function mountStudyFromSource(
       if (typeof result.labelsVisible === "boolean") {
         labelsOn = result.labelsVisible;
       }
-      for (const [num, op] of result.segmentOpacity) {
-        sc.setSegmentOpacity(num, op);
-      }
-      for (const [num, visible] of result.segmentVisibility) {
-        sc.setSegmentVisible(num, visible);
-      }
+      // Batch opacity + visibility — per-segment setters rebake the whole volume each call;
+      // hide-all / full segments rewrite would hang the browser for N≈100 TotalSeg labels.
+      const opacityEntries = [...result.segmentOpacity].filter(
+        ([num, op]) => sc.segmentOpacity(num) !== op,
+      );
+      const visibilityEntries = [...result.segmentVisibility].filter(
+        ([num, visible]) => sc.isSegmentVisible(num) !== visible,
+      );
+      if (opacityEntries.length) sc.setSegmentOpacities(opacityEntries);
+      if (visibilityEntries.length) sc.setSegmentVisibilities(visibilityEntries);
       if (typeof result.opacity === "number" && Number.isFinite(result.opacity)) {
         sc.setSegOpacity(result.opacity);
         sc.slice.setOverlayOpacity(result.opacity * SEG_FILL);
@@ -1479,7 +1530,8 @@ async function mountStudyFromSource(
   const refreshSegChrome = (labmap: SegLabelmap) => {
     seg = labmap;
     sc.setVolumeOpacity(0.5);
-    segCards.setScene(ct, seg, sc.segments);
+    segCards.setScene(ct, seg, segmentsForUi());
+    refreshSegLabelTranslations();
     setIraSegCatalog(buildSegCatalog(labmap, sc.ijkToRAS));
     syncLiveScene();
     // Colorize still on → re-resolve groups against the new labelmap and rebuild chrome rows.
@@ -1869,7 +1921,7 @@ async function mountStudyFromSource(
               status("No segmentation loaded — open a study with SEG to export STL.");
               return;
             }
-            const picked = await pickSegment(sc.segments);
+            const picked = await pickSegment(segmentsForUi());
             if (!picked) return;
             try {
               status(`Meshing ${picked.name}…`);
@@ -2118,15 +2170,27 @@ async function mountStudyFromSource(
     sc.setSegmentOpacities(sc.segments.map((s) => [s.num, 1]));
   };
 
+  // Colorize forces MPR contours on (fill at group opacity + full-colour outline); this is the
+  // user's outline choice to restore when Colorize turns off.
+  let outlineBeforeColorize: boolean | null = null;
+
   const setColorizeMode = (on: boolean) => {
     if (on) {
       if (!sc.hasSeg) return;
       sc.setSegDisplayMode("colorize");
       applyColorizeGroupDefaults();
+      if (outlineBeforeColorize === null) outlineBeforeColorize = sliceOutline;
+      sliceOutline = true;
+      sc.slice.setOverlayOutline(true);
     } else {
       sc.setSegDisplayMode("surface");
       restoreSurfaceSegmentOpacities();
       clearColorizeGroupState();
+      if (outlineBeforeColorize !== null) {
+        sliceOutline = outlineBeforeColorize;
+        outlineBeforeColorize = null;
+        sc.slice.setOverlayOutline(sliceOutline);
+      }
     }
     syncLiveScene();
     drawAll();
@@ -2283,7 +2347,7 @@ async function mountStudyFromSource(
       controls: buildVizControls(),
       anchor: cv.threeD.parentElement ?? undefined,
       segments: {
-        list: () => sc.segments.map((s) => ({ num: s.num, name: s.name, color: s.color })),
+        list: () => segmentsForUi().map((s) => ({ num: s.num, name: s.name, color: s.color })),
         get: (num) => sc.segmentOpacity(num),
         set: (num, o) => {
           sc.setSegmentOpacity(num, o);
@@ -2406,6 +2470,7 @@ async function mountStudyFromSource(
       }
       setIraSegCatalog(EMPTY_SEG_CATALOG);
       labelsOn = false;
+      setIraSegLocaleRefreshHandler(null);
       setIraSceneUpdateHandler(null);
       setIraConferenceHostHandler(null);
       setIraPngFullSizeCaptureHandler(null);

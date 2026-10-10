@@ -640,6 +640,17 @@
   .cast-conference-section:last-child {
     margin-bottom: 0; padding-bottom: 0; border-bottom: 0;
   }
+  .cast-conference-topic-btn {
+    display: inline-flex; align-items: center; max-width: 100%;
+    border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); color: var(--ira-fg);
+    padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .cast-conference-topic-btn:hover { filter: brightness(1.08); }
+  .cast-conference-session-label {
+    display: inline-flex; max-width: 16rem; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
   .cast-conference-section-title {
     margin: 0 0 8px; font: 650 12px/1.2 -apple-system, system-ui, sans-serif;
     color: var(--ira-fg-muted); letter-spacing: 0.02em; text-transform: uppercase;
@@ -658,6 +669,11 @@
   .cast-conference-topic-row {
     display: flex; align-items: center; gap: 8px; padding: 4px 0;
     font-size: 12px; cursor: pointer;
+  }
+  .cast-conference-topic-label { flex: 1 1 auto; min-width: 0; }
+  .cast-conference-topic-timezone {
+    flex: 0 1 auto; margin-left: auto; font-size: 11px;
+    color: var(--ira-fg-muted); white-space: nowrap;
   }
   .cast-conference-muted { margin: 0; font-size: 12px; color: var(--ira-fg-muted); }
   .cast-conference-status { margin: 0 0 10px; font-size: 12px; line-height: 1.4; }
@@ -747,6 +763,20 @@
   #grid.layout-dental [data-cell="sagittal"] { grid-area: sa; }
   #grid.layout-dental [data-cell="threeD"] { grid-area: td; }
   #grid.layout-dental [data-cell="oblique"] { grid-area: ob; }
+  /* 3+1: MPR stacked left, large 3D right. */
+  #grid.layout-threeOne {
+    grid-template-columns: 1fr 2fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    grid-template-areas:
+      "ax td"
+      "co td"
+      "sa td";
+  }
+  #grid.layout-threeOne [data-cell="axial"] { grid-area: ax; }
+  #grid.layout-threeOne [data-cell="coronal"] { grid-area: co; }
+  #grid.layout-threeOne [data-cell="sagittal"] { grid-area: sa; }
+  #grid.layout-threeOne [data-cell="threeD"] { grid-area: td; }
+  #grid.layout-threeOne [data-cell="oblique"] { display: none; }
   #grid.has-max .cell { display: none; }
   #grid.has-max .cell.max { display: block; grid-area: 1 / 1 / -1 / -1; }
   .cell { position: relative; min-width: 0; min-height: 0; background: #000; }
@@ -771,10 +801,6 @@
     <div id="ira-bar">
       <div class="ira-bar-start">
         <span class="brand">SlicerLive - IRA</span>
-        <button type="button" id="iraCastStatusBtn" class="ira-icon-btn ira-text-btn"
-          aria-label="Session info" title="Session info">
-          <span id="iraCastStatus" class="ira-cast-status ira-cast-idle">—</span>
-        </button>
         <button
           type="button"
           id="iraStartConferenceBtn"
@@ -846,7 +872,7 @@
           id="iraReportingBtn"
           class="ira-icon-btn ira-text-btn"
           aria-label="Open DICOM SR reporting"
-          title="Open DICOM SR reporting client"
+          title="Open DICOM SR Report Creator"
         >
           DICOM SR
         </button>
@@ -873,7 +899,7 @@
           style="font:700 15px -apple-system,system-ui,sans-serif">?</button>
       </div>
     </div>
-    <div id="grid">
+    <div id="grid" class="layout-threeOne">
       <div class="cell" data-cell="axial">
         <canvas id="c-axial"></canvas><span class="lab axial">Axial</span>
         <span class="orient o-t">A</span><span class="orient o-b">P</span><span class="orient o-l">R</span><span class="orient o-r">L</span>

@@ -29,9 +29,14 @@ import CastClient, {
   resolveCastFileMessage,
   resolveCastHubAdminUrl,
   batchContextFiles,
+  showCastInfoToast,
   type CastConferenceView,
   type CastProductStatusProbe,
 } from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+import {
+  SKIP_STUDY_RELOAD_TOAST,
+  sameOpenImagingStudyContext,
+} from "../../../../cast-context-identity.ts";
 import {
   contextItemsFromOpenContext,
   materializeLiveSceneBlobUrls,
@@ -76,7 +81,7 @@ function shouldUseSameOriginHub(
 }
 
 /** Local hub for demos; same-origin endpoints when hosted on hub / in cloud. */
-function resolveHubConfig(
+export function resolveHubConfig(
   location: Location = globalThis.location
 ): HubConfig {
   if (!shouldUseSameOriginHub(location)) {
@@ -153,13 +158,13 @@ let onImagingStudyOpen: ImagingStudyOpenHandler | null = null;
 let onImagingStudyClose: ImagingStudyCloseHandler | null = null;
 let onLiveSceneChange: (() => void) | null = null;
 
-/** Reporting peers (CAST-RPT) — same presence idea as worklist connectedApps. */
+/** Reporting peers (RPT / CAST-RPT) — same presence idea as worklist connectedApps. */
 const reportingConnectedApps = new Map<
   string,
   { productName: string; actor: string }
 >();
 
-/** Worklist peers (CAST-WKLST / WORKLIST_CLIENT). */
+/** Worklist peers (WKLST / CAST-WKLST / WORKLIST_CLIENT). */
 const worklistConnectedApps = new Map<
   string,
   { productName: string; actor: string }
@@ -169,13 +174,13 @@ const TITLE_WORKLIST = "Open SlicerWorklist";
 const TITLE_WORKLIST_ONLINE = "SlicerWorklist is connected on this topic";
 const TITLE_WORKLIST_OFFLINE =
   "Open SlicerWorklist (no worklist responded on this topic)";
-const TITLE_REPORTING = "Open DICOM SR reporting client";
+const TITLE_REPORTING = "Open DICOM SR Report Creator";
 const TITLE_REPORTING_ONLINE = "DICOM SR is connected on this topic";
 const TITLE_REPORTING_OFFLINE =
-  "Open DICOM SR reporting client (no reporting responded on this topic)";
-const TITLE_REMOTE_AI = "Remote AI — inference servers";
+  "Open DICOM SR Report Creator (no reporting responded on this topic)";
+const TITLE_REMOTE_AI = "Evidence Creators — inference servers";
 const TITLE_REMOTE_AI_ONLINE =
-  "Remote AI — inference server(s) online on this topic";
+  "Evidence Creators — inference server(s) online on this topic";
 
 /** True when startup STATUS (or later probe) found at least one online AI product. */
 let inferenceServersOnline = false;
@@ -808,6 +813,22 @@ export function setIraSceneUpdateHandler(fn: IraSceneUpdateHandler | null): void
   onSceneUpdate = fn;
 }
 
+/** Re-apply segment display names when the UI locale changes (3D cards + chrome). */
+export type IraSegLocaleRefreshHandler = () => void;
+
+let onSegLocaleRefresh: IraSegLocaleRefreshHandler | null = null;
+
+export function setIraSegLocaleRefreshHandler(
+  fn: IraSegLocaleRefreshHandler | null,
+): void {
+  onSegLocaleRefresh = fn;
+}
+
+/** No-op when no study is mounted. */
+export function refreshIraSegLabelsForLocale(): void {
+  onSegLocaleRefresh?.();
+}
+
 /**
  * Publish Cast scene-update display ops (mrson patches) to actor ID peers.
  * Used when this IRA is conference host so followers mirror VR/seg display state.
@@ -1141,6 +1162,15 @@ function clearWorklistConnectedApps(): void {
 function isReportingPresencePeer(productName: string, actor: string): boolean {
   const actorKey = actor.trim().toUpperCase();
   if (actorKey === REPORTING_ACTOR) return true;
+  const product = productName.trim().toUpperCase();
+  if (
+    product === "RPT" ||
+    product.startsWith("RPT-") ||
+    product === "CAST-RPT" ||
+    product.startsWith("CAST-RPT")
+  ) {
+    return true;
+  }
   return matchesCastProduct(productName, "reporting");
 }
 
@@ -1148,10 +1178,15 @@ function isWorklistPresencePeer(productName: string, actor: string): boolean {
   const actorKey = actor.trim().toUpperCase();
   if (actorKey === WORKLIST_ACTOR) return true;
   const product = productName.trim().toUpperCase();
-  return product === "CAST-WKLST" || product.startsWith("CAST-WKLST");
+  return (
+    product === "WKLST" ||
+    product.startsWith("WKLST-") ||
+    product === "CAST-WKLST" ||
+    product.startsWith("CAST-WKLST")
+  );
 }
 
-/** Port of worklist `markConnectedApp` / `upsertConnectedApp` for CAST-RPT only. */
+/** Port of worklist `markConnectedApp` / `upsertConnectedApp` for RPT peers. */
 function markReportingConnectedApp(message: Record<string, unknown>): void {
   const subscriber = messageSubscriberName(message);
   if (!subscriber) return;
@@ -1213,7 +1248,7 @@ function markWorklistConnectedFromStatusResponses(
     if (!isWorklistPresencePeer("", actor)) continue;
     const key = actor || WORKLIST_ACTOR;
     worklistConnectedApps.set(key, {
-      productName: "CAST-WKLST",
+      productName: "WKLST",
       actor: actor || WORKLIST_ACTOR,
     });
     found = true;
@@ -1512,6 +1547,114 @@ function imagingStudyContextItems(message: Record<string, unknown>): unknown[] {
   return messageEventContext(message);
 }
 
+/** Raw DICOM modality code from Coding / CodeableConcept (keeps CR/DX). */
+function codingModalityRaw(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim().toUpperCase();
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const hit = codingModalityRaw(entry);
+      if (hit) return hit;
+    }
+    return "";
+  }
+  if (typeof value === "object") {
+    const obj = value as { code?: unknown; coding?: unknown; text?: unknown };
+    if (obj.coding != null) return codingModalityRaw(obj.coding);
+    if (obj.code != null) return String(obj.code).trim().toUpperCase();
+    if (obj.text != null) return String(obj.text).trim().toUpperCase();
+  }
+  return "";
+}
+
+/** Best-effort modality from ImagingStudy-open context (study / series / file label). */
+function modalityFromImagingStudyContext(context: unknown[]): string {
+  if (!Array.isArray(context)) return "";
+  for (const item of context) {
+    if (!item || typeof item !== "object") continue;
+    const key = String((item as { key?: unknown }).key || "");
+    const resource = (item as { resource?: unknown }).resource;
+    if (!resource || typeof resource !== "object") continue;
+    const res = resource as {
+      modality?: unknown;
+      series?: unknown;
+      files?: unknown;
+      m?: unknown;
+    };
+    const fromStudy = codingModalityRaw(res.modality);
+    if (fromStudy) return fromStudy;
+    if (Array.isArray(res.series)) {
+      for (const series of res.series) {
+        if (!series || typeof series !== "object") continue;
+        const fromSeries = codingModalityRaw(
+          (series as { modality?: unknown }).modality
+        );
+        if (fromSeries) return fromSeries;
+      }
+    }
+    // IDC / worklist sometimes put modality on volume file labels.
+    if (key === "files" || Array.isArray(res.files)) {
+      const files = Array.isArray(res.files) ? res.files : [];
+      for (const file of files) {
+        if (!file || typeof file !== "object") continue;
+        const row = file as { role?: unknown; label?: unknown };
+        const role = String(row.role || "")
+          .trim()
+          .toLowerCase();
+        if (role && role !== "volume") continue;
+        const label = String(row.label || "")
+          .trim()
+          .toUpperCase();
+        if (label === "CR" || label === "DX") return label;
+      }
+    }
+    // SegRoulette / IDC entry shape may expose ``m`` on the resource.
+    const fromM = String(res.m || "")
+      .trim()
+      .toUpperCase();
+    if (fromM) return fromM;
+  }
+  return "";
+}
+
+function isProjectionRadiographyModality(modality: string): boolean {
+  const m = String(modality || "")
+    .trim()
+    .toUpperCase();
+  return m === "CR" || m === "DX";
+}
+
+/**
+ * CR/DX stay closed (or close if a study was loaded). Toast explains skip.
+ * @returns true when the open was rejected
+ */
+function rejectCrDxImagingStudyOpen(
+  context: unknown[],
+  reason: string
+): boolean {
+  const modality = modalityFromImagingStudyContext(context);
+  if (!isProjectionRadiographyModality(modality)) return false;
+
+  const hadOpen =
+    lastImagingStudyOpenContext.length > 0 || iraUrlHasStudyParams();
+  console.info(
+    `${LOG} ImagingStudy-open rejected (${reason}): modality ${modality} — not opening in SlicerLive`
+  );
+  showCastInfoToast(`Modality ${modality} — not opening`);
+
+  // Never adopt CR/DX as the open study.
+  lastImagingStudyOpenContext = [];
+  if (hadOpen) {
+    lastLiveScene = null;
+    lastSegCatalog = EMPTY_SEG_CATALOG;
+    onLiveSceneChange?.();
+    void Promise.resolve(onImagingStudyClose?.()).catch((err) =>
+      console.error(`${LOG} ImagingStudy-close after CR/DX reject failed`, err)
+    );
+  }
+  return true;
+}
+
 async function resolveAndApplyImagingStudyOpen(
   message: Record<string, unknown>
 ): Promise<void> {
@@ -1546,6 +1689,7 @@ async function resolveAndApplyImagingStudyOpen(
       });
       items.push({ key: "scene", resource: sceneDoc });
     }
+    if (rejectCrDxImagingStudyOpen(items, "websocket")) return;
     lastImagingStudyOpenContext = cloneContextArray(items);
     console.info(
       `${LOG} ImagingStudy-open context items=`,
@@ -1688,6 +1832,21 @@ async function requestStatusFromWorklist(opts?: {
     if (!context.length) {
       console.warn(`${LOG} STATUS: ImagingStudy context empty`);
       if (!forceApply) statusRequestState = "idle";
+      return;
+    }
+
+    if (sameOpenImagingStudyContext(context, lastImagingStudyOpenContext)) {
+      console.warn(
+        `${LOG} STATUS: same study already open — skip ImagingStudy apply`,
+        forceApply ? "(follow host)" : ""
+      );
+      if (!forceApply) statusRequestState = "done";
+      showCastInfoToast(SKIP_STUDY_RELOAD_TOAST);
+      return;
+    }
+
+    if (rejectCrDxImagingStudyOpen(context, "STATUS")) {
+      if (!forceApply) statusRequestState = "done";
       return;
     }
 

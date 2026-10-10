@@ -33,7 +33,7 @@ import {
 export type Plane = "axial" | "sagittal" | "coronal" | "oblique";
 /** Viewport selection / capture target — MPR planes plus the 3D scene. */
 export type ViewportId = Plane | "threeD";
-export type IraLayout = "single" | "twoUp" | "fourUp" | "dental";
+export type IraLayout = "single" | "twoUp" | "fourUp" | "dental" | "threeOne";
 export type IraTool =
   | "scroll"
   | "wl"
@@ -101,7 +101,7 @@ export interface IraCfg {
   };
   strip?: StripItem[];
   /** Requested initial layout (study-mode open uses "single" for a single axial view).
-   *  Overridden to "single" on phones. Defaults to "fourUp". */
+   *  Overridden to "single" on phones. Defaults to "threeOne". */
   initialLayout?: IraLayout;
   /** Fired after hanging-protocol layout changes (e.g. Dental → drop oblique in 3D). */
   onLayoutChange?: (l: IraLayout) => void;
@@ -398,7 +398,7 @@ export function mountIra(cfg: IraCfg): IraApi {
   let crossRas: Vec3 | null = null;
   const measurements: Measurement[] = [];
   let pending: Measurement | null = null; // in-progress clicks
-  let layout: IraLayout = "fourUp";
+  let layout: IraLayout = "threeOne";
 
   /** In-progress freehand marker stroke (local draft before / while publishing). */
   type MarkerDraft = {
@@ -808,6 +808,7 @@ export function mountIra(cfg: IraCfg): IraApi {
     "border:1px solid #33507e;border-radius:4px;padding:2px 4px;cursor:pointer;";
   for (
     const [v, label] of [
+      ["threeOne", "3+1 (MPR | 3D)"],
       ["fourUp", "Four-Up (MPR + 3D)"],
       ["dental", "Dental (MPR + 3D + Oblique)"],
       ["twoUp", "2 side-by-side"],
@@ -1098,8 +1099,8 @@ export function mountIra(cfg: IraCfg): IraApi {
     disabledTip: "Show Report — no reports available for this patient",
   });
   btn("help", "help", "Help — tool guide and keyboard shortcuts — H / F1", () => showHelp());
-  btn("advanced", "advanced", "Advanced Mode — toggle IRA basic (single stack) vs MPR Four-Up + 3D — F10", () => {
-    setLayout(layout === "single" ? "fourUp" : "single");
+  btn("advanced", "advanced", "Advanced Mode — toggle IRA basic (single stack) vs MPR + 3D — F10", () => {
+    setLayout(layout === "single" ? "threeOne" : "single");
   });
 
   // ---- caller-supplied extra tools (IDC Share / Download) --------------------------------
@@ -1115,14 +1116,15 @@ export function mountIra(cfg: IraCfg): IraApi {
     const names = [...cfg.planes, "threeD"];
     if (l === "single") for (const n of names) show[n] = n === selectedPlane;
     else if (l === "twoUp") for (const n of names) show[n] = n === "axial" || n === "sagittal";
-    else if (l === "fourUp") for (const n of names) show[n] = n !== "oblique";
+    else if (l === "fourUp" || l === "threeOne") for (const n of names) show[n] = n !== "oblique";
     else for (const n of names) show[n] = true; // dental: all five
     for (const n of names) {
       const cell = cfg.cellOf(n);
       if (cell) cell.style.display = show[n] ? "" : "none";
     }
     cfg.grid.classList.toggle("layout-dental", l === "dental");
-    if (l === "dental") {
+    cfg.grid.classList.toggle("layout-threeOne", l === "threeOne");
+    if (l === "dental" || l === "threeOne") {
       cfg.grid.style.gridTemplateColumns = "";
       cfg.grid.style.gridTemplateRows = "";
     } else if (l === "fourUp") {
@@ -1136,7 +1138,10 @@ export function mountIra(cfg: IraCfg): IraApi {
       cfg.grid.style.gridTemplateRows = "1fr";
     }
     layoutSel.value = l;
-    buttons.get("advanced")!.classList.toggle("active", l === "fourUp" || l === "dental");
+    buttons.get("advanced")!.classList.toggle(
+      "active",
+      l === "fourUp" || l === "dental" || l === "threeOne",
+    );
     // canvases changed size → re-render (presentVolume's resize handler redraws all)
     globalThis.dispatchEvent(new Event("resize"));
     cfg.onLayoutChange?.(l);
@@ -1191,7 +1196,7 @@ export function mountIra(cfg: IraCfg): IraApi {
     stripBtn.classList.remove("active");
     setLayout("single");
   } else {
-    setLayout(cfg.initialLayout ?? "fourUp");
+    setLayout(cfg.initialLayout ?? "threeOne");
   }
 
   // ---- print / PNG capture (IRA: selected viewport, current state incl. annotations) ----
