@@ -191,11 +191,30 @@ export function displayClass(): "phone" | "desktop" | "large" {
 }
 
 function ensureIraStyle(): void {
-  if (document.getElementById("ira-style")) return;
-  const st = document.createElement("style");
-  st.id = "ira-style";
+  let st = document.getElementById("ira-style") as HTMLStyleElement | null;
+  if (!st) {
+    st = document.createElement("style");
+    st.id = "ira-style";
+    document.head.appendChild(st);
+  }
   st.textContent = STYLE;
-  document.head.appendChild(st);
+}
+
+/** Move `#ira-bar-chrome` between the title host and the collapsed tools slot. */
+function syncIraBarChromeDock(tb: HTMLElement): void {
+  const bar = document.getElementById("ira-bar");
+  const chrome = document.getElementById("ira-bar-chrome");
+  const slot = document.getElementById("ira-toolbar-chrome");
+  if (!bar || !chrome || !slot) return;
+
+  const collapsed = tb.classList.contains("collapsed");
+  if (collapsed) {
+    if (chrome.parentElement !== slot) slot.appendChild(chrome);
+    bar.classList.add("is-chrome-docked");
+  } else {
+    if (chrome.parentElement !== bar) bar.appendChild(chrome);
+    bar.classList.remove("is-chrome-docked");
+  }
 }
 
 function syncIraToolbarToggle(
@@ -207,6 +226,7 @@ function syncIraToolbarToggle(
   toggleBtn.title = collapsed ? "Show tools" : "Hide tools";
   toggleBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
   toggleBtn.setAttribute("aria-label", collapsed ? "Show tools" : "Hide tools");
+  syncIraBarChromeDock(tb);
 }
 
 /**
@@ -216,7 +236,21 @@ function syncIraToolbarToggle(
 export function ensureIraToolbarShell(bar: HTMLElement): HTMLElement {
   ensureIraStyle();
   let tb = document.getElementById("ira-toolbar");
-  if (tb) return tb;
+  if (tb) {
+    if (!document.getElementById("ira-toolbar-chrome")) {
+      const slot = document.createElement("div");
+      slot.id = "ira-toolbar-chrome";
+      const body = document.getElementById("ira-toolbar-body");
+      const toggleEl = document.getElementById("ira-toolbar-toggle");
+      if (toggleEl?.nextSibling) tb.insertBefore(slot, toggleEl.nextSibling);
+      else if (body) tb.insertBefore(slot, body);
+      else tb.append(slot);
+    }
+    const toggle = document.getElementById("ira-toolbar-toggle") as HTMLButtonElement | null;
+    if (toggle) syncIraToolbarToggle(tb, toggle);
+    else syncIraBarChromeDock(tb);
+    return tb;
+  }
 
   tb = document.createElement("div");
   tb.id = "ira-toolbar";
@@ -228,16 +262,19 @@ export function ensureIraToolbarShell(bar: HTMLElement): HTMLElement {
   toggleBtn.type = "button";
   toggleBtn.setAttribute("aria-expanded", "false");
   toggleBtn.setAttribute("aria-controls", "ira-toolbar-body");
-  syncIraToolbarToggle(tb, toggleBtn);
   toggleBtn.addEventListener("click", () => {
     tb!.classList.toggle("collapsed");
     syncIraToolbarToggle(tb!, toggleBtn);
     globalThis.dispatchEvent(new Event("resize"));
   });
 
+  const tbChrome = document.createElement("div");
+  tbChrome.id = "ira-toolbar-chrome";
+
   const tbBody = document.createElement("div");
   tbBody.id = "ira-toolbar-body";
-  tb.append(toggleBtn, tbBody);
+  tb.append(toggleBtn, tbChrome, tbBody);
+  syncIraToolbarToggle(tb, toggleBtn);
   return tb;
 }
 
@@ -251,6 +288,24 @@ export function resetIraToolbarShell(): void {
     tb.classList.add("collapsed");
     if (toggle) syncIraToolbarToggle(tb, toggle);
   }
+}
+
+/** Plant Load study in the tools row when no study toolbar is mounted yet. */
+export function ensureLoadStudyToolbarButton(onClick: () => void): void {
+  ensureIraStyle();
+  const body = document.getElementById("ira-toolbar-body");
+  if (!body) return;
+  let b = document.getElementById("ira-load-local") as HTMLButtonElement | null;
+  if (!b) {
+    b = document.createElement("button");
+    b.id = "ira-load-local";
+    b.type = "button";
+    b.innerHTML = ICONS.loadStudy ?? "?";
+    b.title = "Load study — open a local DICOM folder or ZIP";
+    b.setAttribute("aria-label", "Load study");
+    body.appendChild(b);
+  }
+  b.onclick = () => onClick();
 }
 
 // ---- icons — redrawn from the IRA suggested symbols (Tables 13-1/2/3) -------------------
@@ -347,24 +402,32 @@ const ICONS: Record<string, string> = {
     `<path d="M7 9l5-3 5 3v6l-5 3-5-3z"/><path d="M7 9l5 3 5-3M12 12v6"/>` +
       `<path d="M18 3v4m0 0l-2-2m2 2l2-2"/>`,
   ),
+  // Local folder/ZIP study load
+  loadStudy: I(
+    `<path d="M3 7h6l2-2h10v14H3z"/><path d="M12 11v6m0 0l-2.5-2.5M12 17l2.5-2.5"/>`,
+  ),
   toolsCollapse: I(`<path d="M6 14l6-6 6 6"/>`),
   toolsExpand: I(`<path d="M6 10l6 6 6-6"/>`),
 };
 
 const STYLE = `
-#ira-toolbar { display:flex; align-items:flex-start; gap:4px; padding:3px 8px; background:#0b0e16;
+#ira-toolbar { display:flex; align-items:center; gap:4px; padding:3px 8px; background:#0b0e16;
   border-bottom:1px solid #1b2740; }
 #ira-toolbar.collapsed { padding:2px 8px; }
 #ira-toolbar-toggle { flex:0 0 auto; }
+#ira-toolbar-chrome { display:none; flex:1 1 auto; min-width:0; align-items:center; }
+#ira-toolbar.collapsed #ira-toolbar-chrome { display:flex; }
 #ira-toolbar-body { display:flex; align-items:center; gap:2px; flex-wrap:wrap; flex:1 1 auto; min-width:0; }
 #ira-toolbar.collapsed #ira-toolbar-body { display:none; }
 #ira-toolbar .sep { width:1px; height:28px; background:#1b2740; margin:0 6px; }
-#ira-toolbar button { display:inline-flex; align-items:center; justify-content:center;
+#ira-toolbar-toggle,
+#ira-toolbar-body button { display:inline-flex; align-items:center; justify-content:center;
   width:38px; height:36px; color:#9fb3d0; background:none; border:1px solid transparent;
   border-radius:5px; cursor:pointer; padding:0; }
-#ira-toolbar button:hover { background:#1b2740; color:#d6e2f2; }
-#ira-toolbar button.active { background:#2b6cb0; color:#fff; border-color:#33507e; }
-#ira-toolbar button:disabled { opacity:.3; cursor:default; background:none; }
+#ira-toolbar-toggle:hover,
+#ira-toolbar-body button:hover { background:#1b2740; color:#d6e2f2; }
+#ira-toolbar-body button.active { background:#2b6cb0; color:#fff; border-color:#33507e; }
+#ira-toolbar-body button:disabled { opacity:.3; cursor:default; background:none; }
 #ira-cine-box { display:flex; align-items:center; gap:2px; margin-left:4px; padding:2px 6px;
   background:#11141d; border:1px solid #33507e; border-radius:5px; }
 #ira-cine-box input { width:44px; font:600 11px -apple-system,system-ui,sans-serif; color:#d6e2f2;

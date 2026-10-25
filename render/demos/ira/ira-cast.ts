@@ -129,8 +129,23 @@ export type IraCastConnection =
   | "error";
 
 type StatusListener = (connection: IraCastConnection, detail: string) => void;
-type ImagingStudyOpenHandler = (context: unknown[]) => void | Promise<void>;
+/** Optional meta for open handlers (publisher identity for layout gates). */
+export type IraOpenPublisherMeta = {
+  publisherSubscriberName?: string;
+};
+type ImagingStudyOpenHandler = (
+  context: unknown[],
+  meta?: IraOpenPublisherMeta,
+) => void | Promise<void>;
 type ImagingStudyCloseHandler = () => void | Promise<void>;
+
+/** True when Hub publisher subscriber.name is a 3D Slicer Image Display client. */
+export function isSlicerIdSubscriberName(subscriberName: unknown): boolean {
+  return String(subscriberName || "")
+    .trim()
+    .toUpperCase()
+    .startsWith("3DSLICER");
+}
 
 let client: ReturnType<typeof CastClient.newInstance> | null = null;
 let topic = "";
@@ -767,6 +782,60 @@ export async function publishIraImagingStudyTransition(
   return { closed, opened };
 }
 
+/**
+ * Ask Slicer Image Display to publish local DICOM DB files as dicom-send.
+ */
+export async function requestIraHubDicom(opts: {
+  studyInstanceUID: string;
+  seriesInstanceUID?: string;
+}): Promise<{ ok: boolean; detail: string; response?: unknown }> {
+  if (!client || connection !== "connected") {
+    return { ok: false, detail: "Not connected to Hub" };
+  }
+  const studyInstanceUID = String(opts.studyInstanceUID || "").trim();
+  if (!studyInstanceUID) {
+    return { ok: false, detail: "No studyInstanceUID" };
+  }
+  const seriesInstanceUID = String(opts.seriesInstanceUID || "").trim();
+  const subscriber =
+    subscriberName || client.getSessionConfig?.()?.subscriberName?.trim() || "";
+  if (!subscriber) {
+    return { ok: false, detail: "No subscriber name" };
+  }
+  const requestTopic =
+    topic || String(client.getSessionConfig?.()?.topic || "").trim();
+  try {
+    const result = await client.request({
+      "subscriber.name": subscriber,
+      "subscriber.product.name": "SLICERLIVE-IRA",
+      "subscriber.actor": ID_ACTOR,
+      "target.actor": ID_ACTOR,
+      event: {
+        "hub.event": requestEventFor("DICOM"),
+        ...(requestTopic ? { "hub.topic": requestTopic } : {}),
+        context: {
+          dataType: "DICOM",
+          studyInstanceUID,
+          ...(seriesInstanceUID ? { seriesInstanceUID } : {}),
+        },
+      },
+    });
+    const ok = Boolean(result && result.ok);
+    return {
+      ok,
+      detail: ok
+        ? "dicom-request sent"
+        : `HTTP ${result?.status ?? "?"}`,
+      response: result,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export function getIraCastClient(): ReturnType<typeof CastClient.newInstance> | null {
   return client;
 }
@@ -794,6 +863,7 @@ export function setIraNiftiSendHandler(fn: IraNiftiSendHandler | null): void {
 /** Handler for inbound Cast ``dicom-send`` (resolved event with file bytes). */
 export type IraDicomSendHandler = (
   event: Record<string, unknown>,
+  meta?: IraOpenPublisherMeta,
 ) => void | Promise<void>;
 
 let onDicomSend: IraDicomSendHandler | null = null;
@@ -898,6 +968,99 @@ export function setIraPngFullSizeCaptureHandler(
   fn: IraPngCaptureHandler | null,
 ): void {
   onPngCapture = fn;
+}
+
+function base64ToUint8Array(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Capture the selected viewport and publish binary-family ``png-send`` on the hub topic
+ * so Classroom / Reporting can append a Snapshots row (push, not request/response).
+ */
+export async function publishIraPngSend(): Promise<{
+  ok: boolean;
+  detail?: string;
+}> {
+  if (!client || connection !== "connected") {
+    return { ok: false, detail: "Not connected" };
+  }
+  if (!topic) return { ok: false, detail: "No hub topic" };
+  if (!onPngCapture) return { ok: false, detail: "No study mounted" };
+
+  let payload: IraPngCapturePayload | null = null;
+  try {
+    payload = (await onPngCapture()) ?? null;
+  } catch (err) {
+    console.error(`${LOG} png-send capture failed`, err);
+    return {
+      ok: false,
+      detail: `Capture failed: ${(err as Error)?.message ?? err}`,
+    };
+  }
+  if (!payload?.data) {
+    return { ok: false, detail: "No capture available" };
+  }
+
+  const bytes = base64ToUint8Array(String(payload.data));
+  const messageId =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `png-${Date.now().toString(36)}`;
+  const session = client.getSessionConfig?.() ?? {};
+  const fromSubscriber =
+    subscriberName ||
+    String((session as { subscriberName?: string }).subscriberName || "").trim();
+  const fromUserName =
+    userName ||
+    String((session as { userName?: string }).userName || "").trim();
+
+  try {
+    const res = await client.publish({
+      event: {
+        "hub.topic": topic,
+        "hub.event": "png-send",
+        context: {
+          files: [
+            {
+              data: bytes,
+              fileName: "snapshot.png",
+              mimeType: payload.contentType || "image/png",
+              byteLength: bytes.byteLength,
+            },
+          ],
+          width: payload.width,
+          height: payload.height,
+          fromSubscriber,
+          fromUserName,
+          sentAt: new Date().toISOString(),
+          messageId,
+        },
+      },
+      actor: ID_ACTOR,
+      "target.actor": "*",
+      "target.product.name": "*",
+    });
+    const ok = Boolean(res?.ok);
+    if (!ok) {
+      console.warn(
+        `${LOG} png-send failed`,
+        res ? `HTTP ${res.status}` : "No response",
+      );
+      return { ok: false, detail: "Publish failed" };
+    }
+    console.info(`${LOG} published png-send bytes=`, bytes.byteLength);
+    return { ok: true };
+  } catch (err) {
+    console.error(`${LOG} png-send exception`, err);
+    return {
+      ok: false,
+      detail: `Publish failed: ${(err as Error)?.message ?? err}`,
+    };
+  }
 }
 
 function handleSceneUpdateMessage(message: Record<string, unknown>): boolean {
@@ -1483,7 +1646,17 @@ async function handleResolvedFileSend(
       `${LOG} ${kind}: ${withData.length} file(s) ready`,
       withData.map((f) => (f as { fileName?: string }).fileName || "?"),
     );
-    await handler(event);
+    const publisherSubscriberName =
+      messageSubscriberName(message) ||
+      String(message["subscriber.name"] || "").trim() ||
+      undefined;
+    if (kind === "dicom-send") {
+      await (handler as IraDicomSendHandler)(event, {
+        publisherSubscriberName,
+      });
+    } else {
+      await (handler as IraNiftiSendHandler)(event);
+    }
   } catch (err) {
     console.error(`${LOG} ${kind} handler failed`, err);
   }
@@ -1691,12 +1864,23 @@ async function resolveAndApplyImagingStudyOpen(
     }
     if (rejectCrDxImagingStudyOpen(items, "websocket")) return;
     lastImagingStudyOpenContext = cloneContextArray(items);
+    const publisherSubscriberName =
+      messageSubscriberName(message) ||
+      String(message["subscriber.name"] || "").trim() ||
+      undefined;
     console.info(
       `${LOG} ImagingStudy-open context items=`,
       items.length,
-      sceneDoc ? "(LiveScene)" : ""
+      sceneDoc ? "(LiveScene)" : "",
+      publisherSubscriberName
+        ? `publisher=${publisherSubscriberName}`
+        : ""
     );
-    await Promise.resolve(onImagingStudyOpen?.(lastImagingStudyOpenContext));
+    await Promise.resolve(
+      onImagingStudyOpen?.(lastImagingStudyOpenContext, {
+        publisherSubscriberName,
+      })
+    );
   } catch (err) {
     console.error(`${LOG} ImagingStudy-open resolve/apply failed`, err);
   }

@@ -38,7 +38,67 @@ import {
 } from "../../../../i18n/index.ts";
 import { loadSeries } from "../../vendor/idc_tools/index.js";
 import type { CTVolume, SegLabelmap } from "../../vendor/idc_tools/types.js";
-import { type IraApi, ensureIraToolbarShell, mountIra, type IraLayout, type Plane, resetIraToolbarShell } from "./ira.ts";
+import {
+  type IraApi,
+  type IraTool,
+  ensureIraToolbarShell,
+  ensureLoadStudyToolbarButton,
+  mountIra,
+  type IraLayout,
+  type Plane,
+  resetIraToolbarShell,
+} from "./ira.ts";
+
+/** Header vanishing-brush toggle — enabled only while a study toolbar is mounted. */
+let vanishingBrushIra: IraApi | null = null;
+
+function syncIraVanishingBrushBtn(tool: IraTool | null): void {
+  const btn = document.getElementById("iraVanishingBrushBtn") as HTMLButtonElement | null;
+  if (!btn) return;
+  if (tool === null) {
+    btn.disabled = true;
+    btn.classList.remove("is-active");
+    btn.setAttribute("aria-pressed", "false");
+    return;
+  }
+  btn.disabled = false;
+  const active = tool === "marker";
+  btn.classList.toggle("is-active", active);
+  btn.setAttribute("aria-pressed", active ? "true" : "false");
+}
+
+function wireIraVanishingBrushBtn(): void {
+  const btn = document.getElementById("iraVanishingBrushBtn");
+  if (!btn || btn.dataset.wired === "1") return;
+  btn.dataset.wired = "1";
+  btn.addEventListener("click", () => {
+    if (!vanishingBrushIra) return;
+    vanishingBrushIra.setTool(vanishingBrushIra.tool() === "marker" ? "scroll" : "marker");
+  });
+}
+
+/** Snapshot push (png-send) — enabled while a study toolbar is mounted. */
+function syncIraSnapshotBtn(enabled: boolean): void {
+  const btn = document.getElementById("iraSnapshotBtn") as HTMLButtonElement | null;
+  if (!btn) return;
+  btn.disabled = !enabled;
+}
+
+function wireIraSnapshotBtn(): void {
+  const btn = document.getElementById("iraSnapshotBtn");
+  if (!btn || btn.dataset.wired === "1") return;
+  btn.dataset.wired = "1";
+  btn.addEventListener("click", () => {
+    void (async () => {
+      const result = await publishIraPngSend();
+      if (result.ok) {
+        status("Snapshot sent");
+      } else {
+        status(result.detail || "Snapshot send failed", true);
+      }
+    })();
+  });
+}
 import {
   VanishingStrokeStore,
   partitionVanishingOps,
@@ -54,7 +114,10 @@ import {
   getIraCastSessionInfo,
   getIraLiveScene,
   isIraConferenceHost,
+  isSlicerIdSubscriberName,
+  publishIraPngSend,
   publishIraSceneUpdate,
+  requestIraHubDicom,
   resolveHubConfig,
   setIraConferenceHostHandler,
   setIraDicomSendHandler,
@@ -69,7 +132,11 @@ import {
   setIraSegLocaleRefreshHandler,
   syncIraStudyUrl,
   publishIraImagingStudyTransition,
+  type IraOpenPublisherMeta,
 } from "./ira-cast.ts";
+
+/** Consumed once by the next mountIra (Slicer Image Display opens → fourUp). */
+let pendingIraInitialLayout: IraLayout | undefined;
 import {
   applySceneUpdateOps,
   buildIraDisplaySceneUpdateOps,
@@ -84,7 +151,7 @@ import {
 import { mergeSegLabelmaps, segLabelmapFromNiftiSendEvent } from "./ira-nifti-seg.ts";
 import { segLabelmapFromDicomSendEvent } from "./ira-dicom-seg.ts";
 import { buildSegCatalog, EMPTY_SEG_CATALOG } from "./ira-seg-catalog.ts";
-import { installIraHeader } from "./ira-header.ts";
+import { installIraHeader, openLoadLocalStudyDialog } from "./ira-header.ts";
 import {
   sourceFromIdcOpenContext,
   studyParamsFromIdcSource,
@@ -106,7 +173,62 @@ import {
   volumeFileFromOpenContext,
   vrPresetFromSceneVolume,
 } from "./ira-scene.ts";
-import { loadEntry, type SeriesEntry } from "../../../logic/readers/dicom-local.ts";
+import {
+  indexFiles,
+  loadEntry,
+  type SeriesEntry,
+} from "../../../logic/readers/dicom-local.ts";
+import {
+  batchContextFiles,
+  resolveImagingStudyOpenPlan,
+} from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+
+function dicomSendFileBytes(entry: Record<string, unknown>): ArrayBuffer | null {
+  const data = entry.data;
+  if (data instanceof ArrayBuffer) return data;
+  if (data instanceof Uint8Array) {
+    return data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
+      ? data.buffer
+      : data.slice().buffer;
+  }
+  if (typeof data === "string" && data) {
+    try {
+      const bin = atob(data.includes(",") ? data.split(",").pop()! : data);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out.buffer;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Prefer the largest non-SEG image series from a dicom-send payload. */
+async function pickSeriesEntryFromDicomSend(
+  event: Record<string, unknown>,
+): Promise<SeriesEntry | null> {
+  const files = batchContextFiles(event) as Record<string, unknown>[];
+  const fileObjs: File[] = [];
+  for (const [i, entry] of files.entries()) {
+    const buf = dicomSendFileBytes(entry);
+    if (!buf) continue;
+    const name =
+      (typeof entry.fileName === "string" && entry.fileName.trim()) ||
+      `dicom-send-${i + 1}.dcm`;
+    fileObjs.push(new File([buf], name, { type: "application/dicom" }));
+  }
+  if (!fileObjs.length) return null;
+  const entries = await indexFiles(fileObjs);
+  if (!entries.length) return null;
+  const imageEntries = entries.filter((e) => {
+    const mod = String(e.modality || "").toUpperCase();
+    return mod !== "SEG" && mod !== "SR" && mod !== "PR";
+  });
+  const candidates = imageEntries.length ? imageEntries : entries;
+  candidates.sort((a, b) => b.count - a.count);
+  return candidates[0] || null;
+}
 // The demo case: an arbitrary KiTS kidney-tumour study (IDC c4kc_kits · KiTS-00051) — the
 // noncontrast CT (95 slices) WITH its DICOM SEG (kidney + tumour). Which case loads is
 // resolved from the URL (see resolveSource) — a drop-in for OHIF on the IDC portal:
@@ -352,7 +474,13 @@ async function main() {
   });
   let openApplyChain: Promise<void> = Promise.resolve();
 
-  const applyImagingStudyOpen = async (ctx: unknown[]) => {
+  const applyImagingStudyOpen = async (
+    ctx: unknown[],
+    meta?: IraOpenPublisherMeta,
+  ) => {
+    if (isSlicerIdSubscriberName(meta?.publisherSubscriberName)) {
+      pendingIraInitialLayout = "fourUp";
+    }
     const loadStudy = await loadStudyWhenReady;
     const sceneDoc = sceneDocFromOpenContext(ctx);
     if (sceneDoc) {
@@ -391,7 +519,7 @@ async function main() {
       );
       syncIraStudyUrl({ volume: volumeFile.fileName });
       await loadStudy({ localVolume, label, anonymized: false });
-      // loadStudy(localVolume) clears ImagingStudy context; restore Cast open
+      // loadStudy(localVolume) clears ImagingStudy context; restore Hub open
       // files so Remote AI can publish nifti-send / dicom-send jobs.
       setIraImagingStudyContext(ctx);
       syncIraStudyUrl({ volume: volumeFile.fileName });
@@ -399,16 +527,38 @@ async function main() {
       if (info) info.textContent = label;
       return;
     }
+    const plan = resolveImagingStudyOpenPlan(ctx) as {
+      mode?: string;
+      studyInstanceUID?: string;
+      seriesInstanceUID?: string;
+    } | null;
+    if (plan?.mode === "local-dicom") {
+      const studyInstanceUID = String(plan.studyInstanceUID || "").trim();
+      if (!studyInstanceUID) {
+        status("local-dicom open missing studyInstanceUID", true);
+        return;
+      }
+      status("Requesting DICOM from Image Display…");
+      const result = await requestIraHubDicom({
+        studyInstanceUID,
+        seriesInstanceUID: plan.seriesInstanceUID,
+      });
+      if (!result.ok) {
+        status(`dicom-request failed: ${result.detail}`, true);
+      }
+      // Volume arrives via inbound dicom-send handler.
+      return;
+    }
     status(
-      "Cast ImagingStudy-open: unsupported context (need scene JSON, idc CRDC prefix URLs, or volume files)",
+      "ImagingStudy-open: unsupported context (need scene JSON, idc CRDC prefix URLs, volume files, or local-dicom)",
       true,
     );
   };
 
-  setIraImagingStudyOpenHandler((ctx) => {
+  setIraImagingStudyOpenHandler((ctx, meta) => {
     status("Opening study…");
     openApplyChain = openApplyChain
-      .then(() => applyImagingStudyOpen(ctx))
+      .then(() => applyImagingStudyOpen(ctx, meta))
       .catch((err) => {
         console.error("[ira] ImagingStudy-open apply failed", err);
         status("error: " + ((err as Error)?.message ?? err), true);
@@ -433,6 +583,8 @@ async function main() {
     return;
   }
   status("starting…");
+  wireIraVanishingBrushBtn();
+  wireIraSnapshotBtn();
   const gpu = await initDevice();
   const preferred = (navigator as unknown as { gpu: GPU }).gpu.getPreferredCanvasFormat();
   const srgb = (preferred + "-srgb") as GPUTextureFormat;
@@ -458,12 +610,45 @@ async function main() {
     }
     await applyCastNiftiSeg(event);
   });
-  setIraDicomSendHandler(async (event) => {
-    if (!applyCastDicomSeg) {
-      status("dicom-send received but no study is open", true);
+  setIraDicomSendHandler(async (event, meta) => {
+    if (isSlicerIdSubscriberName(meta?.publisherSubscriberName)) {
+      pendingIraInitialLayout = "fourUp";
+    }
+    const fileCount = batchContextFiles(event).length;
+    // Multi-file sends are study pulls (local-dicom); single-file keeps SEG overlay path.
+    const preferVolumeOpen = fileCount > 1 || !applyCastDicomSeg;
+    if (!preferVolumeOpen && applyCastDicomSeg) {
+      await applyCastDicomSeg(event);
       return;
     }
-    await applyCastDicomSeg(event);
+    try {
+      status("Reconstructing DICOM series…");
+      const entry = await pickSeriesEntryFromDicomSend(event);
+      if (!entry) {
+        if (applyCastDicomSeg) {
+          await applyCastDicomSeg(event);
+          return;
+        }
+        status("dicom-send: no image series to open", true);
+        return;
+      }
+      const vol = loadEntry(entry);
+      const localVolume = iraVolumeFromLocalVolume(vol);
+      const modality = String(entry.modality || localVolume.modality || "CT").trim();
+      const desc = String(entry.description || vol.name || "").trim();
+      const patient = String(entry.patientName || "").trim() || "Local";
+      const label = [patient, modality, desc || `${entry.count} images`]
+        .filter(Boolean)
+        .join(" · ");
+      const loadStudy = await loadStudyWhenReady;
+      await loadStudy({ localVolume, label, anonymized: false });
+      const info = document.getElementById("info");
+      if (info) info.textContent = label;
+      status(`Opened ${label}`);
+    } catch (err) {
+      console.error("[ira] dicom-send volume open failed", err);
+      status("error: " + ((err as Error)?.message ?? err), true);
+    }
   });
 
   const clearViewportDisplay = () => {
@@ -514,6 +699,7 @@ async function main() {
   const showEmptyChrome = () => {
     const bar = document.getElementById("ira-bar");
     if (bar) ensureIraToolbarShell(bar);
+    ensureLoadStudyToolbarButton(() => openLoadLocalStudyDialog());
     if (emptyCleanup) {
       clearViewportDisplay();
       status("No study loaded");
@@ -1145,6 +1331,16 @@ async function mountStudyFromSource(
     }
   };
 
+  // Declared before drawSlice — refreshSegLabelTranslations/drawAll can run early in mount.
+  const updateReadout = (p: Plane) => {
+    const el = document.getElementById("sr-" + p);
+    if (!el) return;
+    const [lo, hi] = sliceIx.bounds(p);
+    const sp = sliceIx.spacing(p);
+    const mm = offset01ToMm(p, off[p], sc.rasLo, sc.rasHi);
+    el.textContent = `${Math.round((mm - lo) / sp + 0.5)}/${Math.round((hi - lo) / sp)} · ${mm.toFixed(1)} mm`;
+  };
+
   const drawSlice = (p: Plane) => {
     if (studyDisposed) return;
     ira?.drawOverlay(p);
@@ -1700,14 +1896,6 @@ async function mountStudyFromSource(
     applyIdcFocusZ(pendingIdcFocusZ);
     pendingIdcFocusZ = null;
   }
-  const updateReadout = (p: Plane) => {
-    const el = document.getElementById("sr-" + p);
-    if (!el) return;
-    const [lo, hi] = sliceIx.bounds(p);
-    const sp = sliceIx.spacing(p);
-    const mm = offset01ToMm(p, off[p], sc.rasLo, sc.rasHi);
-    el.textContent = `${Math.round((mm - lo) / sp + 0.5)}/${Math.round((hi - lo) / sp)} · ${mm.toFixed(1)} mm`;
-  };
 
   // Size canvases and paint immediately so progressive slabs are visible (don't wait for full chrome).
   {
@@ -1820,6 +2008,8 @@ async function mountStudyFromSource(
     }
     : undefined;
 
+  const initialLayout = pendingIraInitialLayout;
+  pendingIraInitialLayout = undefined;
   ira = mountIra({
     overlay: document.getElementById("viewer")!,
     bar: document.getElementById("ira-bar")!,
@@ -1843,6 +2033,7 @@ async function mountStudyFromSource(
       drawAll();
       syncLiveScene();
     },
+    initialLayout,
     onLayoutChange: (l: IraLayout) => setDentalObliqueVisible(l === "dental"),
     readViewportRgba: async (plane) => {
       const canvas = cv[plane];
@@ -1897,6 +2088,7 @@ async function mountStudyFromSource(
       displayToWorldAtDepth: (x, y, depth, w, h) =>
         camera.displayToWorldAtDepth(x, y, depth, w, h) as Vec3,
     },
+    onToolChange: (tool) => syncIraVanishingBrushBtn(tool),
     extraTools: [
       {
         id: "idc-share",
@@ -1934,8 +2126,17 @@ async function mountStudyFromSource(
           })();
         },
       },
+      {
+        id: "load-local",
+        icon: "loadStudy",
+        title: "Load study — open a local DICOM folder or ZIP",
+        run: () => openLoadLocalStudyDialog(),
+      },
     ],
   });
+  vanishingBrushIra = ira;
+  syncIraVanishingBrushBtn(ira.tool());
+  syncIraSnapshotBtn(true);
   setIraPngFullSizeCaptureHandler(() => ira?.capturePngFullSize() ?? null);
   (globalThis as Record<string, unknown>).__iraDbg = {
     ready: () => !!ira,
@@ -2372,6 +2573,11 @@ async function mountStudyFromSource(
         dispose: () => {
           studyDisposed = true;
           vanishingStore.clear();
+          if (vanishingBrushIra === ira) {
+            vanishingBrushIra = null;
+            syncIraVanishingBrushBtn(null);
+            syncIraSnapshotBtn(false);
+          }
           setIraSegCatalog(EMPTY_SEG_CATALOG);
           labelsOn = false;
           try {
@@ -2409,6 +2615,11 @@ async function mountStudyFromSource(
           dispose: () => {
             studyDisposed = true;
             vanishingStore.clear();
+            if (vanishingBrushIra === ira) {
+              vanishingBrushIra = null;
+              syncIraVanishingBrushBtn(null);
+              syncIraSnapshotBtn(false);
+            }
             setIraSegCatalog(EMPTY_SEG_CATALOG);
             labelsOn = false;
             try {
@@ -2459,6 +2670,11 @@ async function mountStudyFromSource(
       vanishingStore.clear();
       dentalLayout = false;
       obliqueIn3D = null;
+      if (vanishingBrushIra === ira) {
+        vanishingBrushIra = null;
+        syncIraVanishingBrushBtn(null);
+        syncIraSnapshotBtn(false);
+      }
       try {
         sc.setExtraFields([]);
       } catch {

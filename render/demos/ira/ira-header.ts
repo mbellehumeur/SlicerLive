@@ -175,7 +175,7 @@ function setLocalStudySelection(pick: LocalStudyPick | null): void {
   setLoadLocalStatus("", false);
 }
 
-function openLoadLocalStudyDialog(): void {
+export function openLoadLocalStudyDialog(): void {
   const modal = document.getElementById("iraLoadLocalModal");
   const anon = document.getElementById(
     "iraLoadLocalAnonymize"
@@ -288,13 +288,6 @@ function installLoadLocalStudyUi(): void {
   const zipInput = document.getElementById(
     "iraLoadLocalZipInput"
   ) as HTMLInputElement | null;
-
-  document
-    .getElementById("iraLoadLocalStudyBtn")
-    ?.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      openLoadLocalStudyDialog();
-    });
 
   document
     .getElementById("iraLoadLocalCancelBtn")

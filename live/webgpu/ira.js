@@ -10889,11 +10889,27 @@ function displayClass() {
   return "desktop";
 }
 function ensureIraStyle() {
-  if (document.getElementById("ira-style")) return;
-  const st2 = document.createElement("style");
-  st2.id = "ira-style";
+  let st2 = document.getElementById("ira-style");
+  if (!st2) {
+    st2 = document.createElement("style");
+    st2.id = "ira-style";
+    document.head.appendChild(st2);
+  }
   st2.textContent = STYLE;
-  document.head.appendChild(st2);
+}
+function syncIraBarChromeDock(tb) {
+  const bar = document.getElementById("ira-bar");
+  const chrome = document.getElementById("ira-bar-chrome");
+  const slot = document.getElementById("ira-toolbar-chrome");
+  if (!bar || !chrome || !slot) return;
+  const collapsed = tb.classList.contains("collapsed");
+  if (collapsed) {
+    if (chrome.parentElement !== slot) slot.appendChild(chrome);
+    bar.classList.add("is-chrome-docked");
+  } else {
+    if (chrome.parentElement !== bar) bar.appendChild(chrome);
+    bar.classList.remove("is-chrome-docked");
+  }
 }
 function syncIraToolbarToggle(tb, toggleBtn) {
   const collapsed = tb.classList.contains("collapsed");
@@ -10901,11 +10917,26 @@ function syncIraToolbarToggle(tb, toggleBtn) {
   toggleBtn.title = collapsed ? "Show tools" : "Hide tools";
   toggleBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
   toggleBtn.setAttribute("aria-label", collapsed ? "Show tools" : "Hide tools");
+  syncIraBarChromeDock(tb);
 }
 function ensureIraToolbarShell(bar) {
   ensureIraStyle();
   let tb = document.getElementById("ira-toolbar");
-  if (tb) return tb;
+  if (tb) {
+    if (!document.getElementById("ira-toolbar-chrome")) {
+      const slot = document.createElement("div");
+      slot.id = "ira-toolbar-chrome";
+      const body = document.getElementById("ira-toolbar-body");
+      const toggleEl = document.getElementById("ira-toolbar-toggle");
+      if (toggleEl?.nextSibling) tb.insertBefore(slot, toggleEl.nextSibling);
+      else if (body) tb.insertBefore(slot, body);
+      else tb.append(slot);
+    }
+    const toggle = document.getElementById("ira-toolbar-toggle");
+    if (toggle) syncIraToolbarToggle(tb, toggle);
+    else syncIraBarChromeDock(tb);
+    return tb;
+  }
   tb = document.createElement("div");
   tb.id = "ira-toolbar";
   tb.classList.add("collapsed");
@@ -10915,15 +10946,17 @@ function ensureIraToolbarShell(bar) {
   toggleBtn.type = "button";
   toggleBtn.setAttribute("aria-expanded", "false");
   toggleBtn.setAttribute("aria-controls", "ira-toolbar-body");
-  syncIraToolbarToggle(tb, toggleBtn);
   toggleBtn.addEventListener("click", () => {
     tb.classList.toggle("collapsed");
     syncIraToolbarToggle(tb, toggleBtn);
     globalThis.dispatchEvent(new Event("resize"));
   });
+  const tbChrome = document.createElement("div");
+  tbChrome.id = "ira-toolbar-chrome";
   const tbBody = document.createElement("div");
   tbBody.id = "ira-toolbar-body";
-  tb.append(toggleBtn, tbBody);
+  tb.append(toggleBtn, tbChrome, tbBody);
+  syncIraToolbarToggle(tb, toggleBtn);
   return tb;
 }
 function resetIraToolbarShell() {
@@ -10935,6 +10968,22 @@ function resetIraToolbarShell() {
     tb.classList.add("collapsed");
     if (toggle) syncIraToolbarToggle(tb, toggle);
   }
+}
+function ensureLoadStudyToolbarButton(onClick) {
+  ensureIraStyle();
+  const body = document.getElementById("ira-toolbar-body");
+  if (!body) return;
+  let b = document.getElementById("ira-load-local");
+  if (!b) {
+    b = document.createElement("button");
+    b.id = "ira-load-local";
+    b.type = "button";
+    b.innerHTML = ICONS.loadStudy ?? "?";
+    b.title = "Load study \u2014 open a local DICOM folder or ZIP";
+    b.setAttribute("aria-label", "Load study");
+    body.appendChild(b);
+  }
+  b.onclick = () => onClick();
 }
 var I = (body) => `<svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 var ICONS = {
@@ -11032,23 +11081,31 @@ var ICONS = {
   stl: I(
     `<path d="M7 9l5-3 5 3v6l-5 3-5-3z"/><path d="M7 9l5 3 5-3M12 12v6"/><path d="M18 3v4m0 0l-2-2m2 2l2-2"/>`
   ),
+  // Local folder/ZIP study load
+  loadStudy: I(
+    `<path d="M3 7h6l2-2h10v14H3z"/><path d="M12 11v6m0 0l-2.5-2.5M12 17l2.5-2.5"/>`
+  ),
   toolsCollapse: I(`<path d="M6 14l6-6 6 6"/>`),
   toolsExpand: I(`<path d="M6 10l6 6 6-6"/>`)
 };
 var STYLE = `
-#ira-toolbar { display:flex; align-items:flex-start; gap:4px; padding:3px 8px; background:#0b0e16;
+#ira-toolbar { display:flex; align-items:center; gap:4px; padding:3px 8px; background:#0b0e16;
   border-bottom:1px solid #1b2740; }
 #ira-toolbar.collapsed { padding:2px 8px; }
 #ira-toolbar-toggle { flex:0 0 auto; }
+#ira-toolbar-chrome { display:none; flex:1 1 auto; min-width:0; align-items:center; }
+#ira-toolbar.collapsed #ira-toolbar-chrome { display:flex; }
 #ira-toolbar-body { display:flex; align-items:center; gap:2px; flex-wrap:wrap; flex:1 1 auto; min-width:0; }
 #ira-toolbar.collapsed #ira-toolbar-body { display:none; }
 #ira-toolbar .sep { width:1px; height:28px; background:#1b2740; margin:0 6px; }
-#ira-toolbar button { display:inline-flex; align-items:center; justify-content:center;
+#ira-toolbar-toggle,
+#ira-toolbar-body button { display:inline-flex; align-items:center; justify-content:center;
   width:38px; height:36px; color:#9fb3d0; background:none; border:1px solid transparent;
   border-radius:5px; cursor:pointer; padding:0; }
-#ira-toolbar button:hover { background:#1b2740; color:#d6e2f2; }
-#ira-toolbar button.active { background:#2b6cb0; color:#fff; border-color:#33507e; }
-#ira-toolbar button:disabled { opacity:.3; cursor:default; background:none; }
+#ira-toolbar-toggle:hover,
+#ira-toolbar-body button:hover { background:#1b2740; color:#d6e2f2; }
+#ira-toolbar-body button.active { background:#2b6cb0; color:#fff; border-color:#33507e; }
+#ira-toolbar-body button:disabled { opacity:.3; cursor:default; background:none; }
 #ira-cine-box { display:flex; align-items:center; gap:2px; margin-left:4px; padding:2px 6px;
   background:#11141d; border:1px solid #33507e; border-radius:5px; }
 #ira-cine-box input { width:44px; font:600 11px -apple-system,system-ui,sans-serif; color:#d6e2f2;
@@ -14604,7 +14661,7 @@ function An(e = {}) {
   };
 }
 function fe(e, t) {
-  e instanceof HTMLElement && (typeof t.hidden == "boolean" && (e.hidden = t.hidden), typeof t.disabled == "boolean" && "disabled" in e && (e.disabled = t.disabled, t.disabled || e.removeAttribute("disabled")), typeof t.label == "string" && (e.textContent = t.label), typeof t.title == "string" && (e.title = t.title), typeof t.ariaLabel == "string" && e.setAttribute("aria-label", t.ariaLabel));
+  e instanceof HTMLElement && (typeof t.hidden == "boolean" && (e.hidden = t.hidden), typeof t.disabled == "boolean" && "disabled" in e && (e.disabled = t.disabled, t.disabled || e.removeAttribute("disabled")), typeof t.label == "string" && !e.querySelector("svg") && (e.textContent = t.label), typeof t.title == "string" && (e.title = t.title), typeof t.ariaLabel == "string" && e.setAttribute("aria-label", t.ariaLabel));
 }
 function ci(e = {}) {
   const t = An({
@@ -19882,6 +19939,9 @@ var STUDY_URL_KEYS = [
   "seriesUID",
   "requestType"
 ];
+function isSlicerIdSubscriberName(subscriberName2) {
+  return String(subscriberName2 || "").trim().toUpperCase().startsWith("3DSLICER");
+}
 var client = null;
 var topic = "";
 var subscriberName = "";
@@ -20298,6 +20358,49 @@ async function publishIraImagingStudyTransition(nextContext) {
   }
   return { closed, opened };
 }
+async function requestIraHubDicom(opts) {
+  if (!client || connection !== "connected") {
+    return { ok: false, detail: "Not connected to Hub" };
+  }
+  const studyInstanceUID = String(opts.studyInstanceUID || "").trim();
+  if (!studyInstanceUID) {
+    return { ok: false, detail: "No studyInstanceUID" };
+  }
+  const seriesInstanceUID = String(opts.seriesInstanceUID || "").trim();
+  const subscriber = subscriberName || client.getSessionConfig?.()?.subscriberName?.trim() || "";
+  if (!subscriber) {
+    return { ok: false, detail: "No subscriber name" };
+  }
+  const requestTopic = topic || String(client.getSessionConfig?.()?.topic || "").trim();
+  try {
+    const result = await client.request({
+      "subscriber.name": subscriber,
+      "subscriber.product.name": "SLICERLIVE-IRA",
+      "subscriber.actor": ID_ACTOR,
+      "target.actor": ID_ACTOR,
+      event: {
+        "hub.event": Ue("DICOM"),
+        ...requestTopic ? { "hub.topic": requestTopic } : {},
+        context: {
+          dataType: "DICOM",
+          studyInstanceUID,
+          ...seriesInstanceUID ? { seriesInstanceUID } : {}
+        }
+      }
+    });
+    const ok = Boolean(result && result.ok);
+    return {
+      ok,
+      detail: ok ? "dicom-request sent" : `HTTP ${result?.status ?? "?"}`,
+      response: result
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err)
+    };
+  }
+}
 function getIraCastClient() {
   return client;
 }
@@ -20363,6 +20466,80 @@ async function publishIraSceneUpdate(ops) {
 var onPngCapture = null;
 function setIraPngFullSizeCaptureHandler(fn2) {
   onPngCapture = fn2;
+}
+function base64ToUint8Array(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function publishIraPngSend() {
+  if (!client || connection !== "connected") {
+    return { ok: false, detail: "Not connected" };
+  }
+  if (!topic) return { ok: false, detail: "No hub topic" };
+  if (!onPngCapture) return { ok: false, detail: "No study mounted" };
+  let payload = null;
+  try {
+    payload = await onPngCapture() ?? null;
+  } catch (err) {
+    console.error(`${LOG} png-send capture failed`, err);
+    return {
+      ok: false,
+      detail: `Capture failed: ${err?.message ?? err}`
+    };
+  }
+  if (!payload?.data) {
+    return { ok: false, detail: "No capture available" };
+  }
+  const bytes = base64ToUint8Array(String(payload.data));
+  const messageId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `png-${Date.now().toString(36)}`;
+  const session = client.getSessionConfig?.() ?? {};
+  const fromSubscriber = subscriberName || String(session.subscriberName || "").trim();
+  const fromUserName = userName || String(session.userName || "").trim();
+  try {
+    const res = await client.publish({
+      event: {
+        "hub.topic": topic,
+        "hub.event": "png-send",
+        context: {
+          files: [
+            {
+              data: bytes,
+              fileName: "snapshot.png",
+              mimeType: payload.contentType || "image/png",
+              byteLength: bytes.byteLength
+            }
+          ],
+          width: payload.width,
+          height: payload.height,
+          fromSubscriber,
+          fromUserName,
+          sentAt: (/* @__PURE__ */ new Date()).toISOString(),
+          messageId
+        }
+      },
+      actor: ID_ACTOR,
+      "target.actor": "*",
+      "target.product.name": "*"
+    });
+    const ok = Boolean(res?.ok);
+    if (!ok) {
+      console.warn(
+        `${LOG} png-send failed`,
+        res ? `HTTP ${res.status}` : "No response"
+      );
+      return { ok: false, detail: "Publish failed" };
+    }
+    console.info(`${LOG} published png-send bytes=`, bytes.byteLength);
+    return { ok: true };
+  } catch (err) {
+    console.error(`${LOG} png-send exception`, err);
+    return {
+      ok: false,
+      detail: `Publish failed: ${err?.message ?? err}`
+    };
+  }
 }
 function handleSceneUpdateMessage(message) {
   const event = message?.event;
@@ -20769,7 +20946,14 @@ async function handleResolvedFileSend(message, kind, handler) {
       `${LOG} ${kind}: ${withData.length} file(s) ready`,
       withData.map((f) => f.fileName || "?")
     );
-    await handler(event);
+    const publisherSubscriberName = xi(message) || String(message["subscriber.name"] || "").trim() || void 0;
+    if (kind === "dicom-send") {
+      await handler(event, {
+        publisherSubscriberName
+      });
+    } else {
+      await handler(event);
+    }
   } catch (err) {
     console.error(`${LOG} ${kind} handler failed`, err);
   }
@@ -20921,12 +21105,18 @@ async function resolveAndApplyImagingStudyOpen(message) {
     }
     if (rejectCrDxImagingStudyOpen(items, "websocket")) return;
     lastImagingStudyOpenContext = Li(items);
+    const publisherSubscriberName = xi(message) || String(message["subscriber.name"] || "").trim() || void 0;
     console.info(
       `${LOG} ImagingStudy-open context items=`,
       items.length,
-      sceneDoc ? "(LiveScene)" : ""
+      sceneDoc ? "(LiveScene)" : "",
+      publisherSubscriberName ? `publisher=${publisherSubscriberName}` : ""
     );
-    await Promise.resolve(onImagingStudyOpen?.(lastImagingStudyOpenContext));
+    await Promise.resolve(
+      onImagingStudyOpen?.(lastImagingStudyOpenContext, {
+        publisherSubscriberName
+      })
+    );
   } catch (err) {
     console.error(`${LOG} ImagingStudy-open resolve/apply failed`, err);
   }
@@ -25396,10 +25586,6 @@ function installLoadLocalStudyUi() {
   const zipInput = document.getElementById(
     "iraLoadLocalZipInput"
   );
-  document.getElementById("iraLoadLocalStudyBtn")?.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    openLoadLocalStudyDialog();
-  });
   document.getElementById("iraLoadLocalCancelBtn")?.addEventListener("click", () => closeLoadLocalStudyDialog());
   document.getElementById("iraLoadLocalFolderBtn")?.addEventListener("click", async () => {
     const picker = globalThis.showDirectoryPicker;
@@ -25845,6 +26031,89 @@ function studyParamsFromIdcSource(source) {
 }
 
 // render/demos/ira/ira-browser.ts
+var vanishingBrushIra = null;
+function syncIraVanishingBrushBtn(tool) {
+  const btn = document.getElementById("iraVanishingBrushBtn");
+  if (!btn) return;
+  if (tool === null) {
+    btn.disabled = true;
+    btn.classList.remove("is-active");
+    btn.setAttribute("aria-pressed", "false");
+    return;
+  }
+  btn.disabled = false;
+  const active = tool === "marker";
+  btn.classList.toggle("is-active", active);
+  btn.setAttribute("aria-pressed", active ? "true" : "false");
+}
+function wireIraVanishingBrushBtn() {
+  const btn = document.getElementById("iraVanishingBrushBtn");
+  if (!btn || btn.dataset.wired === "1") return;
+  btn.dataset.wired = "1";
+  btn.addEventListener("click", () => {
+    if (!vanishingBrushIra) return;
+    vanishingBrushIra.setTool(vanishingBrushIra.tool() === "marker" ? "scroll" : "marker");
+  });
+}
+function syncIraSnapshotBtn(enabled) {
+  const btn = document.getElementById("iraSnapshotBtn");
+  if (!btn) return;
+  btn.disabled = !enabled;
+}
+function wireIraSnapshotBtn() {
+  const btn = document.getElementById("iraSnapshotBtn");
+  if (!btn || btn.dataset.wired === "1") return;
+  btn.dataset.wired = "1";
+  btn.addEventListener("click", () => {
+    void (async () => {
+      const result = await publishIraPngSend();
+      if (result.ok) {
+        status("Snapshot sent");
+      } else {
+        status(result.detail || "Snapshot send failed", true);
+      }
+    })();
+  });
+}
+var pendingIraInitialLayout;
+function dicomSendFileBytes(entry) {
+  const data = entry.data;
+  if (data instanceof ArrayBuffer) return data;
+  if (data instanceof Uint8Array) {
+    return data.byteOffset === 0 && data.byteLength === data.buffer.byteLength ? data.buffer : data.slice().buffer;
+  }
+  if (typeof data === "string" && data) {
+    try {
+      const bin = atob(data.includes(",") ? data.split(",").pop() : data);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out.buffer;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+async function pickSeriesEntryFromDicomSend(event) {
+  const files = Mn(event);
+  const fileObjs = [];
+  for (const [i, entry] of files.entries()) {
+    const buf = dicomSendFileBytes(entry);
+    if (!buf) continue;
+    const name = typeof entry.fileName === "string" && entry.fileName.trim() || `dicom-send-${i + 1}.dcm`;
+    fileObjs.push(new File([buf], name, { type: "application/dicom" }));
+  }
+  if (!fileObjs.length) return null;
+  const entries = await indexFiles(fileObjs);
+  if (!entries.length) return null;
+  const imageEntries = entries.filter((e) => {
+    const mod = String(e.modality || "").toUpperCase();
+    return mod !== "SEG" && mod !== "SR" && mod !== "PR";
+  });
+  const candidates = imageEntries.length ? imageEntries : entries;
+  candidates.sort((a, b) => b.count - a.count);
+  return candidates[0] || null;
+}
 var P2 = new URLSearchParams(location.search);
 var applyCastNiftiSeg = null;
 var applyCastDicomSeg = null;
@@ -26005,7 +26274,10 @@ async function main() {
     resolveLoadStudy = resolve;
   });
   let openApplyChain = Promise.resolve();
-  const applyImagingStudyOpen = async (ctx) => {
+  const applyImagingStudyOpen = async (ctx, meta) => {
+    if (isSlicerIdSubscriberName(meta?.publisherSubscriberName)) {
+      pendingIraInitialLayout = "fourUp";
+    }
     const loadStudy2 = await loadStudyWhenReady;
     const sceneDoc = sceneDocFromOpenContext(ctx);
     if (sceneDoc) {
@@ -26049,14 +26321,31 @@ async function main() {
       if (info) info.textContent = label;
       return;
     }
+    const plan = Ei(ctx);
+    if (plan?.mode === "local-dicom") {
+      const studyInstanceUID = String(plan.studyInstanceUID || "").trim();
+      if (!studyInstanceUID) {
+        status("local-dicom open missing studyInstanceUID", true);
+        return;
+      }
+      status("Requesting DICOM from Image Display\u2026");
+      const result = await requestIraHubDicom({
+        studyInstanceUID,
+        seriesInstanceUID: plan.seriesInstanceUID
+      });
+      if (!result.ok) {
+        status(`dicom-request failed: ${result.detail}`, true);
+      }
+      return;
+    }
     status(
-      "Cast ImagingStudy-open: unsupported context (need scene JSON, idc CRDC prefix URLs, or volume files)",
+      "ImagingStudy-open: unsupported context (need scene JSON, idc CRDC prefix URLs, volume files, or local-dicom)",
       true
     );
   };
-  setIraImagingStudyOpenHandler((ctx) => {
+  setIraImagingStudyOpenHandler((ctx, meta) => {
     status("Opening study\u2026");
-    openApplyChain = openApplyChain.then(() => applyImagingStudyOpen(ctx)).catch((err) => {
+    openApplyChain = openApplyChain.then(() => applyImagingStudyOpen(ctx, meta)).catch((err) => {
       console.error("[ira] ImagingStudy-open apply failed", err);
       status("error: " + (err?.message ?? err), true);
     });
@@ -26077,6 +26366,8 @@ async function main() {
     return;
   }
   status("starting\u2026");
+  wireIraVanishingBrushBtn();
+  wireIraSnapshotBtn();
   const gpu = await initDevice();
   const preferred = navigator.gpu.getPreferredCanvasFormat();
   const srgb = preferred + "-srgb";
@@ -26098,12 +26389,42 @@ async function main() {
     }
     await applyCastNiftiSeg(event);
   });
-  setIraDicomSendHandler(async (event) => {
-    if (!applyCastDicomSeg) {
-      status("dicom-send received but no study is open", true);
+  setIraDicomSendHandler(async (event, meta) => {
+    if (isSlicerIdSubscriberName(meta?.publisherSubscriberName)) {
+      pendingIraInitialLayout = "fourUp";
+    }
+    const fileCount = Mn(event).length;
+    const preferVolumeOpen = fileCount > 1 || !applyCastDicomSeg;
+    if (!preferVolumeOpen && applyCastDicomSeg) {
+      await applyCastDicomSeg(event);
       return;
     }
-    await applyCastDicomSeg(event);
+    try {
+      status("Reconstructing DICOM series\u2026");
+      const entry = await pickSeriesEntryFromDicomSend(event);
+      if (!entry) {
+        if (applyCastDicomSeg) {
+          await applyCastDicomSeg(event);
+          return;
+        }
+        status("dicom-send: no image series to open", true);
+        return;
+      }
+      const vol = loadEntry(entry);
+      const localVolume = iraVolumeFromLocalVolume(vol);
+      const modality = String(entry.modality || localVolume.modality || "CT").trim();
+      const desc = String(entry.description || vol.name || "").trim();
+      const patient = String(entry.patientName || "").trim() || "Local";
+      const label = [patient, modality, desc || `${entry.count} images`].filter(Boolean).join(" \xB7 ");
+      const loadStudy2 = await loadStudyWhenReady;
+      await loadStudy2({ localVolume, label, anonymized: false });
+      const info = document.getElementById("info");
+      if (info) info.textContent = label;
+      status(`Opened ${label}`);
+    } catch (err) {
+      console.error("[ira] dicom-send volume open failed", err);
+      status("error: " + (err?.message ?? err), true);
+    }
   });
   const clearViewportDisplay = () => {
     for (const el3 of document.querySelectorAll(
@@ -26150,6 +26471,7 @@ async function main() {
   const showEmptyChrome = () => {
     const bar = document.getElementById("ira-bar");
     if (bar) ensureIraToolbarShell(bar);
+    ensureLoadStudyToolbarButton(() => openLoadLocalStudyDialog());
     if (emptyCleanup) {
       clearViewportDisplay();
       status("No study loaded");
@@ -26696,6 +27018,14 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       sc.setExtraFields([ensureObliqueIn3D()]);
     }
   };
+  const updateReadout = (p) => {
+    const el3 = document.getElementById("sr-" + p);
+    if (!el3) return;
+    const [lo2, hi2] = sliceIx.bounds(p);
+    const sp = sliceIx.spacing(p);
+    const mm = offset01ToMm(p, off[p], sc.rasLo, sc.rasHi);
+    el3.textContent = `${Math.round((mm - lo2) / sp + 0.5)}/${Math.round((hi2 - lo2) / sp)} \xB7 ${mm.toFixed(1)} mm`;
+  };
   const drawSlice = (p) => {
     if (studyDisposed) return;
     ira?.drawOverlay(p);
@@ -27207,14 +27537,6 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
     applyIdcFocusZ(pendingIdcFocusZ);
     pendingIdcFocusZ = null;
   }
-  const updateReadout = (p) => {
-    const el3 = document.getElementById("sr-" + p);
-    if (!el3) return;
-    const [lo2, hi2] = sliceIx.bounds(p);
-    const sp = sliceIx.spacing(p);
-    const mm = offset01ToMm(p, off[p], sc.rasLo, sc.rasHi);
-    el3.textContent = `${Math.round((mm - lo2) / sp + 0.5)}/${Math.round((hi2 - lo2) / sp)} \xB7 ${mm.toFixed(1)} mm`;
-  };
   {
     const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
     for (const n of names) {
@@ -27311,6 +27633,8 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       seriesDescription: r.SeriesDescription ? String(r.SeriesDescription) : void 0
     }));
   } : void 0;
+  const initialLayout = pendingIraInitialLayout;
+  pendingIraInitialLayout = void 0;
   ira = mountIra({
     overlay: document.getElementById("viewer"),
     bar: document.getElementById("ira-bar"),
@@ -27334,6 +27658,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       drawAll();
       syncLiveScene();
     },
+    initialLayout,
     onLayoutChange: (l) => setDentalObliqueVisible(l === "dental"),
     readViewportRgba: async (plane) => {
       const canvas = cv[plane];
@@ -27386,6 +27711,7 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       worldToDisplay: (ras, w, h) => camera.worldToDisplay(ras, w, h),
       displayToWorldAtDepth: (x, y2, depth, w, h) => camera.displayToWorldAtDepth(x, y2, depth, w, h)
     },
+    onToolChange: (tool) => syncIraVanishingBrushBtn(tool),
     extraTools: [
       {
         id: "idc-share",
@@ -27422,9 +27748,18 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
             }
           })();
         }
+      },
+      {
+        id: "load-local",
+        icon: "loadStudy",
+        title: "Load study \u2014 open a local DICOM folder or ZIP",
+        run: () => openLoadLocalStudyDialog()
       }
     ]
   });
+  vanishingBrushIra = ira;
+  syncIraVanishingBrushBtn(ira.tool());
+  syncIraSnapshotBtn(true);
   setIraPngFullSizeCaptureHandler(() => ira?.capturePngFullSize() ?? null);
   globalThis.__iraDbg = {
     ready: () => !!ira,
@@ -27826,6 +28161,11 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
         dispose: () => {
           studyDisposed = true;
           vanishingStore.clear();
+          if (vanishingBrushIra === ira) {
+            vanishingBrushIra = null;
+            syncIraVanishingBrushBtn(null);
+            syncIraSnapshotBtn(false);
+          }
           setIraSegCatalog(EMPTY_SEG_CATALOG);
           labelsOn = false;
           try {
@@ -27859,6 +28199,11 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
           dispose: () => {
             studyDisposed = true;
             vanishingStore.clear();
+            if (vanishingBrushIra === ira) {
+              vanishingBrushIra = null;
+              syncIraVanishingBrushBtn(null);
+              syncIraSnapshotBtn(false);
+            }
             setIraSegCatalog(EMPTY_SEG_CATALOG);
             labelsOn = false;
             try {
@@ -27903,6 +28248,11 @@ async function mountStudyFromSource(input, gpu, preferred, srgb, names, cv, cx, 
       vanishingStore.clear();
       dentalLayout = false;
       obliqueIn3D = null;
+      if (vanishingBrushIra === ira) {
+        vanishingBrushIra = null;
+        syncIraVanishingBrushBtn(null);
+        syncIraSnapshotBtn(false);
+      }
       try {
         sc.setExtraFields([]);
       } catch {
