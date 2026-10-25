@@ -25,18 +25,19 @@ import {
   type AppLocale,
 } from "../../../../i18n/index.ts";
 import {
-  applyIraCastRadioVisual,
-  getIraCastSessionInfo,
+  applyIraHubRadioVisual,
+  getIraHubSessionInfo,
   getIraLiveScene,
   openIraReportingClient,
   openIraWorklistClient,
+  rebindIraUserName,
   refreshIraSegLabelsForLocale,
   requestIraStatusFromHostWorklist,
-  setIraCastStatusListener,
+  setIraHubStatusListener,
   setIraConferenceFollowHost,
   setIraConferenceHubHandler,
   setIraConferenceView,
-} from "./ira-cast.ts";
+} from "./ira-hub.ts";
 import { openChromeHelp } from "../sl-chrome.ts";
 import {
   closeMedicalInferenceDialog,
@@ -97,7 +98,7 @@ function applyTheme(theme: string): void {
 }
 
 function fillSessionDl(dl: HTMLElement): void {
-  const info = getIraCastSessionInfo();
+  const info = getIraHubSessionInfo();
   const rows: Array<[string, string]> = [
     ["Hub", info.hubEndpoint || "—"],
     ["Subscriber", info.subscriberName || "—"],
@@ -410,7 +411,7 @@ function installLoadLocalStudyUi(): void {
 }
 
 async function requestIraConferenceTakeover(): Promise<void> {
-  const info = getIraCastSessionInfo();
+  const info = getIraHubSessionInfo();
   const view = info.conference;
   if (!view || info.connection !== "connected" || !info.topic) return;
   if (view.selfRole === "leading" || info.conferenceFollowHost) return;
@@ -444,7 +445,7 @@ function renderConferenceChips(view: CastConferenceView | null): void {
   if (!(statusControl instanceof HTMLElement)) {
     return;
   }
-  const info = getIraCastSessionInfo();
+  const info = getIraHubSessionInfo();
   renderCastConferencePresence({
     view,
     statusControl,
@@ -456,7 +457,7 @@ function renderConferenceChips(view: CastConferenceView | null): void {
 }
 
 function refreshConferenceHeaderActions(view: CastConferenceView | null): void {
-  const info = getIraCastSessionInfo();
+  const info = getIraHubSessionInfo();
   applyCastConferenceHeaderActions({
     view,
     followHost: Boolean(info.conferenceFollowHost),
@@ -482,8 +483,8 @@ function refreshConferenceHeaderActions(view: CastConferenceView | null): void {
 
 function refreshRadio(): void {
   const statusEl = iraSessionStatusLabel;
-  if (statusEl) applyIraCastRadioVisual(statusEl);
-  const view = getIraCastSessionInfo().conference;
+  if (statusEl) applyIraHubRadioVisual(statusEl);
+  const view = getIraHubSessionInfo().conference;
   renderConferenceChips(view);
   refreshConferenceHeaderActions(view);
 }
@@ -521,7 +522,7 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
       anchorAlign: "end",
       strings: iraConferenceStrings(),
       getSession: () => {
-        const info = getIraCastSessionInfo();
+        const info = getIraHubSessionInfo();
         return {
           hubEndpoint: info.hubEndpoint,
           topic: info.topic,
@@ -536,8 +537,11 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
       onFollowChange: (followHost) => {
         setIraConferenceFollowHost(followHost);
       },
+      onUserNameChange: async (name) => {
+        await rebindIraUserName(name);
+      },
       onSessionControlClick: (btn) => {
-        const info = getIraCastSessionInfo();
+        const info = getIraHubSessionInfo();
         const view = info.conference;
         if (view?.places?.length) {
           openHubConferenceParticipantsPopup({
@@ -561,14 +565,14 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
   }
 
   refreshRadio();
-  setIraCastStatusListener(() => refreshRadio());
+  setIraHubStatusListener(() => refreshRadio());
 
   try {
     inviteController = createHubConferenceInviteController({
       classPrefix: "cast-conference-invite",
       strings: iraConferenceStrings(),
       getSession: () => {
-        const info = getIraCastSessionInfo();
+        const info = getIraHubSessionInfo();
         return {
           hubEndpoint: info.hubEndpoint,
           topic: info.topic,
@@ -655,7 +659,7 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
     .getElementById("iraLeaveConferenceBtn")
     ?.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      const info = getIraCastSessionInfo();
+      const info = getIraHubSessionInfo();
       const view = info.conference;
       if (!view || info.connection !== "connected") return;
       const leaveBtn = document.getElementById(
@@ -692,7 +696,7 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
     .getElementById("iraResumeFollowingBtn")
     ?.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      const info = getIraCastSessionInfo();
+      const info = getIraHubSessionInfo();
       if (!info.conference || info.conferenceFollowHost) return;
       if (info.conference.selfRole === "leading") return;
       setIraConferenceFollowHost(true);

@@ -646,15 +646,15 @@
   .ira-menu-item:disabled:hover { background: transparent; }
   .ira-menu-item[aria-checked='true'] { background: var(--ira-accent); color: #0b1220; }
   .ira-menu-sep { height: 1px; margin: 4px 6px; background: var(--ira-border); }
-  .ira-cast-status {
+  .ira-hub-status {
     display: inline-flex; align-items: center; justify-content: center;
     max-width: 14rem; overflow: hidden; text-overflow: ellipsis;
     font: inherit;
     color: inherit;
   }
-  .ira-cast-connecting { color: #facc15; }
-  .ira-cast-error, .ira-cast-disconnected { color: #f87171; }
-  .ira-cast-pulse { animation: ira-pulse 1.5s ease-in-out infinite; }
+  .ira-hub-connecting { color: #facc15; }
+  .ira-hub-error, .ira-hub-disconnected { color: #f87171; }
+  .ira-hub-pulse { animation: ira-pulse 1.5s ease-in-out infinite; }
   @keyframes ira-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
   .ira-modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center;
@@ -713,14 +713,39 @@
   .cast-conference-section:last-child {
     margin-bottom: 0; padding-bottom: 0; border-bottom: 0;
   }
-  .cast-conference-section-session {
-    flex: 0 0 auto; margin: 0; padding: 10px 14px 14px;
-    border-bottom: 0; border-top: 1px solid var(--ira-border); overflow: visible;
+  .cast-conference-topic-row-self .cast-conference-user-name-btn {
+    flex: 1 1 auto; min-width: 0; min-height: 24px; justify-content: flex-start;
+    padding: 2px 8px; font: 600 12px/1.3 -apple-system, system-ui, sans-serif;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .cast-conference-session-row {
-    display: flex; align-items: center; gap: 8px;
+  .cast-conference-change-user-overlay {
+    position: absolute; inset: 0; z-index: 2; display: flex;
+    align-items: center; justify-content: center; padding: 12px;
+    background: rgba(0, 0, 0, 0.45); border-radius: inherit;
   }
-  .cast-conference-session-close { margin-left: auto; }
+  .cast-conference-change-user-overlay[hidden] { display: none !important; }
+  .cast-conference-change-user-dialog {
+    width: min(100%, 20rem); padding: 14px;
+    border: 1px solid var(--ira-border); border-radius: 6px;
+    background: var(--ira-surface); box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  }
+  .cast-conference-change-user-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin: 0 0 10px;
+  }
+  .cast-conference-change-user-title {
+    margin: 0; font: 700 13px/1.3 -apple-system, system-ui, sans-serif; color: #fff;
+  }
+  .cast-conference-change-user-dialog .cast-conference-field { margin-bottom: 10px; }
+  .cast-conference-change-user-dialog .cast-conference-user-input { width: 100%; }
+  .cast-conference-change-user-actions {
+    display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+  }
+  .cast-conference-change-user-actions .cast-conference-primary,
+  .cast-conference-change-user-actions .cast-conference-open-another-user {
+    width: 100%; margin: 0;
+  }
+  [data-hub-conference-user-note] { margin: 8px 0 0; }
   .cast-conference-lang-wrap { position: relative; flex: 0 0 auto; }
   .cast-conference-lang-btn {
     display: inline-flex; align-items: center; justify-content: center;
@@ -1247,7 +1272,7 @@
       </div>
       <div class="ira-modal-body">
         <p>SlicerLive IRA — IHE Integrated Reporting Applications reader.</p>
-        <p>Joins a Cast hub as Image Display (<code>ID</code>) when opened with <code>topic</code> and <code>id-token</code> from the worklist.</p>
+        <p>Joins a Slicer hub as Image Display (<code>ID</code>) when opened with <code>topic</code> and <code>id-token</code> from the worklist.</p>
       </div>
     </div>
   </div>

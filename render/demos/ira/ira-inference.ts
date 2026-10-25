@@ -10,12 +10,12 @@ import {
 } from "../../../../../SlicerHub-js-clients/packages/client/dist/hub-client.js";
 import { idcS3, s3ListKeys } from "../../vendor/idc_tools/index.js";
 import {
-  getIraCastClient,
-  getIraCastSessionInfo,
+  getIraHubClient,
+  getIraHubSessionInfo,
   getIraImagingStudyOpenContext,
   publishInferenceJob,
   setIraStatusUpdateHandler,
-} from "./ira-cast.ts";
+} from "./ira-hub.ts";
 import {
   TOTAL_SEG_GROUP_LABELS,
   defaultTaskId,
@@ -872,7 +872,7 @@ function updateDetail(): void {
           .join("\n")}</pre>`
       : "");
 
-  const info = getIraCastSessionInfo();
+  const info = getIraHubSessionInfo();
   const connected = info.connection === "connected";
   const files = volumeFilesFromOpenStudy();
   const online =
@@ -1028,8 +1028,8 @@ async function ensureFlexrayModelOptions(): Promise<void> {
 }
 
 async function probeAll(): Promise<void> {
-  const info = getIraCastSessionInfo();
-  const client = getIraCastClient();
+  const info = getIraHubSessionInfo();
+  const client = getIraHubClient();
   if (info.connection !== "connected" || !client) {
     for (const row of rows) {
       row.probing = false;

@@ -6,7 +6,7 @@
  */
 import { applyOp, type Op } from "../../liveops.ts";
 import type { MrsonNode } from "../../mrson.ts";
-import type { IraLiveSceneDoc } from "./ira-cast.ts";
+import type { IraLiveSceneDoc } from "./ira-hub.ts";
 
 export const IRA_VOL_NODE_ID = "vol1";
 export const IRA_SEG_NODE_ID = "seg1";

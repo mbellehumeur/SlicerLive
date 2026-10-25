@@ -10,7 +10,7 @@ import type { CTVolume } from "../../vendor/idc_tools/types.js";
 import type { Volume } from "../../../logic/readers/nifti.ts";
 import { readVolume } from "../../../logic/readers/registry.ts";
 import { autoWindowLevel } from "../../../logic/window-level.ts";
-import type { IraLiveSceneDoc } from "./ira-cast.ts";
+import type { IraLiveSceneDoc } from "./ira-hub.ts";
 
 const LIVESCENE_MIME = "application/vnd.slicerlive.scene+json";
 
@@ -492,7 +492,7 @@ async function fetchBytesViaHubProxy(
   return new Uint8Array(await r.arrayBuffer());
 }
 
-/** Fetch remote volume bytes; fall back to Cast hub proxy when CORS blocks direct fetch. */
+/** Fetch remote volume bytes; fall back to Slicer hub proxy when CORS blocks direct fetch. */
 export async function fetchRemoteVolumeBytes(
   url: string,
   hubOrigin?: string

@@ -58,7 +58,7 @@ import {
   type SegCatalog,
 } from "./ira-seg-catalog.ts";
 
-const LOG = "[ira-cast]";
+const LOG = "[ira-hub]";
 
 const HUB_CREDENTIALS = {
   client_id: "client_id_3d_Slicer",
@@ -111,8 +111,8 @@ export function resolveHubConfig(
 const ID_ACTOR = "ID";
 const WORKLIST_ACTOR = "WORKLIST_CLIENT";
 const REPORTING_ACTOR = "REPORTING_CLIENT";
-const SS_TOPIC = "ira.cast.topic";
-const SS_TOKEN = "ira.cast.token";
+const SS_TOPIC = "ira.hub.topic";
+const SS_TOKEN = "ira.hub.token";
 
 /** Query keys that select a study; stripped on close / replaced on open. */
 const STUDY_URL_KEYS = [
@@ -131,14 +131,14 @@ const STUDY_URL_KEYS = [
   "requestType",
 ] as const;
 
-export type IraCastConnection =
+export type IraHubConnection =
   | "idle"
   | "connecting"
   | "connected"
   | "disconnected"
   | "error";
 
-type StatusListener = (connection: IraCastConnection, detail: string) => void;
+type StatusListener = (connection: IraHubConnection, detail: string) => void;
 /** Optional meta for open handlers (publisher identity for layout gates). */
 export type IraOpenPublisherMeta = {
   publisherSubscriberName?: string;
@@ -161,7 +161,7 @@ let client: ReturnType<typeof HubClient.newInstance> | null = null;
 let topic = "";
 let subscriberName = "";
 let userName = "";
-let connection: IraCastConnection = "idle";
+let connection: IraHubConnection = "idle";
 let connectionDetail = "Not connected";
 let conference: CastConferenceView | null = null;
 /** When true, apply inbound ImagingStudy-open / display scene-updates from host. */
@@ -218,7 +218,7 @@ export type IraLiveSceneDoc = {
   [key: string]: unknown;
 };
 
-export function setIraCastStatusListener(fn: StatusListener): void {
+export function setIraHubStatusListener(fn: StatusListener): void {
   onStatus = fn;
 }
 
@@ -300,11 +300,11 @@ export function assignIraLocation(studyParams: Record<string, string> = {}): voi
   syncIraStudyUrl(studyParams);
 }
 
-export function getIraCastSessionInfo(): {
+export function getIraHubSessionInfo(): {
   topic: string;
   subscriberName: string;
   userName: string;
-  connection: IraCastConnection;
+  connection: IraHubConnection;
   connectionDetail: string;
   hubEndpoint: string;
   conference: CastConferenceView | null;
@@ -846,7 +846,7 @@ export async function requestIraHubDicom(opts: {
   }
 }
 
-export function getIraCastClient(): ReturnType<typeof HubClient.newInstance> | null {
+export function getIraHubClient(): ReturnType<typeof HubClient.newInstance> | null {
   return client;
 }
 
@@ -1240,7 +1240,7 @@ function buildStatusResponseData(): {
   return { "context.type": "", context };
 }
 
-function setConnection(next: IraCastConnection, detail: string): void {
+function setConnection(next: IraHubConnection, detail: string): void {
   const wasConnected = connection === "connected";
   connection = next;
   connectionDetail = detail;
@@ -2080,21 +2080,21 @@ function scheduleStatusRequestFromWorklist(delayMs: number): void {
   }, delayMs);
 }
 
-/** Apply connection tone classes + topic label for the Cast status control. */
-export function applyIraCastRadioVisual(statusEl: HTMLElement): void {
+/** Apply connection tone classes + topic label for the hub status control. */
+export function applyIraHubRadioVisual(statusEl: HTMLElement): void {
   const visual = castRadioStatusVisual(connection, {
     conferenceActive: Boolean(conference),
   });
   statusEl.classList.remove(
-    "ira-cast-idle",
-    "ira-cast-connecting",
-    "ira-cast-connected",
-    "ira-cast-disconnected",
-    "ira-cast-error",
-    "ira-cast-pulse"
+    "ira-hub-idle",
+    "ira-hub-connecting",
+    "ira-hub-connected",
+    "ira-hub-disconnected",
+    "ira-hub-error",
+    "ira-hub-pulse"
   );
-  statusEl.classList.add(`ira-cast-${visual.tone}`);
-  statusEl.classList.toggle("ira-cast-pulse", visual.pulse);
+  statusEl.classList.add(`ira-hub-${visual.tone}`);
+  statusEl.classList.toggle("ira-hub-pulse", visual.pulse);
   const label = topic.trim() || "—";
   statusEl.textContent = label;
   const tip = conference?.title
@@ -2109,12 +2109,52 @@ export function applyIraCastRadioVisual(statusEl: HTMLElement): void {
 }
 
 /**
- * Join Cast when worklist deep-link params are present.
+ * Join Slicer hub when worklist deep-link params are present.
  * No-op (idle) when neither topic nor id-token is set.
  */
-export async function connectIraCast(): Promise<void> {
+/**
+ * Change hub user name: unsubscribe old topic, auth/subscribe as the new name.
+ */
+export async function rebindIraUserName(nextUserName: string): Promise<void> {
+  const next = String(nextUserName || "").trim();
+  if (!next) throw new Error("User name is required");
+  if (!client) {
+    userName = next;
+    topic = next;
+    onStatus?.();
+    return;
+  }
+  setConnection("connecting", "Switching user");
+  try {
+    const result = await client.rebindUserName(next);
+    const session = client.getSessionConfig();
+    userName = String(result.user_name || next).trim() || next;
+    topic = String(result.topic || session.topic || next).trim() || next;
+    if (session.subscriberName) subscriberName = session.subscriberName;
+    const hubToken = String(client.getHubConfig?.()?.token || "").trim();
+    if (hubToken) persistCastCredentials(topic, hubToken);
+    if (result.status === 202) {
+      setConnection("connected", "Websocket connected");
+    } else {
+      setConnection(
+        "disconnected",
+        `Subscribe failed (${String(result.status)})`
+      );
+    }
+  } catch (err) {
+    setConnection(
+      "error",
+      err instanceof Error ? err.message : String(err)
+    );
+    throw err;
+  }
+}
+
+export async function connectIraHub(): Promise<void> {
   const params = new URLSearchParams(globalThis.location.search);
-  topic = params.get("topic")?.trim() || "";
+  const urlUserName = params.get("userName")?.trim() || "";
+  topic = params.get("topic")?.trim() || urlUserName || "";
+  userName = urlUserName || topic;
   let urlToken = params.get("id-token")?.trim() || "";
   const followHostParam = params.get("followHost")?.trim().toLowerCase() || "";
   if (followHostParam === "1" || followHostParam === "true") {
@@ -2141,6 +2181,7 @@ export async function connectIraCast(): Promise<void> {
       productVersion: "0.1",
       actors: [ID_ACTOR],
       topic: topic || undefined,
+      userName: userName || undefined,
       events: [
         IMAGINGSTUDY_OPEN,
         IMAGINGSTUDY_CLOSE,
@@ -2201,6 +2242,8 @@ export async function connectIraCast(): Promise<void> {
   });
 
   try {
+    if (userName) client.setUserName(userName);
+    if (topic) client.setTopic(topic);
     if (urlToken) {
       client.setToken(urlToken);
     } else {

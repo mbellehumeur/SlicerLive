@@ -110,8 +110,8 @@ import { CT_VR_PRESETS, presetLUT } from "../../ct-vr-presets.ts";
 import { openVrPresetMenu, type VrPresetItem } from "../vr-preset-menu.ts";
 import type { Vec3 } from "../../mat4.ts";
 import {
-  connectIraCast,
-  getIraCastSessionInfo,
+  connectIraHub,
+  getIraHubSessionInfo,
   getIraLiveScene,
   isIraConferenceHost,
   isSlicerIdSubscriberName,
@@ -133,7 +133,7 @@ import {
   syncIraStudyUrl,
   publishIraImagingStudyTransition,
   type IraOpenPublisherMeta,
-} from "./ira-cast.ts";
+} from "./ira-hub.ts";
 
 /** Consumed once by the next mountIra (Slicer Image Display opens → fourUp). */
 let pendingIraInitialLayout: IraLayout | undefined;
@@ -460,7 +460,7 @@ async function main() {
     input:
       | Source
       | { sceneUrl: string }
-      | { sceneDoc: import("./ira-cast.ts").IraLiveSceneDoc }
+      | { sceneDoc: import("./ira-hub.ts").IraLiveSceneDoc }
       | {
           localVolume: CTVolume;
           label: string;
@@ -506,7 +506,7 @@ async function main() {
     const volumeFile = volumeFileFromOpenContext(ctx);
     if (volumeFile) {
       status("Downloading volume…");
-      const hubEndpoint = getIraCastSessionInfo().hubEndpoint;
+      const hubEndpoint = getIraHubSessionInfo().hubEndpoint;
       let hubOrigin = "http://127.0.0.1:2018";
       try {
         hubOrigin = new URL(hubEndpoint).origin;
@@ -576,7 +576,7 @@ async function main() {
     pendingClose = true;
   });
 
-  void connectIraCast();
+  void connectIraHub();
 
   if (!(navigator as unknown as { gpu?: unknown }).gpu) {
     status("WebGPU not available — try Chrome/Edge 113+ or Safari 18+.", true);
@@ -847,7 +847,7 @@ async function mountStudyFromSource(
   input:
     | Source
     | { sceneUrl: string }
-    | { sceneDoc: import("./ira-cast.ts").IraLiveSceneDoc }
+    | { sceneDoc: import("./ira-hub.ts").IraLiveSceneDoc }
     | {
         localVolume: CTVolume;
         label: string;
@@ -915,7 +915,7 @@ async function mountStudyFromSource(
     status(`loaded local series · ${ct.dims.join("×")}`);
   } else if ("sceneDoc" in input || "sceneUrl" in input) {
     status("loading scene…");
-    let sceneDoc: import("./ira-cast.ts").IraLiveSceneDoc | null = null;
+    let sceneDoc: import("./ira-hub.ts").IraLiveSceneDoc | null = null;
     if ("sceneDoc" in input) {
       sceneDoc = input.sceneDoc;
       setIraLiveScene(sceneDoc);
@@ -1533,7 +1533,7 @@ async function mountStudyFromSource(
           hasNext: Boolean(next),
           applyingRemoteSceneUpdate,
           host: isIraConferenceHost(),
-          role: getIraCastSessionInfo().conference?.selfRole ?? null,
+          role: getIraHubSessionInfo().conference?.selfRole ?? null,
         });
         return;
       }
@@ -2078,7 +2078,7 @@ async function mountStudyFromSource(
       void publishIraSceneUpdate([op as Record<string, unknown>]);
     },
     vanishingAuthor: () => {
-      const info = getIraCastSessionInfo();
+      const info = getIraHubSessionInfo();
       return info.userName || info.subscriberName || undefined;
     },
     vanishing3d: {

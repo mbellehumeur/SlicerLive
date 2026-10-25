@@ -4,7 +4,7 @@
 import {
   getIraImagingStudyOpenContext,
   getIraLiveScene,
-} from "./ira-cast.ts";
+} from "./ira-hub.ts";
 import { modalityFromSceneName } from "./ira-scene.ts";
 import { mhubContextHintsFromImagingStudy } from "./mhub-models.ts";
 import type { TotalSegModality } from "./totalseg-tasks.ts";
