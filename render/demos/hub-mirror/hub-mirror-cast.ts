@@ -1,17 +1,18 @@
 /**
- * Cast session for hub-mirror — deep-link ?topic=&id-token=, scene-update LiveSync.
+ * Hub session for hub-mirror — deep-link ?topic=&id-token=, scene-update LiveSync.
  * Bulk chunks arrive via HubBlobs on scene-update (payloadIds → GET /api/hub/payloads).
  * Does not subscribe to imagingstudy-open / imagingstudy-close.
  */
-import CastClient, {
+import HubClient, {
+  SCENE_UPDATE,
   batchContextFiles,
   generateSubscriberName,
   getHubEventLower,
   isRunningInCloud,
   messageEventContext,
   messageSubscriberName,
-  resolveCastFileMessage,
-} from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+  resolveHubFileMessage,
+} from "../../../../../SlicerHub-js-clients/packages/client/dist/hub-client.js";
 import {
   CastTransport,
   livesyncContextFromWire,
@@ -40,10 +41,10 @@ const PRODUCT_NAME = "SLICERLIVE-HUB-MIRROR";
 const HUB_BLOBS_EVENT = "HubBlobs";
 
 /**
- * True when this page is served from the Cast hub `/hub-mirror/` mount.
+ * True when this page is served from the Slicer hub `/hub-mirror/` mount.
  * Local demo servers (e.g. :8130/.../hub-mirror/) must NOT match — they have no /api/hub.
  */
-function isServedFromCastHubMount(
+function isServedFromSlicerHubMount(
   location: Location = globalThis.location
 ): boolean {
   const path = String(location?.pathname || "");
@@ -58,10 +59,10 @@ function isServedFromCastHubMount(
 function shouldUseSameOriginHub(
   location: Location = globalThis.location
 ): boolean {
-  return isServedFromCastHubMount(location) || isRunningInCloud(location);
+  return isServedFromSlicerHubMount(location) || isRunningInCloud(location);
 }
 
-/** Local hub for demos; same-origin only when mounted on Cast hub / in cloud. */
+/** Local hub for demos; same-origin only when mounted on Slicer hub / in cloud. */
 function resolveHubConfig(location: Location = globalThis.location) {
   if (!shouldUseSameOriginHub(location)) {
     return LOCAL_HUB;
@@ -79,7 +80,7 @@ function resolveHubConfig(location: Location = globalThis.location) {
 
 export type HubMirrorCast = {
   transport: CastTransport;
-  client: ReturnType<typeof CastClient.newInstance>;
+  client: ReturnType<typeof HubClient.newInstance>;
   topic: string;
   subscriberName: string;
   ready: Promise<void>;
@@ -172,7 +173,7 @@ async function sleep(ms: number): Promise<void> {
 
 /** Fetch hub payloads with backoff — payloads may still be registering. */
 async function fetchHubBlobFilesWithRetry(
-  client: ReturnType<typeof CastClient.newInstance>,
+  client: ReturnType<typeof HubClient.newInstance>,
   files: Array<Record<string, unknown>>,
   opts: { attempts?: number; baseDelayMs?: number } = {}
 ): Promise<
@@ -195,7 +196,7 @@ async function fetchHubBlobFilesWithRetry(
           context: { files: pending.map((f) => ({ ...f })) },
         },
       };
-      const resolved = (await resolveCastFileMessage(
+      const resolved = (await resolveHubFileMessage(
         client,
         synthetic
       )) as Record<string, unknown>;
@@ -220,7 +221,7 @@ async function fetchHubBlobFilesWithRetry(
 }
 
 /**
- * Connect to Cast hub and return a CastTransport ready for LiveSync.
+ * Connect to Slicer hub and return a CastTransport ready for LiveSync.
  * Requires ?topic= and ?id-token= (worklist deep-link).
  */
 export async function connectHubMirrorCast(): Promise<HubMirrorCast> {
@@ -268,7 +269,7 @@ export async function connectHubMirrorCast(): Promise<HubMirrorCast> {
     };
   });
 
-  const client = CastClient.newInstance({
+  const client = HubClient.newInstance({
     hub,
     session: {
       subscriberName,
@@ -277,11 +278,11 @@ export async function connectHubMirrorCast(): Promise<HubMirrorCast> {
       actors: [ID_ACTOR],
       topic: topic || undefined,
       // Scene control + HubBlobs payload refs only — no imagingstudy-* subscription.
-      events: ["scene-update"],
+      events: [SCENE_UPDATE],
       lease: 7200,
       defaultTargetActor: "ID",
     },
-    callbackUrl: `${globalThis.location.origin}/castCallback`,
+    callbackUrl: `${globalThis.location.origin}/hubCallback`,
     preserveSessionTopicFromToken: Boolean(topic),
     autoReconnect: true,
   });
@@ -293,7 +294,7 @@ export async function connectHubMirrorCast(): Promise<HubMirrorCast> {
       await client.publish({
         event: {
           "hub.topic": topic,
-          "hub.event": "scene-update",
+          "hub.event": SCENE_UPDATE,
           context: livesyncContextFromWire(wire),
         },
         actor: ID_ACTOR,
@@ -324,7 +325,7 @@ export async function connectHubMirrorCast(): Promise<HubMirrorCast> {
     const from = messageSubscriberName(message);
     if (from && from === subscriberName) return;
 
-    if (eventName !== "scene-update") return;
+    if (eventName !== SCENE_UPDATE) return;
 
     const eventObj = (message.event || {}) as Record<string, unknown>;
     const rawContext = eventObj.context;

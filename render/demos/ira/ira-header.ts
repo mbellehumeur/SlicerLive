@@ -4,17 +4,17 @@
  */
 import {
   applyCastConferenceHeaderActions,
-  confirmCastConferenceTakeover,
-  createCastConferenceDialog,
-  createCastConferenceInviteController,
-  deleteCastConference,
-  openCastConferenceParticipantsPopup,
+  confirmHubConferenceTakeover,
+  createHubConferenceDialog,
+  createHubConferenceInviteController,
+  deleteHubConference,
+  openHubConferenceParticipantsPopup,
   renderCastConferencePresence,
   shouldShowConferenceInvite,
-  showCastInfoToast,
-  transferCastConferenceLead,
+  showHubInfoToast,
+  transferHubConferenceLead,
   type CastConferenceView,
-} from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+} from "../../../../../SlicerHub-js-clients/packages/client/dist/hub-client.js";
 import {
   applyHeaderChrome,
   conferenceStringsFor,
@@ -414,12 +414,12 @@ async function requestIraConferenceTakeover(): Promise<void> {
   const view = info.conference;
   if (!view || info.connection !== "connected" || !info.topic) return;
   if (view.selfRole === "leading" || info.conferenceFollowHost) return;
-  const ok = await confirmCastConferenceTakeover({
+  const ok = await confirmHubConferenceTakeover({
     strings: iraConferenceStrings(),
   });
   if (!ok) return;
   try {
-    await transferCastConferenceLead(
+    await transferHubConferenceLead(
       info.hubEndpoint,
       view.hostTopic,
       info.topic,
@@ -427,7 +427,7 @@ async function requestIraConferenceTakeover(): Promise<void> {
     );
   } catch (err) {
     console.error("[ira] take over failed", err);
-    showCastInfoToast(
+    showHubInfoToast(
       err instanceof Error ? err.message : "Failed to take over",
     );
   }
@@ -506,16 +506,16 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
   installMedicalInferenceUi();
   installLoadLocalStudyUi();
 
-  let conferenceDialog: ReturnType<typeof createCastConferenceDialog> | null =
+  let conferenceDialog: ReturnType<typeof createHubConferenceDialog> | null =
     null;
   let inviteController: ReturnType<
-    typeof createCastConferenceInviteController
+    typeof createHubConferenceInviteController
   > | null = null;
   let openConferenceDialog = (_anchor?: HTMLElement | null): void => {
     console.warn("[ira] conference dialog not available");
   };
   try {
-    conferenceDialog = createCastConferenceDialog({
+    conferenceDialog = createHubConferenceDialog({
       classPrefix: "cast-conference",
       // Right-align under Conferencing so the panel opens left of the viz card.
       anchorAlign: "end",
@@ -540,7 +540,7 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
         const info = getIraCastSessionInfo();
         const view = info.conference;
         if (view?.places?.length) {
-          openCastConferenceParticipantsPopup({
+          openHubConferenceParticipantsPopup({
             anchor: btn,
             view,
             followHost: Boolean(info.conferenceFollowHost),
@@ -564,7 +564,7 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
   setIraCastStatusListener(() => refreshRadio());
 
   try {
-    inviteController = createCastConferenceInviteController({
+    inviteController = createHubConferenceInviteController({
       classPrefix: "cast-conference-invite",
       strings: iraConferenceStrings(),
       getSession: () => {
@@ -595,7 +595,7 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
         const label =
           String(info?.leaderLabel || info?.leaderUserName || "").trim() ||
           "Someone";
-        showCastInfoToast(`${label} took over`);
+        showHubInfoToast(`${label} took over`);
       },
     });
     setIraConferenceHubHandler((message) =>
@@ -666,7 +666,7 @@ export function installIraHeader(opts: IraHeaderOpts = {}): void {
         leaveBtn.disabled = true;
         leaveBtn.textContent = hostAction ? "Ending…" : "Leaving…";
       }
-      void deleteCastConference(
+      void deleteHubConference(
         info.hubEndpoint,
         view.hostTopic,
         hostAction ? undefined : info.topic

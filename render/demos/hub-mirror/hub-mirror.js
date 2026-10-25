@@ -1,4 +1,4 @@
-// SlicerLive/render/device.ts
+// render/device.ts
 async function initDevice() {
   const gpu = navigator.gpu;
   if (!gpu) throw new Error("WebGPU not available (need Chrome/Edge/Safari or Deno --unstable-webgpu)");
@@ -7,9 +7,9 @@ async function initDevice() {
   const want = ["float32-filterable", "timestamp-query", "shader-f16"].filter((f) => adapter.features.has(f));
   const lim = adapter.limits;
   const requiredLimits = {};
-  const raise = (k2) => {
-    const v2 = lim[k2];
-    if (typeof v2 === "number") requiredLimits[k2] = v2;
+  const raise = (k) => {
+    const v = lim[k];
+    if (typeof v === "number") requiredLimits[k] = v;
   };
   raise("maxBufferSize");
   raise("maxStorageBufferBindingSize");
@@ -18,7 +18,7 @@ async function initDevice() {
   return { adapter, device, features: new Set(want) };
 }
 
-// SlicerLive/render/mat4.ts
+// render/mat4.ts
 function identity() {
   const m = new Float32Array(16);
   m[0] = m[5] = m[10] = m[15] = 1;
@@ -29,7 +29,7 @@ function multiply(a, b) {
   for (let c = 0; c < 4; c++) {
     for (let r = 0; r < 4; r++) {
       let s = 0;
-      for (let k2 = 0; k2 < 4; k2++) s += a[k2 * 4 + r] * b[c * 4 + k2];
+      for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
       o[c * 4 + r] = s;
     }
   }
@@ -45,11 +45,11 @@ function perspectiveZO(fovy, aspect, near, far) {
   m[14] = far * near / (near - far);
   return m;
 }
-function perspectiveZOTile(fovy, viewW, viewH, x2, y, w, h, near, far) {
+function perspectiveZOTile(fovy, viewW, viewH, x, y2, w, h, near, far) {
   const t = near * Math.tan(fovy / 2), b = -t;
   const r = t * (viewW / viewH), l = -r;
-  const l2 = l + (r - l) * x2 / viewW, r2 = l + (r - l) * (x2 + w) / viewW;
-  const t2 = t - (t - b) * y / viewH, b2 = t - (t - b) * (y + h) / viewH;
+  const l2 = l + (r - l) * x / viewW, r2 = l + (r - l) * (x + w) / viewW;
+  const t2 = t - (t - b) * y2 / viewH, b2 = t - (t - b) * (y2 + h) / viewH;
   const m = new Float32Array(16);
   m[0] = 2 * near / (r2 - l2);
   m[5] = 2 * near / (t2 - b2);
@@ -144,41 +144,41 @@ function patientToTextureFromIjkToRAS(ijkToRAS, dims) {
   return invert(texToRASFromIjkToRAS(ijkToRAS, dims));
 }
 function texToRASFromIjkToRAS(ijkToRAS, dims) {
-  const M2 = transpose4(ijkToRAS);
+  const M = transpose4(ijkToRAS);
   const A = new Float32Array(16);
   for (let a = 0; a < 3; a++) {
     A[a * 4 + a] = dims[a];
     A[12 + a] = -0.5;
   }
   A[15] = 1;
-  return multiply(M2, A);
+  return multiply(M, A);
 }
 function volumeAABBFromIjkToRAS(ijkToRAS, dims) {
   const t2r = texToRASFromIjkToRAS(ijkToRAS, dims);
-  const lo = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
+  const lo2 = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
   for (let c = 0; c < 8; c++) {
-    const u = c & 1, v2 = c >> 1 & 1, w = c >> 2 & 1;
+    const u = c & 1, v = c >> 1 & 1, w = c >> 2 & 1;
     for (let r = 0; r < 3; r++) {
-      const p = t2r[r] * u + t2r[4 + r] * v2 + t2r[8 + r] * w + t2r[12 + r];
-      if (p < lo[r]) lo[r] = p;
+      const p = t2r[r] * u + t2r[4 + r] * v + t2r[8 + r] * w + t2r[12 + r];
+      if (p < lo2[r]) lo2[r] = p;
       if (p > hi2[r]) hi2[r] = p;
     }
   }
-  return [lo, hi2];
+  return [lo2, hi2];
 }
 function applyMat4(m, p) {
-  const x2 = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
-  const y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+  const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+  const y2 = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
   const z2 = m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14];
   const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15] || 1;
-  return [x2 / w, y / w, z2 / w];
+  return [x / w, y2 / w, z2 / w];
 }
 function spacingFromIjkToRAS(ijkToRAS) {
   const col = (c) => Math.hypot(ijkToRAS[c], ijkToRAS[4 + c], ijkToRAS[8 + c]);
   return [col(0), col(1), col(2)];
 }
 
-// SlicerLive/render/scene-renderer.ts
+// render/scene-renderer.ts
 var DEFAULT_FORMAT = "rgba8unorm-srgb";
 var SCENE_FLOATS = 16;
 var CLIP_FLOATS = 36;
@@ -630,17 +630,17 @@ fn fs_resolve(v : RV) -> @location(0) vec4<f32> {
     if (this.accumTex[0] && this.accumW === width && this.accumH === height) return;
     this.accumW = width;
     this.accumH = height;
-    for (let k2 = 0; k2 < 2; k2++) {
-      this.accumTex[k2]?.destroy();
-      this.accumTex[k2] = this.dev.createTexture({ size: [width, height], format: "rgba32float", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
-      this.accumView[k2] = this.accumTex[k2].createView();
+    for (let k = 0; k < 2; k++) {
+      this.accumTex[k]?.destroy();
+      this.accumTex[k] = this.dev.createTexture({ size: [width, height], format: "rgba32float", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
+      this.accumView[k] = this.accumTex[k].createView();
     }
-    for (let k2 = 0; k2 < 2; k2++) {
-      this.accumBind[k2] = this.dev.createBindGroup({
+    for (let k = 0; k < 2; k++) {
+      this.accumBind[k] = this.dev.createBindGroup({
         layout: this.accumPipeline.getBindGroupLayout(0),
         entries: [
           { binding: 0, resource: this.traceView },
-          { binding: 1, resource: this.accumView[k2] },
+          { binding: 1, resource: this.accumView[k] },
           { binding: 2, resource: { buffer: this.accumUniformBuf } }
         ]
       });
@@ -768,12 +768,12 @@ ${body}
 }`;
     }).join("\n");
     const fieldFns = receivers.map((p) => p.field.samplingWGSL(p.slot)).join("\n");
-    const wf = (v2) => (Number.isFinite(v2) ? v2 : 0).toFixed(6);
+    const wf = (v) => (Number.isFinite(v) ? v : 0).toFixed(6);
     const boxSkipWGSL = (p) => {
-      const [lo, hi2] = p.field.aabb();
+      const [lo2, hi2] = p.field.aabb();
       return `
 fn skip_${p.field.kind}${p.slot}(wp : vec3<f32>) -> f32 {
-  let q = max(vec3<f32>(${wf(lo[0])}, ${wf(lo[1])}, ${wf(lo[2])}) - wp,
+  let q = max(vec3<f32>(${wf(lo2[0])}, ${wf(lo2[1])}, ${wf(lo2[2])}) - wp,
               wp - vec3<f32>(${wf(hi2[0])}, ${wf(hi2[1])}, ${wf(hi2[2])}));
   return length(max(q, vec3<f32>(0.0)));   // 0 inside the box, exact distance outside
 }`;
@@ -1038,31 +1038,31 @@ ${pickDispatch}
     this.mat[this.clipOff + 32] = 0;
   }
   /** Axis-aligned RAS crop box [lo,hi] → 6 inward planes. offset = -dot(faceOrigin, n). */
-  setClipBox(lo, hi2) {
+  setClipBox(lo2, hi2) {
     this.setClipPlanes([
-      [1, 0, 0, -lo[0]],
+      [1, 0, 0, -lo2[0]],
       [-1, 0, 0, hi2[0]],
       // keep lo.x <= x <= hi.x
-      [0, 1, 0, -lo[1]],
+      [0, 1, 0, -lo2[1]],
       [0, -1, 0, hi2[1]],
-      [0, 0, 1, -lo[2]],
+      [0, 0, 1, -lo2[2]],
       [0, 0, -1, hi2[2]]
     ]);
   }
   /** Scene AABB = union of field AABBs; also picks a default sample step from the smallest field extent. */
   recomputeBounds() {
     if (!this.placed.length) return;
-    let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    let mn2 = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
     for (const p of this.placed) {
       const [a, b] = p.field.aabb();
       for (let i = 0; i < 3; i++) {
-        mn[i] = Math.min(mn[i], a[i]);
+        mn2[i] = Math.min(mn2[i], a[i]);
         mx[i] = Math.max(mx[i], b[i]);
       }
     }
-    this.mat[0] = mn[0];
-    this.mat[1] = mn[1];
-    this.mat[2] = mn[2];
+    this.mat[0] = mn2[0];
+    this.mat[1] = mn2[1];
+    this.mat[2] = mn2[2];
     this.mat[4] = mx[0];
     this.mat[5] = mx[1];
     this.mat[6] = mx[2];
@@ -1158,11 +1158,11 @@ ${pickDispatch}
    *  RAS point where front-to-back opacity first reaches 50% — Slicer's 3D volume pick. Traces
    *  whatever renders (DVR volumes, SegmentField iso shells, RGBA), EXCLUDING ghost handles.
    *  Uses the camera set by the last setCamera(); returns null if the ray never reaches 50%. */
-  async pick(u, v2) {
+  async pick(u, v) {
     if (!this.pickPipeline || !this.pickBind || !this.placed.length) return null;
     return this.serialise(async () => {
       this.mat[this.pickOff] = u * 2 - 1;
-      this.mat[this.pickOff + 1] = 1 - v2 * 2;
+      this.mat[this.pickOff + 1] = 1 - v * 2;
       this.mat[this.pickOff + 11] = 0;
       this.flush();
       return await this.tracePick();
@@ -1238,7 +1238,7 @@ ${pickDispatch}
     this.flush();
     const target = this.dev.createTexture({ size: [width, height], format: "rgba32float", usage: GPUTextureUsage.RENDER_ATTACHMENT });
     const view = target.createView();
-    const qs = this.dev.createQuerySet({ type: "timestamp", count: 2 });
+    const qs2 = this.dev.createQuerySet({ type: "timestamp", count: 2 });
     const resolve = this.dev.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
     const read = this.dev.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const samples = [];
@@ -1247,24 +1247,24 @@ ${pickDispatch}
       const mb = this.meshPass(enc, width, height);
       const pass = enc.beginRenderPass({
         colorAttachments: [{ view, loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 1 } }],
-        timestampWrites: { querySet: qs, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 }
+        timestampWrites: { querySet: qs2, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 }
       });
       pass.setPipeline(this.pipeline);
       pass.setBindGroup(0, this.bind);
       pass.setBindGroup(1, mb);
       pass.draw(3);
       pass.end();
-      enc.resolveQuerySet(qs, 0, 2, resolve, 0);
+      enc.resolveQuerySet(qs2, 0, 2, resolve, 0);
       enc.copyBufferToBuffer(resolve, 0, read, 0, 16);
       this.dev.queue.submit([enc.finish()]);
       await read.mapAsync(GPUMapMode.READ);
       const t = new BigUint64Array(read.getMappedRange());
-      const ms = Number(t[1] - t[0]) / 1e6;
+      const ms2 = Number(t[1] - t[0]) / 1e6;
       read.unmap();
-      if (ms > 0 && Number.isFinite(ms)) samples.push(ms);
+      if (ms2 > 0 && Number.isFinite(ms2)) samples.push(ms2);
     }
     target.destroy();
-    qs.destroy();
+    qs2.destroy();
     resolve.destroy();
     read.destroy();
     if (!samples.length) return NaN;
@@ -1285,7 +1285,7 @@ ${pickDispatch}
     await buf.mapAsync(GPUMapMode.READ);
     const padded = new Uint8Array(buf.getMappedRange());
     const out = new Uint8Array(width * height * 4);
-    for (let y = 0; y < height; y++) out.set(padded.subarray(y * bpr, y * bpr + width * 4), y * width * 4);
+    for (let y2 = 0; y2 < height; y2++) out.set(padded.subarray(y2 * bpr, y2 * bpr + width * 4), y2 * width * 4);
     buf.unmap();
     target.destroy();
     buf.destroy();
@@ -1317,7 +1317,7 @@ ${pickDispatch}
     await buf.mapAsync(GPUMapMode.READ);
     const padded = new Uint8Array(buf.getMappedRange());
     const out = new Uint8Array(width * height * 4);
-    for (let y = 0; y < height; y++) out.set(padded.subarray(y * bpr, y * bpr + width * 4), y * width * 4);
+    for (let y2 = 0; y2 < height; y2++) out.set(padded.subarray(y2 * bpr, y2 * bpr + width * 4), y2 * width * 4);
     buf.unmap();
     target.destroy();
     buf.destroy();
@@ -1325,7 +1325,7 @@ ${pickDispatch}
   }
 };
 
-// SlicerLive/render/slice-renderer.ts
+// render/slice-renderer.ts
 var DEFAULT_FORMAT2 = "rgba8unorm-srgb";
 var SHADER = (
   /* wgsl */
@@ -1442,7 +1442,10 @@ fn fs_main(v : V) -> @location(0) vec4<f32> {
     let e = max(max(distance(n0.rgb, ov.rgb) + abs(n0.a - ov.a), distance(n1.rgb, ov.rgb) + abs(n1.a - ov.a)),
                 max(distance(n2.rgb, ov.rgb) + abs(n2.a - ov.a), distance(n3.rgb, ov.rgb) + abs(n3.a - ov.a)));
     let edge = clamp((e - 0.03) * 12.0, 0.0, 1.0);   // 0 in the interior, 1 at a colour/label edge
-    outA = clamp(ov.a * u.params.w * edge, 0.0, 1.0);
+    // Label-overlay (Colorize) mode: contours draw at full strength for every VISIBLE segment,
+    // independent of its fill opacity, so faint groups (lungs/muscle at ~5%) still read as shapes.
+    let segA = select(ov.a, select(0.0, 1.0, ov.a > 0.0), u.size.z > 0.5);
+    outA = clamp(segA * u.params.w * edge, 0.0, 1.0);
   }
   col = mix(col, ov.rgb, max(fillA, outA));
   return vec4<f32>(srgb2physical(col), 1.0);
@@ -1452,7 +1455,13 @@ fn fs_main(v : V) -> @location(0) vec4<f32> {
 var BASES = {
   axial: { uDir: [-1, 0, 0], vDir: [0, 1, 0], nDir: [0, 0, 1] },
   coronal: { uDir: [-1, 0, 0], vDir: [0, 0, 1], nDir: [0, 1, 0] },
-  sagittal: { uDir: [0, -1, 0], vDir: [0, 0, 1], nDir: [1, 0, 0] }
+  sagittal: { uDir: [0, -1, 0], vDir: [0, 0, 1], nDir: [1, 0, 0] },
+  // ~45° tilt of axial about R–L (default dental / reformat demo plane).
+  oblique: {
+    uDir: [-1, 0, 0],
+    vDir: [0, Math.SQRT1_2, Math.SQRT1_2],
+    nDir: [0, -Math.SQRT1_2, Math.SQRT1_2]
+  }
 };
 var dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 var SliceRenderer = class {
@@ -1498,7 +1507,8 @@ var SliceRenderer = class {
   viewState = {
     axial: { panU: 0, panV: 0, zoom: 1 },
     coronal: { panU: 0, panV: 0, zoom: 1 },
-    sagittal: { panU: 0, panV: 0, zoom: 1 }
+    sagittal: { panU: 0, panV: 0, zoom: 1 },
+    oblique: { panU: 0, panV: 0, zoom: 1 }
   };
   cX = [0, 0, 0];
   // in-plane centre of the LAST rendered frame (for viewToTex picking)
@@ -1624,8 +1634,8 @@ var SliceRenderer = class {
    *  centre, a crosshair) can address the same slice for anatomical AND oblique bases. */
   offset01Along(orient, ras) {
     const n = this.basisOf(orient).nDir;
-    const { lo, hi: hi2 } = this.extentAlong(n);
-    return Math.max(0, Math.min(1, (dot3(ras, n) - lo) / Math.max(hi2 - lo, 1e-6)));
+    const { lo: lo2, hi: hi2 } = this.extentAlong(n);
+    return Math.max(0, Math.min(1, (dot3(ras, n) - lo2) / Math.max(hi2 - lo2, 1e-6)));
   }
   basisOf(orient) {
     return this.basisOverride[orient] ?? BASES[orient];
@@ -1634,7 +1644,7 @@ var SliceRenderer = class {
    *  of "rasHi[axis] - rasLo[axis]" to an oblique axis. Reduces to exactly that for the
    *  anatomical bases, since projecting an axis-aligned box on its own axis is the axis span. */
   extentAlong(d) {
-    let lo = Infinity, hi2 = -Infinity;
+    let lo2 = Infinity, hi2 = -Infinity;
     for (let i = 0; i < 8; i++) {
       const c = [
         i & 1 ? this.rasHi[0] : this.rasLo[0],
@@ -1642,10 +1652,10 @@ var SliceRenderer = class {
         i & 4 ? this.rasHi[2] : this.rasLo[2]
       ];
       const t = dot3(c, d);
-      if (t < lo) lo = t;
+      if (t < lo2) lo2 = t;
       if (t > hi2) hi2 = t;
     }
-    return { lo, hi: hi2 };
+    return { lo: lo2, hi: hi2 };
   }
   /** Volume geometry: patientToTexture (RAS->tex[0,1], encodes ijkToRAS) + the RAS
    *  bounding box (for plane extents/scrub range). Get both from the ImageField. */
@@ -1720,8 +1730,8 @@ var SliceRenderer = class {
    *  A-extent, horizontal follows viewport aspect.) */
   viewSpanMm() {
     const b = this.basisOf(this.orient);
-    const u = this.extentAlong(b.uDir), v2 = this.extentAlong(b.vDir);
-    return Math.max(u.hi - u.lo, v2.hi - v2.lo);
+    const u = this.extentAlong(b.uDir), v = this.extentAlong(b.vDir);
+    return Math.max(u.hi - u.lo, v.hi - v.lo);
   }
   /** The fitted in-plane extent (mm) used for a given orientation — the value directly
    *  comparable to a Slicer slice node's fitted fieldOfView. */
@@ -1739,8 +1749,8 @@ var SliceRenderer = class {
    *  under-zoomed whenever the larger extent wasn't on the viewport's limiting axis. */
   fitUV(orient, aspectWH) {
     const b = this.basisOf(orient);
-    const u = this.extentAlong(b.uDir), v2 = this.extentAlong(b.vDir);
-    const uExt = u.hi - u.lo, vExt = v2.hi - v2.lo;
+    const u = this.extentAlong(b.uDir), v = this.extentAlong(b.vDir);
+    const uExt = u.hi - u.lo, vExt = v.hi - v.lo;
     const uS0 = Math.max(uExt, vExt * aspectWH);
     return { uS0, vS0: uS0 / aspectWH };
   }
@@ -1751,9 +1761,9 @@ var SliceRenderer = class {
    *  uS/vS are the FULL in-plane extents mapped across the viewport width/height. */
   frameFor(orient, offset01, aspectWH) {
     const b = this.basisOf(orient);
-    const vs = this.viewState[orient];
+    const vs2 = this.viewState[orient];
     const { uS0, vS0 } = this.fitUV(orient, aspectWH);
-    const uS = uS0 / vs.zoom, vS = vS0 / vs.zoom;
+    const uS = uS0 / vs2.zoom, vS = vS0 / vs2.zoom;
     const c = [(this.rasLo[0] + this.rasHi[0]) / 2, (this.rasLo[1] + this.rasHi[1]) / 2, (this.rasLo[2] + this.rasHi[2]) / 2];
     const nx = this.extentAlong(b.nDir);
     const want = nx.lo + Math.max(0, Math.min(1, offset01)) * (nx.hi - nx.lo);
@@ -1761,9 +1771,9 @@ var SliceRenderer = class {
     c[0] += b.nDir[0] * (want - have);
     c[1] += b.nDir[1] * (want - have);
     c[2] += b.nDir[2] * (want - have);
-    c[0] += b.uDir[0] * vs.panU + b.vDir[0] * vs.panV;
-    c[1] += b.uDir[1] * vs.panU + b.vDir[1] * vs.panV;
-    c[2] += b.uDir[2] * vs.panU + b.vDir[2] * vs.panV;
+    c[0] += b.uDir[0] * vs2.panU + b.vDir[0] * vs2.panV;
+    c[1] += b.uDir[1] * vs2.panU + b.vDir[1] * vs2.panV;
+    c[2] += b.uDir[2] * vs2.panU + b.vDir[2] * vs2.panV;
     return { b, c, uS, vS };
   }
   /** Zoom factor for an orientation (1 = fitted). */
@@ -1780,12 +1790,12 @@ var SliceRenderer = class {
   }
   /** Zoom by `factor` (>1 zooms in) about a pivot (u,v in [0,1]); the pivot point stays fixed. */
   zoomAbout(orient, factor, pu, pv, w, h) {
-    const vs = this.viewState[orient];
+    const vs2 = this.viewState[orient];
     const { uS0, vS0 } = this.fitUV(orient, w / h);
-    const z2 = Math.max(0.2, Math.min(50, vs.zoom * factor));
-    vs.panU += (pu - 0.5) * (uS0 / vs.zoom - uS0 / z2);
-    vs.panV += (0.5 - pv) * (vS0 / vs.zoom - vS0 / z2);
-    vs.zoom = z2;
+    const z2 = Math.max(0.2, Math.min(50, vs2.zoom * factor));
+    vs2.panU += (pu - 0.5) * (uS0 / vs2.zoom - uS0 / z2);
+    vs2.panV += (0.5 - pv) * (vS0 / vs2.zoom - vS0 / z2);
+    vs2.zoom = z2;
   }
   /** Reset pan/zoom for an orientation to the fitted view. */
   resetView(orient) {
@@ -1796,10 +1806,10 @@ var SliceRenderer = class {
     return structuredClone(this.viewState);
   }
   /** Restore a (possibly partial) snapshot from getViewState(). */
-  setViewState(vs) {
-    for (const k2 of Object.keys(vs)) {
-      const v2 = vs[k2];
-      if (v2 && Number.isFinite(v2.zoom) && v2.zoom > 0) this.viewState[k2] = { ...v2 };
+  setViewState(vs2) {
+    for (const k of Object.keys(vs2)) {
+      const v = vs2[k];
+      if (v && Number.isFinite(v.zoom) && v.zoom > 0) this.viewState[k] = { ...v };
     }
   }
   /** Mirror Slicer's in-plane navigation for an orientation: drive pan + zoom from the slice
@@ -1823,29 +1833,29 @@ var SliceRenderer = class {
    *  of setMirrorFrame, so a local pan/zoom can be written back to the app as a slice frame. */
   mirrorFrame(orient, aspectWH) {
     const b = this.basisOf(orient);
-    const st2 = this.viewState[orient];
+    const st = this.viewState[orient];
     const { uS0, vS0 } = this.fitUV(orient, aspectWH);
-    const fovX = uS0 / st2.zoom, fovY = vS0 / st2.zoom;
+    const fovX = uS0 / st.zoom, fovY = vS0 / st.zoom;
     const volC = [(this.rasLo[0] + this.rasHi[0]) / 2, (this.rasLo[1] + this.rasHi[1]) / 2, (this.rasLo[2] + this.rasHi[2]) / 2];
     const centerRAS = [
-      volC[0] + b.uDir[0] * st2.panU + b.vDir[0] * st2.panV,
-      volC[1] + b.uDir[1] * st2.panU + b.vDir[1] * st2.panV,
-      volC[2] + b.uDir[2] * st2.panU + b.vDir[2] * st2.panV
+      volC[0] + b.uDir[0] * st.panU + b.vDir[0] * st.panV,
+      volC[1] + b.uDir[1] * st.panU + b.vDir[1] * st.panV,
+      volC[2] + b.uDir[2] * st.panU + b.vDir[2] * st.panV
     ];
     return { centerRAS, fovX, fovY };
   }
   /** Map a view (u,v) in [0,1] (y down) to normalized texture coords for the current
    *  plane — for click picking. Returns the tex coord; the caller converts to IJK via
    *  ijk = tex*dims - 0.5. Anisotropy/rotation are handled by the same p2t the shader uses. */
-  viewToTex(u, v2) {
+  viewToTex(u, v) {
     const b = this.basisOf(this.orient);
     const uS = this.uSpanMm || this.viewSpanMm();
     const vS = this.vSpanMm || this.viewSpanMm();
     const c = this.cX;
     const ras = [
-      c[0] + b.uDir[0] * (u - 0.5) * uS + b.vDir[0] * (0.5 - v2) * vS,
-      c[1] + b.uDir[1] * (u - 0.5) * uS + b.vDir[1] * (0.5 - v2) * vS,
-      c[2] + b.uDir[2] * (u - 0.5) * uS + b.vDir[2] * (0.5 - v2) * vS
+      c[0] + b.uDir[0] * (u - 0.5) * uS + b.vDir[0] * (0.5 - v) * vS,
+      c[1] + b.uDir[1] * (u - 0.5) * uS + b.vDir[1] * (0.5 - v) * vS,
+      c[2] + b.uDir[2] * (u - 0.5) * uS + b.vDir[2] * (0.5 - v) * vS
     ];
     return applyMat4(this.p2t, ras);
   }
@@ -1857,15 +1867,15 @@ var SliceRenderer = class {
     const { b, c, uS, vS } = this.frameFor(orient, offset01, aspectWH);
     const d = [ras[0] - c[0], ras[1] - c[1], ras[2] - c[2]];
     const u = 0.5 + (d[0] * b.uDir[0] + d[1] * b.uDir[1] + d[2] * b.uDir[2]) / uS;
-    const v2 = 0.5 - (d[0] * b.vDir[0] + d[1] * b.vDir[1] + d[2] * b.vDir[2]) / vS;
-    return { u, v: v2, distMm: dot3(d, b.nDir) };
+    const v = 0.5 - (d[0] * b.vDir[0] + d[1] * b.vDir[1] + d[2] * b.vDir[2]) / vS;
+    return { u, v, distMm: dot3(d, b.nDir) };
   }
   /** Map a view (u,v in [0,1], y down) on a plane back to a RAS point ON that plane —
    *  the exact inverse of rasToView (same pan/zoom/aspect). Used to drag a 2D markup:
    *  the point lands on the current slice (its out-of-plane coord becomes the plane offset). */
-  viewToRas(orient, offset01, u, v2, aspectWH) {
+  viewToRas(orient, offset01, u, v, aspectWH) {
     const { b, c, uS, vS } = this.frameFor(orient, offset01, aspectWH);
-    const du = (u - 0.5) * uS, dv = (0.5 - v2) * vS;
+    const du = (u - 0.5) * uS, dv = (0.5 - v) * vS;
     return [
       c[0] + b.uDir[0] * du + b.vDir[0] * dv,
       c[1] + b.uDir[1] * du + b.vDir[1] * dv,
@@ -1971,7 +1981,7 @@ struct VO { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
     await buf.mapAsync(GPUMapMode.READ);
     const padded = new Uint8Array(buf.getMappedRange());
     const out = new Uint8Array(w * h * 4);
-    for (let y = 0; y < h; y++) out.set(padded.subarray(y * bpr, y * bpr + w * 4), y * w * 4);
+    for (let y2 = 0; y2 < h; y2++) out.set(padded.subarray(y2 * bpr, y2 * bpr + w * 4), y2 * w * 4);
     buf.unmap();
     target.destroy();
     buf.destroy();
@@ -1979,7 +1989,7 @@ struct VO { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
   }
 };
 
-// SlicerLive/render/vtk-camera.ts
+// render/vtk-camera.ts
 var sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 var add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 var scale = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
@@ -1994,16 +2004,16 @@ var normalize = (a) => {
   const n = norm(a) || 1;
   return [a[0] / n, a[1] / n, a[2] / n];
 };
-function rotateAboutAxis(v2, axis, deg) {
-  const k2 = normalize(axis);
+function rotateAboutAxis(v, axis, deg) {
+  const k = normalize(axis);
   const t = deg * Math.PI / 180;
   const c = Math.cos(t), s = Math.sin(t);
-  const kv = cross(k2, v2);
-  const kd = dot(k2, v2);
+  const kv = cross(k, v);
+  const kd = dot(k, v);
   return [
-    v2[0] * c + kv[0] * s + k2[0] * kd * (1 - c),
-    v2[1] * c + kv[1] * s + k2[1] * kd * (1 - c),
-    v2[2] * c + kv[2] * s + k2[2] * kd * (1 - c)
+    v[0] * c + kv[0] * s + k[0] * kd * (1 - c),
+    v[1] * c + kv[1] * s + k[1] * kd * (1 - c),
+    v[2] * c + kv[2] * s + k[2] * kd * (1 - c)
   ];
 }
 var VtkCamera = class _VtkCamera {
@@ -2075,9 +2085,9 @@ var VtkCamera = class _VtkCamera {
     this.position = sub(this.focalPoint, scale(dop, d));
   }
   /** Translate both position and focal point (used by pan). */
-  translate(v2) {
-    this.position = add(this.position, v2);
-    this.focalPoint = add(this.focalPoint, v2);
+  translate(v) {
+    this.position = add(this.position, v);
+    this.focalPoint = add(this.focalPoint, v);
   }
   /** Half-height of the view plane at the focal point (perspective). */
   focalPlaneHalfHeight() {
@@ -2112,13 +2122,13 @@ var VtkCamera = class _VtkCamera {
   /** Inverse of worldToDisplay at a FIXED view-depth: the world point under display pixel (x,y)
    *  lying in the plane perpendicular to the view at `depth`. Dragging a 3D handle in this plane
    *  keeps its distance from the camera, so it tracks the cursor without depth ambiguity. */
-  displayToWorldAtDepth(x2, y, depth, w, h) {
+  displayToWorldAtDepth(x, y2, depth, w, h) {
     const { right, up } = this.basis();
     const dop = this.directionOfProjection;
     const halfH = Math.max(1e-6, depth) * Math.tan(this.viewAngle * Math.PI / 360);
     const aspect = w / h;
-    const ndcx = x2 / w * 2 - 1;
-    const ndcy = 1 - y / h * 2;
+    const ndcx = x / w * 2 - 1;
+    const ndcy = 1 - y2 / h * 2;
     const offset = add(scale(right, ndcx * halfH * aspect), scale(up, ndcy * halfH));
     return add(add(this.position, scale(dop, depth)), offset);
   }
@@ -2134,7 +2144,7 @@ var VtkCamera = class _VtkCamera {
   }
 };
 
-// SlicerLive/render/budget-controller.ts
+// render/budget-controller.ts
 var BudgetController = class {
   budgetPx;
   targetMs;
@@ -2161,7 +2171,7 @@ var BudgetController = class {
   }
 };
 
-// SlicerLive/render/demos/accum-loop.ts
+// render/demos/accum-loop.ts
 function mountAdaptiveLoop(opts) {
   const target = opts.target ?? 32;
   const idleGap = opts.idleGapMs ?? 120;
@@ -2209,14 +2219,14 @@ function mountAdaptive3d(opts) {
   const budget = new BudgetController({ targetMs: opts.targetMs ?? 16 });
   const DBG = typeof location !== "undefined" && new URLSearchParams(location.search).has("perf");
   let dbgN = 0, dbgMoving = 0, dbgSettled = 0, dbgLast = 0;
-  const dbgTick = (kind, ms, s) => {
+  const dbgTick = (kind, ms2, s) => {
     if (!DBG) return;
     dbgN++;
-    if (kind === "mov") dbgMoving += ms;
-    else dbgSettled += ms;
+    if (kind === "mov") dbgMoving += ms2;
+    else dbgSettled += ms2;
     const now = performance.now();
     if (now - dbgLast > 500) {
-      console.log(`[perf] mov=${dbgMoving.toFixed(0)}ms/${dbgN}f settled=${dbgSettled.toFixed(0)}ms lastScale=${s.toFixed(2)} last=${ms.toFixed(1)}ms`);
+      console.log(`[perf] mov=${dbgMoving.toFixed(0)}ms/${dbgN}f settled=${dbgSettled.toFixed(0)}ms lastScale=${s.toFixed(2)} last=${ms2.toFixed(1)}ms`);
       dbgLast = now;
       dbgMoving = dbgSettled = dbgN = 0;
     }
@@ -2237,9 +2247,9 @@ function mountAdaptive3d(opts) {
       sc.renderUpscaled(opts.view(), rw, rh, vw, vh);
     }
     opts.gpu.device.queue.onSubmittedWorkDone().then(() => {
-      const ms = performance.now() - t0;
-      budget.update(ms);
-      dbgTick("mov", ms, s);
+      const ms2 = performance.now() - t0;
+      budget.update(ms2);
+      dbgTick("mov", ms2, s);
     });
     opts.onFrame?.();
   };
@@ -2279,7 +2289,7 @@ function mountAdaptive3d(opts) {
   return { draw, budget, renderSettled, renderMoving, loop };
 }
 
-// SlicerLive/render/rate-limiter.ts
+// render/rate-limiter.ts
 var Coalescer = class {
   /**
    * @param intervalMs minimum wall time between wire flushes (e.g. 33 = ~30Hz).
@@ -2336,7 +2346,7 @@ var Coalescer = class {
   }
 };
 
-// SlicerLive/render/livesync.ts
+// render/livesync.ts
 function opKey(op) {
   if (op.op === "cmd") return `${op.id}:${op.cmd}:${op.args?.index ?? ""}`;
   if (op.op === "patch") return `${op.id}:${op.path}`;
@@ -2522,10 +2532,10 @@ var LiveSync = class {
   }
 };
 
-// SlicerLive/render/demos/sl-logo.ts
+// render/demos/sl-logo.ts
 var SL_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADkAAAA8CAIAAABTt4VhAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAARGVYSWZNTQAqAAAACAABh2kABAAAAAEAAAAaAAAAAAADoAEAAwAAAAEAAQAAoAIABAAAAAEAAAA5oAMABAAAAAEAAAA8AAAAAH9xBdAAAAHLaVRYdFhNTDpjb20uYWRvYmUueG1wAAAAAAA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIiB4OnhtcHRrPSJYTVAgQ29yZSA2LjAuMCI+CiAgIDxyZGY6UkRGIHhtbG5zOnJkZj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+CiAgICAgIDxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiCiAgICAgICAgICAgIHhtbG5zOmV4aWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20vZXhpZi8xLjAvIj4KICAgICAgICAgPGV4aWY6Q29sb3JTcGFjZT4xPC9leGlmOkNvbG9yU3BhY2U+CiAgICAgICAgIDxleGlmOlBpeGVsWERpbWVuc2lvbj41MDA8L2V4aWY6UGl4ZWxYRGltZW5zaW9uPgogICAgICAgICA8ZXhpZjpQaXhlbFlEaW1lbnNpb24+NTIwPC9leGlmOlBpeGVsWURpbWVuc2lvbj4KICAgICAgPC9yZGY6RGVzY3JpcHRpb24+CiAgIDwvcmRmOlJERj4KPC94OnhtcG1ldGE+ConTBbQAABmbSURBVGgFjZpZkB3XWcd7775919k1o2VGsjZLthw5sR3HiZ3EGMcJJqRIXKmiqAKTByh4yEN4pQJFUVBUUUWRQIViCVQZQ0IWJyGLYyeyY8lYkrXYlmxJtnbNSLPeO3fpvZvfd/pKOOSFnjt97+0+fc7//L/1fOfqjbFZjaPItCLVNU3Xdc3gj3fd0DTP1bZtsD/5yNwnfvmef/23Z1860VlY1dJcM7lrFAYnXePEWeMD/ci/HEWha3mRa0XOvzrzIS+0jAtylbci40XDnNZyq5B3+aQ+FwXf5UKhGZZhWHzmX/qnZ66XAGV0EHNNF0zcWm/3gl77Pfu2Hzv9qmvrZloYprQBpMnEmJl6VB4qDzUEGPJc5yNnBTTPcs3IDb5lZVPOQDZkPvBCe8Ys6FDgCgAQ8cctdegWX9QMNMWQ3FT3ChCYhuHYuu9oFUczbbtSqTiW5jl6bOiWyWRBWWItcUuHJVohhpdg5SVEpvDFma8pf0ZKC0CkhW7qaUY/Q7jyCA8K3BK6dKJkLV0LrxyCT+YgQKESoUKbY2sNX9805e3fv3V6Zvrgy6fTwrRNgGoiFUvOMiU4pj0Pqlmq7mVIAXoTIoCyTLCm4ABcljNKyoBZgexuwlWS5aKSP9wpphU+JXWwCtsykCioUG+YcGwAqOrokyPW3u2jO7ZtPvDcz469di0rTMfKhVRLGticBavBiw+i63QFCvQyK7IsFzqBqFAmqZamWmxqZponCUgYi3ENmYGhw7Rp6Ggw3YhGiB4Ig5kisTxZdF8OUZJiWgIUtmxT8z1jy7R//727PN+bv97pBaDQKq6JyoLSsQ3bpmGexPFgEIVRVuhukhZx1KfNxFijWa8oA9IS5J4VcWrESR4lehzroQ7jJqwqmoZwmd5NuAgEFRGzM0WPwSiHJQrB7ORrYSFNaBV11BxL91297pueYw36Sa8fMgfXFi4rHmLPozBY6iS5XhuZ2rVtz50zs7tWFuePHzmQDHrdOFq9tLBhJKj6HijLl/AK9gLNoU+hLBTicAoiVdFoU3g1DQQCHmYzhDtEClbhVb1MET0odT5Ylu7aYDJqnul7rikM5r4nU6FBp7PeT5wNs+/7yKOP7L7j3ompGdetHD/83Ksv/3Dj3I5N2/ZkSfzakefnz70wmsSmLXqH5on+pdpqR69WR5rNeoG0tVzBzZRkFVxRAww2x2UoZcALiVqWhA5tCxC4J+hSQDXXQsrwao6P1sbGm1EQjTTsRi1N1vpLq9nc3k/c/9FP37bzTsdx0ixlBudOHzl04JmK39i8dXeep8y56lc/+Uj1yc94k2OmIOUwtYtXsy9/NT56yvBdA8srncWQXTUXYVcwgga4eDOQivaXWnATq5iUbg2lbyBoDz9q6J313oWzp2a3TG/dMnH2/Fm/Pvdrv/q597z/Y7phpmmSxBEeYNDvvnH8hTgJ53bthSrRe8ZCmUTxbzoHdRHDgA68XsUBKxDQRkg1IiEO/kTaelrgK7RM/IVosKalQ5sd+iycAGqk44ag0zEN18FhQbTWWY+uXl3ZvHlza2LLvQ+9d27/b/mtqTCK0SnBhEaZ1qV3Xl9cuDQ6MeN5Xs51y0jiJEtjaFOjCIKhGBGdobmOgdWimhIsS5UFtD60+JhOgYswMoQsuqsCgIx2k1elqaipY4kBebZZcXXQOo7tN0ZTb+vcPR/d6t7WG6QAJSLghiQiaXo86IE1yZKZiRlINU1z+frFs68fXJ4/v2cy0XVXoSn1TXiDaSSmdAAlEF4hEEPiM7qqJUDSY2YmpmakWY4Ry6RktrewltI3DczfdUwClecaWOv6enDqfDFz9z3TznbbKUZsK0n0fpAPgiwU3TLnb1xaWbpWq7dc16O7teX5tcV3PvLoY1E4qAZfL4qB2I2SrRouJ3zg8iouvIrPQimEUZErnyEPt4CvykRHyRW4esuzacRYDon7OFSxJ/ChADhI39GhMNEmP3zP79rNfaud0HW1mm/7vm1ZZCD0h/YXN+bfjsLe2Mw2IKVxtL5y5Y79+x9+/LOHnvuOvohzgkZDghMHUcATh0LnjSrxBJUTKXO2yBJkSim806ucxR4JXzxLhCs1SOUugMWr2ZBqa+KqHMNz9SxLB2nr8c/+4W17HgjCSCZO+EmwpxS4vm+iBmvd3tryVRwyvBI/1teut1r1Pe+5x/ereZaeOBEvXFz3wIoQcax60etrb17Q1oP2wmqfuBDTYZrzgZ5rPtruaY6oiWp9k10BXuqy4pX7+CxIdS3TJVNxUZK0EzoPfvzJ/fc9HEdRSTxqJGZuGJ5XQI/j6v2ri0Fv1a/WLNfN8QvR+ty22Y2z2wiuzP6iN3O8vrPwHMlfoAatNIJG5dIHvcHeCQ/CEDSEM4eXLnXPDiIbZw5nkkVIWig3RBUM8gc5iiGvotigRJMwUkvPuqG2bc/DDz76RBbH0pz4LpqihClaispIgOl3FopsUG+Mo4W9oOs41syW2Ypfy1S8d2cn6w9s11pVBgcrfMXX2yNZ8IFs9Vd2jyghy2VMi4zg+uWImKOyR5UIKE1QMaSARzmwfvUmgUB4BautR3Hm1Gcf/dTv2KaJJgBxeICaQ0IGc8NEsjxYdu3cqzfwROGgU6/7k9ObyvboH27HSBMjlsjKRZI3DFsX3sRuJAcT8oj2wiVai99FUXISXFEaU/EDzMyIlXUKr5JJig64eCvUpcjDzH3woU/PbNyaJJHcEnzqrKByIgA6tuO6ccUJm3XH8v2E/DMNmiMbGiPjknGopJ1YYNEvmi6iFIQSGjF5rnBwFlqV9SvLxk74qlIG8a44LeWARYgKhdIBZoEQbVtSliQuWlO33/fAY6jfLaDSNYcaIsvzGOJtLDcZHXEnJ0YCw0n7oWXmrdaI79eAypggkexWnhF0opsEMz5zCZZ5Q4cFrjQRazElmDFJ1g5K19Rgco9Qp8RS6gCXeRbp83ysVR64/+P15ojEz5v4pEFJreqBcXECg07btu2JDdNrfbfbbaPojdaIaVpERnlOVji6acmbkrp8BRj4FVbVtUxAeVjSZfFl3MQ0WMYRI5iaoAY3CiZTHtqW+FchlVy42tpy5/4PlqSqptJM/hVKnpJE2zFJSRcXFhbnr3jNyVartrhwuVpx6s0WvnBImcTzXB9E0IJJih5wI4iZZZDlnVDWh6Wp4h9CyOSruGwWaASFgvQQrKaZu5iWUI/DLW2LSQC2yJPc2rHzfSPjk2kSl6SWQAWq4hVxMkuiKylpd319ZbU9WZ30G0TiXDfdarXO9IczxFhPX/BefQ3wspCB21zDGvtB9JSWffOtNqsGXBLZCfq9FqS91Dh1LeGSePG8kNVOWmRJNDPVwI5Up6XPktgrXk0za7vuuLfksRzy3Wexk5JlIY/0fhCEKZGtbpnVipnpVsX3S6wwQYcP+v5DFaeJvDB55TDnw/Qn9vrohPPAhqr4VyaWSch85uyN7+n3J9uf0L0max8UDF1OoqBz8K9M85Kon5LqMHcRdSh0vzG1acuOoZ9St8EmpArJqJaIgyhgu5bGiiWLmF6sXECrUclNslkyFdoOHYFvGWOm07JsoRQiioKgUo3MlmfN1ByqA9JpVtiG1nQM26gWjUnDHUO8KmTpWhSYdsVhTNFeOYb+lXmTK05MztWbo9K1Okq0fBS46ookYg7GwUFCnRFmcDFREFarrlUBlXjIUglKr4W7vPmwqBy30CLOQjQdStMyoaYVOs01EpZyYkyZxBXzEBnSLU1RJtqxuGFQc3JqzrJthWp4EogKpuKXWUg7wYGqa6lKGomvdsWvVKo+CaGotaiKWBiwRBDDLyIXeYmHEMg3LUA6lkvyJy+aq2/DrwRUMSVuqFvyJnqu22OSg0qj4fG/n4YXUPwwTHECzN7QEvxUrVaR2JiReOJJBGt5CAABd2tkASfHrSvDccoH1GU1NN/LS9KQ8IFPHnYpa0NhVqAaOJ3RoQzVLG+OerOtij2ie6ziqR74BqtcX1KTrNdZa7gteJWkQ/5wF3AqVRmxMrnAY+I+cbi2wdIDkUv+hYWxbqe2wEx1y9UdT5IDmuZ4vIwuZHbclWOYuzAEKyjL86tiBD9/DKel3mAK7mRMwxyfmjKN0PEtsvc4iuM4AR/kpcyFSJknl/udF9LYN230RkJmXqxEydlB75pmkWSSnIiNyAKwOL7Y6xanU/1bpldP44wkETWPozBpXzWmUbYh2GF9QKYoM8Dkfh4rEEuUcl+0EHsKw0TLY6cyMrXZ0e1We2WZp8AjKk9BRtfOvXFw8dLr1p73XW9M4JqUKLgpvmYaq8yKC8AU+QCKa8X4Lv0xLeuszL/6ysENm2+vtybgLnGTE2a/34soTMEBT9/yWaKzjDaEpqgVkDIH8VZIDNqk2GHiWQvKLL2FS426Pr5lDgJcqjSS0kjKeePiievvHLrvQ4/ddd/jlo0X+/8eT/3T3/Qi8/HPfmF60w4MqdNZ+os/+tyNS0dTTRZtgFG8ok64NVYPqaTV7z5KW+EMXRWP9IJUTWOmcaK3O2EU9OqTA782Um00yGXo4ezJFxbePrT37kd33vUI0/p5Gb27Y/l8a6iV5cWn/+XLL7/44mOf/nxrbJqKjunYF8+9QegOo6TAMynNHPIKGkJs0O8qQx12Kpyq/jAP0sVqxSYwBv00UdXJdjdei1ZGZ5Zbo5Ou6wRZeubYs5fPHNl3z8d27HsYoP8X2rvAlbdYEF25eO6F57934NnvVurTTzz5x5u37SFvwEMlUfSz5/8TlSNxG6gUGomXWLmLx4w7ndVbc72FV9hXwxC4Cd/EbHISPAERK+xH/V7YGNHwyldePxDl9fse/Mzu/R8dPvsLb7KG6/dWlheuXDh37MiLb7/5xura+uTMzo/9+hd27n2/5bhpmmH6eN/vf+Pvz711bPfeexcuHhksD8qewKroE+1NVxav/qLU5Iq4IQ5RVgk5fCUl1Vg1gJ5ZZzguM1tyLXdt6cLRF//DIzEo9F4/CPphf9Drddc7a8urK0urq8u9bjfLdNcf2bxt/4Mf/4ONc7vrzQkaU2vCXBzHW19f/vbTXzr002c+9RufX1ldWb58WHyvHGWuTRop4SFbWrgYRQF1PLFYoVo1UWeUAd+eoKpizuIzSFVt03I9CjTR2NSWOz/4uUsXrl5552wQDlzPxpGtrQUR9RMWO07Nr8/M7b5rb3OiOTJVq4+7fs0yHeaZMt2c3M9iqb+6ev3oS99//vtPkcz+9u//6Z3v+/A//90XWYxJ3FJcyRpGOJPVRb66fLmzsjQ+NSOZGYe6BUrJUVItCDIUXRZtgtv0XIoItu/lKIBR3bYJf7u9CMKM+hDuhFwPhVHec9jT0HOJ78JdMeFcSsx53qb48darJw8/f/bNo65Xf+jRJ/bd+0u2V11dW1ycP2+TwKG2Uk26WX+FRqiO+8uXLp6enNlS5vYKrYyEL4yoUElEKXMOKrVEV+qGPVOLdWdbWjTJvOjBccRiw1A6EHCCWcQjCwDeSfuLPA7D9fby5fNvXDh3kvPq8oLr1bbffu9v/t6fTc/uYr3e6barGMDFc8H6jaZyeqUeqhhLB7laCxWDM6+/8t77HhGANw+GZGIyttIKhsQtoDPNVi1OSAoW29f+e3F+vjD8xti0ZXuF7iQpNdqAtJoENwwHfTx6t9NpL62t3GivLGDBlML9amty4233fOiTc9vvGp3cjDJQGFnrLKIUCM51/TOvHzGLLhESfRSKWLnwzovp08IysitvH1+8fmVyw2ZSXlFZhCXuTJIcnpGgwEVZ8+Tj03d4mzY6btFbu9bvzK+tXO8utyyTOnFg2NVOp3vt2o3lVVwFqYBrOnXPH5mcnt2x9wOt8U0jY9ONkSnLcoT5HJRtJJ5mlBbFjhyn0mu3z5896lmUupwsT2jG6EP/SrxOMqlZ9/sLJw7/5LFPPYlh3mRWJsOBDIENXFJB1vJ16m3eBPO2/F07Rx+MQtZJGRlsGW4lj9H1KMolHstiFb8xrKmI92DXQ9bDIV0TQQZBT+wAz6oGoueXD/xX0L4yUiWDkS07IbKMXTRgiRPH8Gy6ZnTy8A+Xb8xLxULZ1q0zzQBKRbJeNeuUBWydZVkah6QrttRxkiSFVOmExdAgZM+jIPay6QDZOG9CTSqvME0jkAkAgaCHYRhFAyVYIY99tCgIjr/8o4odwoOsO8rSnYgWHVAuE3dEVkEFrr924eBPvknapSYpHap/xavUxIlh7MwZJETRgGIcvBSsbLnITEoIfOBiGGe8sPVG1W7WbCr6koiJTqlD+pUKX7/fRlmHjGhaqzV++KUfri+dpWIJnoikSykAzcHKWfwLtZxQseLb6YlXvvvOmZOGI/p062AMSV/YaWQhiRQpEMtOFUU3yZfQH1Y4Mj56b4s7QsvDMO8PWD9mTJyCISUItQ12q0ut11sP40BZj5Baq43cmL/yyoFv1NyYmgFABSteTh0q4ZUcSVZ5Ucw9IamIrv/gm18ZdNfF5ktNUApAzYtKVlamw2p3hnSaxXGMULAJxVwUp1yxHanQYZOULHv9dL1LcCiASw9lGMJIB2G/P+iINxbBivRd2/3Bt/6hCOc9147TIkyKNFELXigo2AesNGCDujtLRlkhienIxsby4rVeP96z736ZklqUU0RyqAQVuYxH7FA1lSQpgohqIrVO2aBDXlEoO29MybJMqKI+gvvHHhgFr0xn3MXpxkm01l6KE2xfgJqmPT624dnvPvXmkWdGG7INisaTkYdJ3h0Amlaa6QrWguE9h5xWvBQ4bJvNwezi+TOGVdu+e7/Ka6U2g7PDpFlmIWmaAQIRR5iK4BDRE6mQGhMAEFegFj5lvU9YZheO9QpyyrU4zVbXrkdxKEFMgFoT45uOHPzxT7/3ldFabJpOEOZBDFCknVNgpQrBIbzyRq4MtaiMLFCGBkSMjt86fdL1R+e23yHkiPdTBVqEyxLANJKsYGsTKExa7dBiK6JIYmFlqUq1pBn4FLOF45DkZ+vd1W6/SxtaWqY9ObHp5JEXv/P0X7a8vuu4gzgbwGgEnVS9tUEsEZ7JgrWupIMHkDgr61v546AiDd3hqZNHTNvfumMfRsxq3WP3EDnGFIVAruOk8ASIFs8AkTCK3mPWokvskNEglRK7BCOokHNGjTlNCWokLoXr+ePjmw7/7EfffurPW26v4ntBlPdDfEheGg8SCGMtUT84oLTRQDo4UwSICig75g0Sh3AdMzx14tCg179t936/wu6shFz2iOGVFxIX7TQpMuP+hWlWOGgtD7MWR4OhmMb0BotR0o8Ga6aZsCcFmkp1vOK1fvTMvz737b8eq8aViofoYTTAG7JMQpdSIlQepSiSToQ3SW1QUoa3JGoIQNEEtIvOuY8qOw4VoGvnjyxdfWvL3M6xiQ0sNMFHLsuM8BuJ1AYk9SmnihcTy0abdKKlbEHCaxhHvd7aoL8G0bJB7lT8+vTywo2n//FPXnv561OjFiuzQYToxVIxgIiAi4hwv5kWZ7htYdF0PIp7yJPtJrDKv1CreEXp1FeUwZoac2v6dbe47Pq+4UzabgW9plofBPzOQsIg6QNPUs5gomxpQy2Mor4sw5Kk224v9QckImatRuVzynUqLz//79/46hc7i6fZ8kUwfYCK6DPUFKBRIls00g/7c9K/xAHTFl5BhxMQrCVQSBGgwjH2rrEqvG1z8yMPbB+pJm+/9tzlc8ebo2N+fTLOXbIIqcLIIbMkHFDEQMmIt0EYkDpFYcd1igqa6I3Um1PY55VzR8+f/Nq5Y1/TsoFhV9BONvewejRVRD8EmknPKHqBDFmMCLhhIAUT9Eh1RPZZuYFtmypjlqIIKQ6lYAzjjdOXmq1GEZ+7dvJvTx8eC/VtzZm7JzbuqtZHTEruLAIkjJLni4sypHLokZJ7ZKNG3Lv89qGDPz519Plg/Z27947duXv62BsLK71gEGb9EHsHJT6ESSIWAYqgZLtPORmhQWEVOsXJqAqwxjCSg0MwgsV95ZEsHSRqtdfDziC3K/xew/XMYKX9+pm3f3r24pcKZ3JseufG2Z2bNs7Obtk4MTWJ3SyvdLu4pc5K0LlSs1Y3TmYLl86cOXk6ilEff2E5uWtfa9NMcHUxxAGHsUhfWZIAJXxgDzg6ASq5tRKZYBWogrrMqWnEFoTQCjPiYwyP3/1QHPDddifIdWdhJUqj0NuzwXKrptWfnHD6Qbdz7dDyxQOnjGJqrHrnHXOMcfy1CzdW+mQwjZp51+7JPVPbalvclZWpMxf764MMZ7yy1t26ZfzM+dVrSxFJotgov+CQX5ugoyVQngaoYJMDXNiWsl+UUwK/cgMKPcahdkqoDGyc9G/fMbGy2tMN+613VtbWIxxts1ltd5P5ZRwlqy/X8/x6vdqoOfxEhh9GIFam6VaqFZ+9V61R9xr1yko7WGCnMciIi9UK6YE9PjFyfam/uBqhCfAqQCVvk7CnGBUmyTJLOpW+ivsTtkHK5gKCV7RK9i8Pi96I11xY6jdHmgQ9FoBhInkJ/bIOG4TMCh0lcuqUDVHTMNWYxlovgS1+4sGPdAjoCzfW6brZ9NZ6HeTeaLZOnLpG4Z4opVyp+GxxxIpU8EqchE2BJaRygFW+wKksp8TqpZEUd9SeDe+o/Hova/eSxbVwEGu3bZs69tolSi8EQ5vapMCVWEWyQneu50IDsJbbUW+QkyslhD629Ayj0+1R8JmbHcWD9np9KphBbBw7cXWxk+EH3g1UlgiCRSmrAqpg6/8DnlUhNsYFwKsAAAAASUVORK5CYII=";
 
-// SlicerLive/render/demos/sl-chrome.ts
+// render/demos/sl-chrome.ts
 var DEFAULT_HELP = [
   { title: "3D view", rows: [
     ["Left-drag", "Rotate"],
@@ -2582,7 +2592,7 @@ function openChromeHelp(host = document.body, sheets = DEFAULT_HELP, actions = [
   glass(panel);
   panel.innerHTML = `<div style="font:800 20px -apple-system,system-ui,sans-serif;margin-bottom:4px">SlicerLive \u2014 controls</div>`;
   for (const sec of sheets) {
-    const rows = sec.rows.map(([k2, d]) => `<div style="font:600 12px ui-monospace,Menlo,monospace;color:#fff5d6;white-space:nowrap">${k2}</div><div style="color:rgba(232,238,255,.85)">${d}</div>`).join("");
+    const rows = sec.rows.map(([k, d]) => `<div style="font:600 12px ui-monospace,Menlo,monospace;color:#fff5d6;white-space:nowrap">${k}</div><div style="color:rgba(232,238,255,.85)">${d}</div>`).join("");
     panel.innerHTML += `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><div style="font:700 11px -apple-system,system-ui,sans-serif;letter-spacing:1.1px;text-transform:uppercase;color:#9fe9ff;margin-bottom:9px">${sec.title}</div><div style="display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;align-items:baseline">${rows}</div></div>`;
   }
   if (actions.length) {
@@ -2678,7 +2688,7 @@ function installChrome(opts) {
     box.style.opacity = level < 0.02 ? "0.75" : "1";
     box.innerHTML = `<span style="position:absolute;left:0;top:0;bottom:0;width:${pct}%;background:${c};opacity:.9"></span><span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:700 10px -apple-system,system-ui,sans-serif;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.75)">${pct}%</span>`;
   };
-  const triNext = (v2) => v2 > 0.66 ? 0.5 : v2 > 0.04 ? 0 : 1;
+  const triNext = (v) => v > 0.66 ? 0.5 : v > 0.04 ? 0 : 1;
   const attachOpacity = (box, get, set, color, onChange) => {
     box.style.cursor = "ew-resize";
     box.title = "Click: 100% \u2192 50% \u2192 off \xB7 Drag sideways for a live opacity slider";
@@ -2795,7 +2805,7 @@ function installChrome(opts) {
         inp.step = String(c.slider.step ?? 1);
         inp.value = String(c.slider.get());
         inp.style.cssText = "width:100%;accent-color:#54c6f0;cursor:pointer;";
-        const fmt = c.slider.format ?? ((v2) => String(Math.round(v2)));
+        const fmt = c.slider.format ?? ((v) => String(Math.round(v)));
         const paint = () => {
           val.textContent = fmt(c.slider.get());
         };
@@ -2926,8 +2936,8 @@ function installChrome(opts) {
   }
   function refresh() {
     for (const { c, el: el2 } of selEls) {
-      const v2 = c.get();
-      if (el2.value !== v2) el2.value = v2;
+      const v = c.get();
+      if (el2.value !== v) el2.value = v;
     }
     for (const { c, row, sw, repaint } of rows) {
       const dis = c.disabled?.() ?? false;
@@ -2988,8 +2998,8 @@ function installChrome(opts) {
   return { refresh, destroy, openHelp };
 }
 
-// SlicerLive/render/recorder.ts
-var clone = (v2) => structuredClone(v2);
+// render/recorder.ts
+var clone = (v) => structuredClone(v);
 function seekFrames(frames, t) {
   let base = -1;
   for (let i = 0; i < frames.length; i++) {
@@ -3028,17 +3038,17 @@ function nearestThumbOf(thumbs, t) {
   return best;
 }
 
-// SlicerLive/render/commits.ts
-function canonicalize(v2) {
-  if (v2 === null || typeof v2 === "boolean" || typeof v2 === "number") return JSON.stringify(v2);
-  if (typeof v2 === "string") return JSON.stringify(v2);
-  if (Array.isArray(v2)) return "[" + v2.map(canonicalize).join(",") + "]";
-  if (typeof v2 === "object") {
-    const o = v2;
-    const keys = Object.keys(o).filter((k2) => o[k2] !== void 0).sort();
-    return "{" + keys.map((k2) => JSON.stringify(k2) + ":" + canonicalize(o[k2])).join(",") + "}";
+// render/commits.ts
+function canonicalize(v) {
+  if (v === null || typeof v === "boolean" || typeof v === "number") return JSON.stringify(v);
+  if (typeof v === "string") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(canonicalize).join(",") + "]";
+  if (typeof v === "object") {
+    const o = v;
+    const keys = Object.keys(o).filter((k) => o[k] !== void 0).sort();
+    return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalize(o[k])).join(",") + "}";
   }
-  throw new Error("cannot canonicalize " + typeof v2);
+  throw new Error("cannot canonicalize " + typeof v);
 }
 async function sha256Hex(s) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -3050,7 +3060,7 @@ async function hashCommit(c) {
 }
 async function sealStream(deltas, opts = {}) {
   const interval = opts.intervalMs ?? 1e3;
-  const iso = opts.isoFromMs ?? ((ms) => new Date(ms).toISOString());
+  const iso = opts.isoFromMs ?? ((ms2) => new Date(ms2).toISOString());
   const commits = [];
   let parent = null;
   let bundle = [];
@@ -3112,7 +3122,7 @@ async function verifyChain(commits) {
   return { ok: true };
 }
 
-// SlicerLive/render/recording.ts
+// render/recording.ts
 function reduceEvent(nodes, ev) {
   const t = ev.t;
   switch (ev.event) {
@@ -3131,8 +3141,8 @@ function reduceEvent(nodes, ev) {
       const id = ev.sourceId;
       const node = nodes.get(id);
       if (!node) return null;
-      for (const k2 of ["position", "focalPoint", "viewUp", "viewAngle", "parallelScale"]) {
-        if (k2 in ev) node[k2] = ev[k2];
+      for (const k of ["position", "focalPoint", "viewUp", "viewAngle", "parallelScale"]) {
+        if (k in ev) node[k] = ev[k];
       }
       return { t, k: "up", id, node: structuredClone(node) };
     }
@@ -3140,8 +3150,8 @@ function reduceEvent(nodes, ev) {
       const id = ev.sourceId;
       const node = nodes.get(id);
       if (!node || !ev.display) return null;
-      for (const k2 of ["visible", "opacity", "fill2D", "outline2D", "segments"]) {
-        if (k2 in ev.display) node[k2] = ev.display[k2];
+      for (const k of ["visible", "opacity", "fill2D", "outline2D", "segments"]) {
+        if (k in ev.display) node[k] = ev.display[k];
       }
       return { t, k: "up", id, node: structuredClone(node) };
     }
@@ -3171,21 +3181,21 @@ var Recording = class _Recording {
     if (!base.endsWith("/")) base += "/";
     const man = await (await fetch(base + "recording.json")).json();
     const keyDocs = await Promise.all(
-      man.keyframes.map((k2) => fetch(base + k2.scene).then((r) => r.json()))
+      man.keyframes.map((k) => fetch(base + k.scene).then((r) => r.json()))
     );
     const items = [];
-    man.keyframes.forEach((k2, i) => items.push({ t: k2.t, key: keyDocs[i].nodes }));
+    man.keyframes.forEach((k, i) => items.push({ t: k.t, key: keyDocs[i].nodes }));
     for (const e of man.events) items.push({ t: e.t, ev: e });
     items.sort((a, b) => a.t - b.t || (a.key ? 0 : 1) - (b.key ? 0 : 1));
     const frames = [];
     const cur = /* @__PURE__ */ new Map();
-    for (const it2 of items) {
-      if (it2.key) {
-        frames.push({ t: it2.t, k: "key", nodes: structuredClone(it2.key) });
+    for (const it of items) {
+      if (it.key) {
+        frames.push({ t: it.t, k: "key", nodes: structuredClone(it.key) });
         cur.clear();
-        for (const [id, n] of Object.entries(it2.key)) cur.set(id, structuredClone(n));
-      } else if (it2.ev) {
-        const fr2 = reduceEvent(cur, it2.ev);
+        for (const [id, n] of Object.entries(it.key)) cur.set(id, structuredClone(n));
+      } else if (it.ev) {
+        const fr2 = reduceEvent(cur, it.ev);
         if (fr2) frames.push(fr2);
       }
     }
@@ -3235,7 +3245,7 @@ var Recording = class _Recording {
   }
 };
 
-// SlicerLive/render/vtk-interactor.ts
+// render/vtk-interactor.ts
 var MOTION_FACTOR = 10;
 var MOUSE_WHEEL_MOTION_FACTOR = 1;
 function actionForButton(button, m = {}) {
@@ -3275,9 +3285,9 @@ var CameraInteractor = class _CameraInteractor {
   /** Mouse move while dragging. width/height are the view size in CSS pixels. */
   move(cssX, cssY, width, height) {
     if (this.action === "none" || !this.prev) return;
-    const [x2, y] = _CameraInteractor.toDisplay(cssX, cssY, height);
-    const dx = x2 - this.prev[0];
-    const dy = y - this.prev[1];
+    const [x, y2] = _CameraInteractor.toDisplay(cssX, cssY, height);
+    const dx = x - this.prev[0];
+    const dy = y2 - this.prev[1];
     if (dx === 0 && dy === 0) return;
     switch (this.action) {
       case "rotate":
@@ -3290,10 +3300,10 @@ var CameraInteractor = class _CameraInteractor {
         this.scale(dy, height);
         break;
       case "spin":
-        this.spin(x2, y, this.prev[0], this.prev[1], width, height);
+        this.spin(x, y2, this.prev[0], this.prev[1], width, height);
         break;
     }
-    this.prev = [x2, y];
+    this.prev = [x, y2];
     this.onChange?.();
   }
   /** vtkMRMLCameraWidget::ProcessRotate */
@@ -3313,9 +3323,9 @@ var CameraInteractor = class _CameraInteractor {
     this.camera.dolly(Math.pow(1.1, -dyf));
   }
   /** vtkMRMLCameraWidget::ProcessSpin — roll about the view plane normal. */
-  spin(x2, y, px, py, width, height) {
+  spin(x, y2, px, py, width, height) {
     const cx = width / 2, cy = height / 2;
-    const newAngle = Math.atan2(y - cy, x2 - cx) * 180 / Math.PI;
+    const newAngle = Math.atan2(y2 - cy, x - cx) * 180 / Math.PI;
     const oldAngle = Math.atan2(py - cy, px - cx) * 180 / Math.PI;
     this.roll(newAngle - oldAngle);
   }
@@ -3324,14 +3334,14 @@ var CameraInteractor = class _CameraInteractor {
     const cam = this.camera;
     const axis = cam.directionOfProjection;
     const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
-    const v2 = cam.viewUp;
-    const k2 = axis;
-    const kv = [k2[1] * v2[2] - k2[2] * v2[1], k2[2] * v2[0] - k2[0] * v2[2], k2[0] * v2[1] - k2[1] * v2[0]];
-    const kd = k2[0] * v2[0] + k2[1] * v2[1] + k2[2] * v2[2];
+    const v = cam.viewUp;
+    const k = axis;
+    const kv = [k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]];
+    const kd = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
     cam.viewUp = [
-      v2[0] * c + kv[0] * s + k2[0] * kd * (1 - c),
-      v2[1] * c + kv[1] * s + k2[1] * kd * (1 - c),
-      v2[2] * c + kv[2] * s + k2[2] * kd * (1 - c)
+      v[0] * c + kv[0] * s + k[0] * kd * (1 - c),
+      v[1] * c + kv[1] * s + k[1] * kd * (1 - c),
+      v[2] * c + kv[2] * s + k[2] * kd * (1 - c)
     ];
     cam.orthogonalizeViewUp();
     this.onChange?.();
@@ -3344,7 +3354,7 @@ var CameraInteractor = class _CameraInteractor {
   }
 };
 
-// SlicerLive/render/demos/slice-control.ts
+// render/demos/slice-control.ts
 function attachSliceControls(canvas, cfg) {
   const SCROLL_PX = cfg.scrollPx ?? 7;
   const h = cfg.hooks ?? {};
@@ -3361,8 +3371,8 @@ function attachSliceControls(canvas, cfg) {
   const onWheel = (e) => {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
-      const { u, v: v2, w, h: hh } = uv(e);
-      cfg.getSlice().zoomAbout(cfg.orient, Math.exp(-e.deltaY * 15e-4), u, v2, w, hh);
+      const { u, v, w, h: hh } = uv(e);
+      cfg.getSlice().zoomAbout(cfg.orient, Math.exp(-e.deltaY * 15e-4), u, v, w, hh);
       cfg.redraw();
       h.onZoom?.();
       return;
@@ -3392,24 +3402,24 @@ function attachSliceControls(canvas, cfg) {
     const wantZoom = e.button === 2;
     if (wantPan || wantZoom) {
       e.preventDefault();
-      const { u: u2, v: v3 } = uv(e);
-      view = { mode: wantZoom ? "zoom" : "pan", x: e.clientX, y: e.clientY, pu: u2, pv: v3 };
+      const { u: u2, v: v2 } = uv(e);
+      view = { mode: wantZoom ? "zoom" : "pan", x: e.clientX, y: e.clientY, pu: u2, pv: v2 };
       canvas.style.cursor = wantZoom ? "ns-resize" : "grabbing";
       canvas.setPointerCapture(e.pointerId);
       return;
     }
     if (e.button !== 0) return;
     e.preventDefault();
-    const { u, v: v2, w, h: hh } = uv(e);
+    const { u, v, w, h: hh } = uv(e);
     const mode = cfg.leftMode?.() ?? (cfg.wl?.enabled() ? "wl" : "scroll");
-    if (h.onLeftGrab?.(u, v2, w, hh)) {
+    if (h.onLeftGrab?.(u, v, w, hh)) {
       grabbed = { moved: 0 };
     } else if (mode === "wl" && cfg.wl) {
       const [win, lev] = cfg.wl.get();
       wlDrag = { x: e.clientX, y: e.clientY, win, lev };
       canvas.style.cursor = "crosshair";
     } else if (mode === "zoom" || mode === "pan") {
-      view = { mode, x: e.clientX, y: e.clientY, pu: u, pv: v2 };
+      view = { mode, x: e.clientX, y: e.clientY, pu: u, pv: v };
       canvas.style.cursor = mode === "zoom" ? "ns-resize" : "grabbing";
     } else scroll = { x: e.clientX, y: e.clientY, acc: 0 };
     canvas.setPointerCapture(e.pointerId);
@@ -3427,18 +3437,18 @@ function attachSliceControls(canvas, cfg) {
     }
     if (grabbed) {
       grabbed.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
-      const { u, v: v2, w, h: hh } = uv(e);
-      h.onLeftDrag?.(u, v2, w, hh);
+      const { u, v, w, h: hh } = uv(e);
+      h.onLeftDrag?.(u, v, w, hh);
       return;
     }
     if (wlDrag && cfg.wl) {
-      const [lo, hi2] = cfg.wl.range();
+      const [lo2, hi2] = cfg.wl.range();
       const r = canvas.getBoundingClientRect();
-      const gain = (hi2 - lo) / Math.max(1, Math.min(r.width, r.height));
+      const gain = (hi2 - lo2) / Math.max(1, Math.min(r.width, r.height));
       let win = wlDrag.win + gain * (e.clientX - wlDrag.x);
       if (win < 0) win = 0;
       let lev = wlDrag.lev + gain * (wlDrag.y - e.clientY);
-      if (lev < lo - win / 2) lev = lo - win / 2;
+      if (lev < lo2 - win / 2) lev = lo2 - win / 2;
       if (lev > hi2 + win / 2) lev = hi2 + win / 2;
       cfg.wl.set(win, lev);
       wlDrag = { x: e.clientX, y: e.clientY, win, lev };
@@ -3458,8 +3468,8 @@ function attachSliceControls(canvas, cfg) {
       return;
     }
     if (e.buttons === 0 && h.onHover) {
-      const { u, v: v2, w, h: hh } = uv(e);
-      h.onHover(u, v2, w, hh);
+      const { u, v, w, h: hh } = uv(e);
+      h.onHover(u, v, w, hh);
     }
   };
   const onUp = (e) => {
@@ -3507,7 +3517,7 @@ function attachSliceControls(canvas, cfg) {
   };
 }
 
-// SlicerLive/render/capsule-field.ts
+// render/capsule-field.ts
 var MAX = 256;
 var CapsuleField = class {
   kind = "cap";
@@ -3565,23 +3575,23 @@ var CapsuleField = class {
   }
   aabb() {
     if (this.n === 0) return [[-1, -1, -1], [1, 1, 1]];
-    const lo = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
+    const lo2 = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
     for (let i = 0; i < this.n; i++) {
       const r = this.screen ? 0 : this.segA[i * 4 + 3];
       for (let a = 0; a < 3; a++) {
-        lo[a] = Math.min(lo[a], this.segA[i * 4 + a] - r, this.segB[i * 4 + a] - r);
+        lo2[a] = Math.min(lo2[a], this.segA[i * 4 + a] - r, this.segB[i * 4 + a] - r);
         hi2[a] = Math.max(hi2[a], this.segA[i * 4 + a] + r, this.segB[i * 4 + a] + r);
       }
     }
     if (this.screen) {
-      const diag = Math.hypot(hi2[0] - lo[0], hi2[1] - lo[1], hi2[2] - lo[2]);
+      const diag = Math.hypot(hi2[0] - lo2[0], hi2[1] - lo2[1], hi2[2] - lo2[2]);
       const m = Math.max(40, diag * 0.15);
       for (let a = 0; a < 3; a++) {
-        lo[a] -= m;
+        lo2[a] -= m;
         hi2[a] += m;
       }
     }
-    return [lo, hi2];
+    return [lo2, hi2];
   }
   structMembers(s) {
     return [
@@ -3596,10 +3606,10 @@ var CapsuleField = class {
       `  cap${s}_colors : array<vec4<f32>, ${MAX}>,`
     ].join("\n");
   }
-  declareBindings(_s, _base) {
+  declareBindings(_s2, _base) {
     return "";
   }
-  bindEntries(_s, _base) {
+  bindEntries(_s2, _base) {
     return [];
   }
   skipWGSL(s) {
@@ -3684,7 +3694,7 @@ fn sample_field_cap${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
   }
 };
 
-// SlicerLive/render/textures.ts
+// render/textures.ts
 function writeScalarTexture3DSlices(dev, texture, data, dims, zStart, zCount) {
   const [dx, dy, dz] = dims;
   if (zCount <= 0 || zStart < 0 || zStart >= dz) {
@@ -3735,17 +3745,17 @@ function writeScalarTexture3DRegion(dev, texture, data, dims, xStart, yStart, zS
   );
 }
 
-// SlicerLive/render/fields.ts
-function transformedAABB(m, lo, hi2) {
-  const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+// render/fields.ts
+function transformedAABB(m, lo2, hi2) {
+  const mn2 = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < 8; i++) {
-    const c = applyMat4(m, [i & 1 ? hi2[0] : lo[0], i & 2 ? hi2[1] : lo[1], i & 4 ? hi2[2] : lo[2]]);
+    const c = applyMat4(m, [i & 1 ? hi2[0] : lo2[0], i & 2 ? hi2[1] : lo2[1], i & 4 ? hi2[2] : lo2[2]]);
     for (let a = 0; a < 3; a++) {
-      mn[a] = Math.min(mn[a], c[a]);
+      mn2[a] = Math.min(mn2[a], c[a]);
       mx[a] = Math.max(mx[a], c[a]);
     }
   }
-  return [mn, mx];
+  return [mn2, mx];
 }
 var ImageField = class {
   kind = "img";
@@ -3851,8 +3861,8 @@ var ImageField = class {
   }
   /** The scalar range the LUT spans — window/level for the volume rendering. Re-packed into
    *  the material uniform on the next syncUniforms()/render, so no pipeline rebuild. */
-  setClim(lo, hi2) {
-    this.clim = [lo, hi2];
+  setClim(lo2, hi2) {
+    this.clim = [lo2, hi2];
   }
   getClim() {
     return [this.clim[0], this.clim[1]];
@@ -3886,8 +3896,8 @@ var ImageField = class {
   }
   /** Centre of the volume in world (RAS) at identity — a natural pivot for a transform widget. */
   worldCenter() {
-    const [lo, hi2] = this.origBox ?? this.box;
-    return [(lo[0] + hi2[0]) / 2, (lo[1] + hi2[1]) / 2, (lo[2] + hi2[2]) / 2];
+    const [lo2, hi2] = this.origBox ?? this.box;
+    return [(lo2[0] + hi2[0]) / 2, (lo2[1] + hi2[1]) / 2, (lo2[2] + hi2[2]) / 2];
   }
   /** Place the volume in the world by a rigid transform M (worldFromLocal): the ray samples
    *  at p2t·M⁻¹·wp, so the volume appears moved/rotated. A Tier-A interactive update — caller
@@ -3981,7 +3991,7 @@ fn sample_field_img${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
     out[off + 23] = this.shade[3];
     out[off + 24] = this.unit;
   }
-  bindEntries(_s, base) {
+  bindEntries(_s2, base) {
     return [
       { binding: base, resource: this.volTex.createView() },
       { binding: base + 1, resource: this.lutTex.createView() }
@@ -4316,7 +4326,7 @@ fn sample_field_seg${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
     out[off + 33] = this.box[1][1];
     out[off + 34] = this.box[1][2];
   }
-  bindEntries(_s, base) {
+  bindEntries(_s2, base) {
     const e = [{ binding: base, resource: this.tex.createView() }];
     if (this.attrTex) e.push({ binding: base + 1, resource: this.attrTex.createView() });
     return e;
@@ -4430,12 +4440,12 @@ fn sample_field_rgba${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
     out[off + 22] = this.shade[2];
     out[off + 23] = this.shade[3];
   }
-  bindEntries(_s, base) {
+  bindEntries(_s2, base) {
     return [{ binding: base, resource: this.tex.createView() }];
   }
 };
 
-// SlicerLive/render/fiducial-field.ts
+// render/fiducial-field.ts
 var MAX2 = 64;
 var FiducialField = class {
   kind = "fid";
@@ -4504,23 +4514,23 @@ var FiducialField = class {
   }
   aabb() {
     if (this.n === 0) return [[-1, -1, -1], [1, 1, 1]];
-    const lo = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
+    const lo2 = [Infinity, Infinity, Infinity], hi2 = [-Infinity, -Infinity, -Infinity];
     for (let i = 0; i < this.n; i++) {
       const r = this.screen ? 0 : this.spheres[i * 4 + 3];
       for (let a = 0; a < 3; a++) {
-        lo[a] = Math.min(lo[a], this.spheres[i * 4 + a] - r);
+        lo2[a] = Math.min(lo2[a], this.spheres[i * 4 + a] - r);
         hi2[a] = Math.max(hi2[a], this.spheres[i * 4 + a] + r);
       }
     }
     if (this.screen) {
-      const diag = Math.hypot(hi2[0] - lo[0], hi2[1] - lo[1], hi2[2] - lo[2]);
+      const diag = Math.hypot(hi2[0] - lo2[0], hi2[1] - lo2[1], hi2[2] - lo2[2]);
       const m = Math.max(40, diag * 0.15);
       for (let a = 0; a < 3; a++) {
-        lo[a] -= m;
+        lo2[a] -= m;
         hi2[a] += m;
       }
     }
-    return [lo, hi2];
+    return [lo2, hi2];
   }
   structMembers(s) {
     return [
@@ -4534,10 +4544,10 @@ var FiducialField = class {
       `  fid${s}_colors : array<vec4<f32>, ${MAX2}>,`
     ].join("\n");
   }
-  declareBindings(_s, _base) {
+  declareBindings(_s2, _base) {
     return "";
   }
-  bindEntries(_s, _base) {
+  bindEntries(_s2, _base) {
     return [];
   }
   // --- empty-space skipping -------------------------------------------------
@@ -4647,7 +4657,7 @@ fn sample_field_fid${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
   }
 };
 
-// SlicerLive/render/roi-box-field.ts
+// render/roi-box-field.ts
 var RoiBoxField = class {
   kind = "roi";
   bindingCount = 0;
@@ -4761,7 +4771,7 @@ fn sample_field_roi${s}(wp : vec3<f32>, rd : vec3<f32>) -> vec4<f32> {
   }
 };
 
-// SlicerLive/render/bake.ts
+// render/bake.ts
 var INIT_WGSL = (
   /* wgsl */
   `
@@ -4919,7 +4929,7 @@ var ColorizeBaker = class {
   }
 };
 
-// SlicerLive/render/zarr.ts
+// render/zarr.ts
 var ZDT = {
   "<f4": Float32Array,
   "<f8": Float64Array,
@@ -4933,8 +4943,8 @@ var ZDT = {
   "<u1": Uint8Array
 };
 async function inflateDeflate(buf) {
-  const ds = new DecompressionStream("deflate");
-  return await new Response(new Response(buf).body.pipeThrough(ds)).arrayBuffer();
+  const ds2 = new DecompressionStream("deflate");
+  return await new Response(new Response(buf).body.pipeThrough(ds2)).arrayBuffer();
 }
 var blobFetch = (url) => fetch(url);
 function setBlobFetch(f) {
@@ -5012,7 +5022,7 @@ async function assembleZarr(blobBase, z2, Ctor, opts) {
   } else {
     out = new Ctor(expected);
   }
-  let lo = Infinity, hi2 = -Infinity;
+  let lo2 = Infinity, hi2 = -Infinity;
   const onBytes = opts.onBytes;
   const onSlab = opts.onSlab;
   const onChunk = opts.onChunk;
@@ -5058,10 +5068,10 @@ async function assembleZarr(blobBase, z2, Ctor, opts) {
           const src = (zz * cy + yy) * cx;
           const dst = ((z0 + zz) * ny + (y0 + yy)) * nx + x0;
           for (let xx = 0; xx < xw; xx++) {
-            const v2 = chunk[src + xx];
-            out[dst + xx] = v2;
-            if (v2 < lo) lo = v2;
-            if (v2 > hi2) hi2 = v2;
+            const v = chunk[src + xx];
+            out[dst + xx] = v;
+            if (v < lo2) lo2 = v;
+            if (v > hi2) hi2 = v;
           }
         }
       }
@@ -5089,16 +5099,16 @@ async function assembleZarr(blobBase, z2, Ctor, opts) {
     }
   };
   await Promise.all(Array.from({ length: Math.min(opts.concurrency, jobs.length) }, worker));
-  return { data: out, dtype: z2.dtype, dims, range: [lo, hi2] };
+  return { data: out, dtype: z2.dtype, dims, range: [lo2, hi2] };
 }
 
-// SlicerLive/logic/transforms.ts
+// logic/transforms.ts
 var IDENTITY4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 function rowMul(a, b) {
   const out = new Array(16).fill(0);
   for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
     let s = 0;
-    for (let k2 = 0; k2 < 4; k2++) s += a[r * 4 + k2] * b[k2 * 4 + c];
+    for (let k = 0; k < 4; k++) s += a[r * 4 + k] * b[k * 4 + c];
     out[r * 4 + c] = s;
   }
   return out;
@@ -5118,7 +5128,7 @@ function worldForNode(node, nodes) {
   return worldMatrix(parentTransformId(node), nodes);
 }
 
-// SlicerLive/render/scene-volume.ts
+// render/scene-volume.ts
 function interpTF(tf, s, comps) {
   if (!tf.length) return new Array(comps).fill(0);
   if (s <= tf[0][0]) return tf[0].slice(1, 1 + comps);
@@ -5128,7 +5138,7 @@ function interpTF(tf, s, comps) {
     if (s <= tf[i][0]) {
       const a = tf[i - 1], b = tf[i];
       const u = (s - a[0]) / Math.max(b[0] - a[0], 1e-9);
-      return Array.from({ length: comps }, (_2, c) => a[1 + c] + u * (b[1 + c] - a[1 + c]));
+      return Array.from({ length: comps }, (_, c) => a[1 + c] + u * (b[1 + c] - a[1 + c]));
     }
   }
   return last.slice(1, 1 + comps);
@@ -5147,22 +5157,22 @@ function lutFromTransferFunctions(colorTF, opacityTF, clim) {
   return lut;
 }
 
-// SlicerLive/render/liveops.ts
+// render/liveops.ts
 function pointerKeys(path) {
-  return path.replace(/^#/, "").split("/").filter((k2) => k2.length > 0);
+  return path.replace(/^#/, "").split("/").filter((k) => k.length > 0);
 }
 function setByPointer(obj, path, value) {
   const keys = pointerKeys(path);
   if (keys.length === 0) return false;
   let cur = obj;
   for (let i = 0; i < keys.length - 1; i++) {
-    const k2 = keys[i];
+    const k = keys[i];
     if (cur == null || typeof cur !== "object") return false;
     const container = cur;
-    let next = container[k2];
+    let next = container[k];
     if (next == null || typeof next !== "object") {
       next = /^\d+$/.test(keys[i + 1]) ? [] : {};
-      container[k2] = next;
+      container[k] = next;
     }
     cur = next;
   }
@@ -5182,9 +5192,9 @@ var CMDS = {
   },
   setCameraPose(node, args) {
     let did = false;
-    for (const k2 of ["position", "focalPoint", "viewUp"]) {
-      if (Array.isArray(args[k2])) {
-        node[k2] = [...args[k2]];
+    for (const k of ["position", "focalPoint", "viewUp"]) {
+      if (Array.isArray(args[k])) {
+        node[k] = [...args[k]];
         did = true;
       }
     }
@@ -5192,9 +5202,9 @@ var CMDS = {
   },
   setRoi(node, args) {
     let did = false;
-    for (const k2 of ["center", "size"]) {
-      if (Array.isArray(args[k2])) {
-        node[k2] = [...args[k2]];
+    for (const k of ["center", "size"]) {
+      if (Array.isArray(args[k])) {
+        node[k] = [...args[k]];
         did = true;
       }
     }
@@ -5230,7 +5240,7 @@ function applyOp(nodes, op) {
   }
 }
 
-// SlicerLive/render/livescene.ts
+// render/livescene.ts
 var LiveScene = class {
   // LiveScene is the pure data model — no wire. A LiveSync (render/livesync.ts) owns the transport,
   // reconnect, coalescing, and echo suppression; it drives this model via receiveEvent()/applyRemote()
@@ -5306,16 +5316,16 @@ var LiveScene = class {
   }
   /** Fan a completed op mutation out to displayers + the `_changes` feed. `op` is set only for LOCAL
    *  writes so LiveSync replicates them (echo suppression: remote/event changes carry no op). */
-  applied(r, origin, v2, op) {
+  applied(r, origin, v, op) {
     if (r.kind === "del") {
       for (const m of this.managers) m.onNodeRemoved?.(r.id, this);
-      this.feed({ id: r.id, kind: "remove", origin, v: v2, op });
+      this.feed({ id: r.id, kind: "remove", origin, v, op });
       return;
     }
     const node = this.nodes.get(r.id);
     if (!node) return;
     for (const m of this.interested(node.type)) m.onNodeAdded?.(node, this);
-    this.feed({ id: r.id, type: node.type, kind: "upsert", origin, v: v2, node, op });
+    this.feed({ id: r.id, type: node.type, kind: "upsert", origin, v, node, op });
   }
   // ── replay (SceneRecorder) ──────────────────────────────────────────────────
   // When applyView is false the model + _changes feed still update on every inbound event (so a
@@ -5407,8 +5417,8 @@ var LiveScene = class {
       const node = this.nodes.get(id);
       const disp = ev.display;
       if (node && disp) {
-        for (const k2 of ["visible", "opacity", "fill2D", "outline2D", "segments"]) {
-          if (k2 in disp) node[k2] = disp[k2];
+        for (const k of ["visible", "opacity", "fill2D", "outline2D", "segments"]) {
+          if (k in disp) node[k] = disp[k];
         }
       }
       if (live) for (const m of this.interested("segmentation")) await m.onEvent?.(ev, this);
@@ -5417,8 +5427,8 @@ var LiveScene = class {
       const id = ev.sourceId;
       const node = this.nodes.get(id);
       if (node) {
-        for (const k2 of ["position", "focalPoint", "viewUp", "viewAngle", "parallelScale"]) {
-          if (k2 in ev) node[k2] = ev[k2];
+        for (const k of ["position", "focalPoint", "viewUp", "viewAngle", "parallelScale"]) {
+          if (k in ev) node[k] = ev[k];
         }
       }
       if (live) for (const m of this.interested("camera")) await m.onEvent?.(ev, this);
@@ -5569,12 +5579,12 @@ var MarkupsDisplayableManager = class {
   isHeld(id) {
     const now = performance.now();
     let held = false;
-    for (const [k2, t] of this.heldUntil) {
+    for (const [k, t] of this.heldUntil) {
       if (t <= now) {
-        this.heldUntil.delete(k2);
+        this.heldUntil.delete(k);
         continue;
       }
-      if (k2.startsWith(id + ":")) held = true;
+      if (k.startsWith(id + ":")) held = true;
     }
     return held;
   }
@@ -5657,9 +5667,9 @@ var SliceDisplayableManager = class _SliceDisplayableManager {
     const m = node.sliceToRAS;
     if (!cell || !m || m.length < 16) return;
     const col = (c) => [m[c], m[4 + c], m[8 + c]];
-    const norm2 = (v2) => {
-      const l = Math.hypot(v2[0], v2[1], v2[2]) || 1;
-      return [v2[0] / l, v2[1] / l, v2[2] / l];
+    const norm2 = (v) => {
+      const l = Math.hypot(v[0], v[1], v[2]) || 1;
+      return [v[0] / l, v[1] / l, v[2] / l];
     };
     const nDir = norm2(col(2)), uDir = norm2(col(0)), vDir = norm2(col(1));
     const trans = [m[3], m[7], m[11]];
@@ -5707,7 +5717,7 @@ function segPalette(segments) {
   return p;
 }
 function paletteKey(segments) {
-  return (segments ?? []).map((s) => `${s.labelValue}:${s.color.map((x2) => x2.toFixed(3)).join(",")}:${s.visible !== false}`).join("|");
+  return (segments ?? []).map((s) => `${s.labelValue}:${s.color.map((x) => x.toFixed(3)).join(",")}:${s.visible !== false}`).join("|");
 }
 var SegmentationDisplayableManager = class {
   // is the 3D field currently in the view?
@@ -5939,20 +5949,20 @@ var VolumeRenderingDisplayableManager = class {
   }
   // 256-entry rgba8 LUT sampled across the DATA RANGE (clim is fixed to that range).
   buildLUT(range) {
-    const cs = this.tf?.colorStops;
-    const os = this.tf?.scalarOpacity;
-    if (cs?.length && os?.length) {
-      const colorTF = cs.map((s) => [s.value, s.rgba[0], s.rgba[1], s.rgba[2]]);
-      const opac = os.map((s) => [s.value, s.opacity]);
+    const cs2 = this.tf?.colorStops;
+    const os2 = this.tf?.scalarOpacity;
+    if (cs2?.length && os2?.length) {
+      const colorTF = cs2.map((s) => [s.value, s.rgba[0], s.rgba[1], s.rgba[2]]);
+      const opac = os2.map((s) => [s.value, s.opacity]);
       return lutFromTransferFunctions(colorTF, opac, range);
     }
     const win = this.scalarDisp?.window ?? range[1] - range[0];
     const lev = this.scalarDisp?.level ?? (range[0] + range[1]) / 2;
-    const lo = lev - win / 2, hi2 = lev + win / 2;
+    const lo2 = lev - win / 2, hi2 = lev + win / 2;
     const lut = new Uint8Array(256 * 4);
     for (let i = 0; i < 256; i++) {
-      const v2 = range[0] + i / 255 * (range[1] - range[0]);
-      const g = Math.max(0, Math.min(1, (v2 - lo) / Math.max(hi2 - lo, 1e-6)));
+      const v = range[0] + i / 255 * (range[1] - range[0]);
+      const g = Math.max(0, Math.min(1, (v - lo2) / Math.max(hi2 - lo2, 1e-6)));
       lut[i * 4] = lut[i * 4 + 1] = lut[i * 4 + 2] = Math.round(g * 255);
       lut[i * 4 + 3] = Math.round(Math.max(0, Math.min(1, (g - 0.15) / 0.85)) * 200);
     }
@@ -5960,7 +5970,7 @@ var VolumeRenderingDisplayableManager = class {
   }
 };
 
-// SlicerLive/algorithms/geom.ts
+// algorithms/geom.ts
 function transpose42(m) {
   const o = new Float32Array(16);
   for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) o[c * 4 + r] = m[r * 4 + c];
@@ -5971,7 +5981,7 @@ function spacingFromIjkToRAS2(ijkToRAS) {
   return [col(0), col(1), col(2)];
 }
 
-// SlicerLive/algorithms/editable-segmentation.ts
+// algorithms/editable-segmentation.ts
 var EditableSegmentation = class {
   dims;
   ijkToRAS;
@@ -6023,9 +6033,9 @@ var EditableSegmentation = class {
   /** Region-limited labelmap write (`lo`/`size` in label-grid ijk; data x-fastest, tightly packed).
    *  Deliberately NO dirty notification: the caller pairs it with a region-limited rebake
    *  (SegmentationLogic.rebakeShellRegion) — an onDirty full rebake would defeat the point. */
-  writeLabelRegion(data, lo, size) {
+  writeLabelRegion(data, lo2, size) {
     this.device.queue.writeTexture(
-      { texture: this.labelTex, origin: lo },
+      { texture: this.labelTex, origin: lo2 },
       data,
       { bytesPerRow: size[0] * 4, rowsPerImage: size[1] },
       size
@@ -6044,9 +6054,9 @@ var EditableSegmentation = class {
     await buf.mapAsync(GPUMapMode.READ);
     const padded = new Uint32Array(buf.getMappedRange());
     const out = new Uint32Array(dx * dy * dz);
-    for (let z2 = 0; z2 < dz; z2++) for (let y = 0; y < dy; y++) {
-      const src = (z2 * dy + y) * rowU32, dst = (z2 * dy + y) * dx;
-      for (let x2 = 0; x2 < dx; x2++) out[dst + x2] = padded[src + x2];
+    for (let z2 = 0; z2 < dz; z2++) for (let y2 = 0; y2 < dy; y2++) {
+      const src = (z2 * dy + y2) * rowU32, dst = (z2 * dy + y2) * dx;
+      for (let x = 0; x < dx; x++) out[dst + x] = padded[src + x];
     }
     buf.unmap();
     buf.destroy();
@@ -6057,7 +6067,7 @@ var EditableSegmentation = class {
   }
 };
 
-// SlicerLive/algorithms/effects/paint.ts
+// algorithms/effects/paint.ts
 var PAINT_WGSL = (
   /* wgsl */
   `
@@ -6165,7 +6175,7 @@ var PaintEffect = class {
   }
 };
 
-// SlicerLive/algorithms/effects/scissors.ts
+// algorithms/effects/scissors.ts
 var SCISSORS_WGSL = (
   /* wgsl */
   `
@@ -6223,12 +6233,12 @@ var ScissorsEffect = class {
   apply(contourRAS, opts) {
     if (contourRAS.length < 3) return;
     const dev = this.dev, dims = this.seg.dims;
-    const [u, v2] = [opts.u, opts.v];
+    const [u, v] = [opts.u, opts.v];
     const proj = new Float32Array(contourRAS.length * 2);
     for (let i = 0; i < contourRAS.length; i++) {
       const p2 = contourRAS[i];
       proj[i * 2] = p2[0] * u[0] + p2[1] * u[1] + p2[2] * u[2];
-      proj[i * 2 + 1] = p2[0] * v2[0] + p2[1] * v2[1] + p2[2] * v2[2];
+      proj[i * 2 + 1] = p2[0] * v[0] + p2[1] * v[1] + p2[2] * v[2];
     }
     const need = contourRAS.length * 8;
     if (!this.polyBuf || this.polyCap < contourRAS.length) {
@@ -6245,9 +6255,9 @@ var ScissorsEffect = class {
     f[17] = u[1];
     f[18] = u[2];
     f[19] = 0;
-    f[20] = v2[0];
-    f[21] = v2[1];
-    f[22] = v2[2];
+    f[20] = v[0];
+    f[21] = v[1];
+    f[22] = v[2];
     f[23] = 0;
     uu[24] = dims[0];
     uu[25] = dims[1];
@@ -6279,7 +6289,7 @@ var ScissorsEffect = class {
   }
 };
 
-// SlicerLive/algorithms/effects/growcut.ts
+// algorithms/effects/growcut.ts
 var INIT_WGSL2 = (
   /* wgsl */
   `
@@ -6442,7 +6452,7 @@ var GrowCutEffect = class {
     await buf.mapAsync(GPUMapMode.READ);
     const f = new Float32Array(buf.getMappedRange());
     let n = 0;
-    for (let z2 = 0; z2 < dz; z2++) for (let y = 0; y < dy; y++) for (let x2 = 0; x2 < dx; x2++) if (f[(z2 * dy + y) * rowF + x2 * 2] > 0.5) n++;
+    for (let z2 = 0; z2 < dz; z2++) for (let y2 = 0; y2 < dy; y2++) for (let x = 0; x < dx; x++) if (f[(z2 * dy + y2) * rowF + x * 2] > 0.5) n++;
     buf.unmap();
     buf.destroy();
     return n;
@@ -6458,15 +6468,15 @@ var GrowCutEffect = class {
     this.dev.queue.submit([enc.finish()]);
     await buf.mapAsync(GPUMapMode.READ);
     const f = new Float32Array(buf.getMappedRange());
-    let mn = Infinity, mx = -Infinity;
-    for (let z2 = 0; z2 < dz; z2++) for (let y = 0; y < dy; y++) for (let x2 = 0; x2 < dx; x2++) {
-      const v2 = f[(z2 * dy + y) * rowF + x2];
-      if (v2 < mn) mn = v2;
-      if (v2 > mx) mx = v2;
+    let mn2 = Infinity, mx = -Infinity;
+    for (let z2 = 0; z2 < dz; z2++) for (let y2 = 0; y2 < dy; y2++) for (let x = 0; x < dx; x++) {
+      const v = f[(z2 * dy + y2) * rowF + x];
+      if (v < mn2) mn2 = v;
+      if (v > mx) mx = v;
     }
     buf.unmap();
     buf.destroy();
-    return mx - mn;
+    return mx - mn2;
   }
   destroy() {
     this.a.destroy();
@@ -6475,7 +6485,7 @@ var GrowCutEffect = class {
   }
 };
 
-// SlicerLive/algorithms/seg-edit-driver.ts
+// algorithms/seg-edit-driver.ts
 var SegEditDriver = class _SegEditDriver {
   constructor(seg, opts = {}) {
     this.seg = seg;
@@ -6605,7 +6615,7 @@ var SegEditDriver = class _SegEditDriver {
   }
 };
 
-// SlicerLive/render/sdf-bake.ts
+// render/sdf-bake.ts
 var INIT_WGSL3 = (
   /* wgsl */
   `
@@ -6932,8 +6942,8 @@ var JfaSdfBaker = class {
       return s * Math.pow(2, e - 15) * (1 + f / 1024);
     };
     const out = new Float32Array(dx * dy * dz);
-    for (let z2 = 0; z2 < dz; z2++) for (let y = 0; y < dy; y++) for (let x2 = 0; x2 < dx; x2++) {
-      out[(z2 * dy + y) * dx + x2] = h2f(u16[(z2 * dy + y) * rowU16 + x2 * 4 + 3]);
+    for (let z2 = 0; z2 < dz; z2++) for (let y2 = 0; y2 < dy; y2++) for (let x = 0; x < dx; x++) {
+      out[(z2 * dy + y2) * dx + x] = h2f(u16[(z2 * dy + y2) * rowU16 + x * 4 + 3]);
     }
     buf.unmap();
     buf.destroy();
@@ -6993,17 +7003,17 @@ var JfaSdfBaker = class {
    *  ≫band away from any visible shell — invisible, and the next full sweep cleans them. */
   refineRegion(regionIjk) {
     const dev = this.dev, [dx, dy, dz] = this.dims;
-    const lo = [Math.max(0, regionIjk.lo[0]), Math.max(0, regionIjk.lo[1]), Math.max(0, regionIjk.lo[2])];
+    const lo2 = [Math.max(0, regionIjk.lo[0]), Math.max(0, regionIjk.lo[1]), Math.max(0, regionIjk.lo[2])];
     const hi2 = [Math.min(dx, regionIjk.hi[0]), Math.min(dy, regionIjk.hi[1]), Math.min(dz, regionIjk.hi[2])];
-    const [rx, ry, rz] = [hi2[0] - lo[0], hi2[1] - lo[1], hi2[2] - lo[2]];
+    const [rx, ry, rz] = [hi2[0] - lo2[0], hi2[1] - lo2[1], hi2[2] - lo2[2]];
     if (rx <= 0 || ry <= 0 || rz <= 0) return;
     const g = [Math.ceil(rx / 4), Math.ceil(ry / 4), Math.ceil(rz / 4)];
-    const region = { lo, hi: hi2 };
+    const region = { lo: lo2, hi: hi2 };
     let src = this.lastSeed;
     let enc = dev.createCommandEncoder();
     enc.copyTextureToTexture({ texture: this.seed[src] }, { texture: this.seed[src ^ 1] }, this.dims);
     dev.queue.submit([enc.finish()]);
-    this.writeUni(0, lo);
+    this.writeUni(0, lo2);
     enc = dev.createCommandEncoder();
     {
       const b = dev.createBindGroup({ layout: this.initPipe.getBindGroupLayout(0), entries: [
@@ -7023,7 +7033,7 @@ var JfaSdfBaker = class {
     for (let s = 1 << Math.floor(Math.log2(Math.max(2, maxDim - 1))); s >= 1; s >>= 1) steps.push(s);
     steps.push(2, 1);
     for (const step of steps) {
-      this.writeUni(step, lo);
+      this.writeUni(step, lo2);
       const dst = src ^ 1;
       enc = dev.createCommandEncoder();
       const b = dev.createBindGroup({ layout: this.jfaPipe.getBindGroupLayout(0), entries: [
@@ -7040,7 +7050,7 @@ var JfaSdfBaker = class {
       src = dst;
     }
     this.lastSeed = src;
-    this.writeUni(0, lo);
+    this.writeUni(0, lo2);
     enc = dev.createCommandEncoder();
     const bf = dev.createBindGroup({ layout: this.finalPipe.getBindGroupLayout(0), entries: [
       { binding: 0, resource: this.seed[src].createView() },
@@ -7166,7 +7176,7 @@ var JfaSdfBaker = class {
     let passIdx = 0;
     for (const [srcT, dstT, axis] of passes) {
       const expand = region ? (2 - passIdx) * radius : 0;
-      const lo = region ? [Math.max(0, region.lo[0] - expand), Math.max(0, region.lo[1] - expand), Math.max(0, region.lo[2] - expand)] : [0, 0, 0];
+      const lo2 = region ? [Math.max(0, region.lo[0] - expand), Math.max(0, region.lo[1] - expand), Math.max(0, region.lo[2] - expand)] : [0, 0, 0];
       const hi2 = region ? [Math.min(dx, region.hi[0] + expand), Math.min(dy, region.hi[1] + expand), Math.min(dz, region.hi[2] + expand)] : [dx, dy, dz];
       const ab = new ArrayBuffer(112);
       const u32 = new Uint32Array(ab), f32 = new Float32Array(ab), i32 = new Int32Array(ab);
@@ -7176,9 +7186,9 @@ var JfaSdfBaker = class {
       u32[4] = axis;
       u32[5] = radius;
       f32.set(w, 8);
-      i32[24] = lo[0];
-      i32[25] = lo[1];
-      i32[26] = lo[2];
+      i32[24] = lo2[0];
+      i32[25] = lo2[1];
+      i32[26] = lo2[2];
       const ub = dev.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       dev.queue.writeBuffer(ub, 0, ab);
       const b = dev.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
@@ -7189,7 +7199,7 @@ var JfaSdfBaker = class {
       const bp = enc.beginComputePass();
       bp.setPipeline(pipe);
       bp.setBindGroup(0, b);
-      bp.dispatchWorkgroups(Math.ceil((hi2[0] - lo[0]) / 4), Math.ceil((hi2[1] - lo[1]) / 4), Math.ceil((hi2[2] - lo[2]) / 4));
+      bp.dispatchWorkgroups(Math.ceil((hi2[0] - lo2[0]) / 4), Math.ceil((hi2[1] - lo2[1]) / 4), Math.ceil((hi2[2] - lo2[2]) / 4));
       bp.end();
       passIdx++;
     }
@@ -7214,7 +7224,7 @@ var JfaSdfBaker = class {
   }
 };
 
-// SlicerLive/logic/segmentation-logic.ts
+// logic/segmentation-logic.ts
 function invertAffine(m) {
   const r = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
   const det = r[0] * (r[4] * r[8] - r[5] * r[7]) - r[1] * (r[3] * r[8] - r[5] * r[6]) + r[2] * (r[3] * r[7] - r[4] * r[6]);
@@ -7356,24 +7366,24 @@ var SegmentationLogic = class {
    *  seam blur run region-limited in one shot — full settled quality lands immediately, no
    *  two-phase. Without it: full-volume fast pass + a debounced full-volume seam blur. */
   /** RAS bbox → padded-SDF-grid ijk bbox with an M-voxel margin (shell band + blur radii). */
-  regionToIjk(regionRAS, M2 = 8) {
+  regionToIjk(regionRAS, M = 8) {
     const inv = invertAffine(this.sdf.sdfIjkToRAS());
-    const lo = [Infinity, Infinity, Infinity];
+    const lo2 = [Infinity, Infinity, Infinity];
     const hi2 = [-Infinity, -Infinity, -Infinity];
-    for (const x2 of [regionRAS.lo[0], regionRAS.hi[0]]) for (const y of [regionRAS.lo[1], regionRAS.hi[1]]) for (const z2 of [regionRAS.lo[2], regionRAS.hi[2]]) {
-      const i = inv[0] * x2 + inv[1] * y + inv[2] * z2 + inv[3];
-      const j2 = inv[4] * x2 + inv[5] * y + inv[6] * z2 + inv[7];
-      const k2 = inv[8] * x2 + inv[9] * y + inv[10] * z2 + inv[11];
-      lo[0] = Math.min(lo[0], i);
-      lo[1] = Math.min(lo[1], j2);
-      lo[2] = Math.min(lo[2], k2);
+    for (const x of [regionRAS.lo[0], regionRAS.hi[0]]) for (const y2 of [regionRAS.lo[1], regionRAS.hi[1]]) for (const z2 of [regionRAS.lo[2], regionRAS.hi[2]]) {
+      const i = inv[0] * x + inv[1] * y2 + inv[2] * z2 + inv[3];
+      const j2 = inv[4] * x + inv[5] * y2 + inv[6] * z2 + inv[7];
+      const k = inv[8] * x + inv[9] * y2 + inv[10] * z2 + inv[11];
+      lo2[0] = Math.min(lo2[0], i);
+      lo2[1] = Math.min(lo2[1], j2);
+      lo2[2] = Math.min(lo2[2], k);
       hi2[0] = Math.max(hi2[0], i);
       hi2[1] = Math.max(hi2[1], j2);
-      hi2[2] = Math.max(hi2[2], k2);
+      hi2[2] = Math.max(hi2[2], k);
     }
     return {
-      lo: [Math.floor(lo[0]) - M2, Math.floor(lo[1]) - M2, Math.floor(lo[2]) - M2],
-      hi: [Math.ceil(hi2[0]) + M2, Math.ceil(hi2[1]) + M2, Math.ceil(hi2[2]) + M2]
+      lo: [Math.floor(lo2[0]) - M, Math.floor(lo2[1]) - M, Math.floor(lo2[2]) - M],
+      hi: [Math.ceil(hi2[0]) + M, Math.ceil(hi2[1]) + M, Math.ceil(hi2[2]) + M]
     };
   }
   /** REGION-LIMITED settle-refine after a labelmap edit confined to `regionRAS` (e.g. a
@@ -7460,7 +7470,7 @@ var SegmentationLogic = class {
   }
 };
 
-// SlicerLive/logic/seged-manager.ts
+// logic/seged-manager.ts
 function slice2DOpacities2(node, visible) {
   if (!visible) return [0, 0];
   const overall = typeof node.opacity === "number" ? node.opacity : 1;
@@ -7539,7 +7549,7 @@ var SegEditDisplayableManager = class {
     this.driver = new SegEditDriver(this.seg, {
       labelForSegment: (id) => this.labelForId.get(id) ?? 1,
       imageTex: this.opts.imageTexForSeeds,
-      onUnhandled: (k2) => this.opts.onEdit?.("unhandled:" + k2)
+      onUnhandled: (k) => this.opts.onEdit?.("unhandled:" + k)
     });
     this.logic = new SegmentationLogic(this.dev, this.seg, { renderMode: "sdf", boundaryMode: "all", opacity: 1 });
     this.overlayBaker = new ColorizeBaker(this.dev, this.seg.masterTexture(), dims);
@@ -7603,7 +7613,7 @@ var SegEditDisplayableManager = class {
   applyPalette(disp) {
     const segs = disp.segments ?? [];
     this.updateLabelMap(segs);
-    const key = segs.map((s) => `${s.labelValue}:${s.color.map((x2) => x2.toFixed(3)).join(",")}:${s.visible !== false}`).join("|");
+    const key = segs.map((s) => `${s.labelValue}:${s.color.map((x) => x.toFixed(3)).join(",")}:${s.visible !== false}`).join("|");
     if (key === this.palKey) return false;
     this.palKey = key;
     this.overlayPalette.fill(0);
@@ -7676,49 +7686,49 @@ var SegEditDisplayableManager = class {
   }
 };
 
-// ../cast-interface/cast-js-client/dist/cast-client.js
-function pn(e, t) {
-  t.classHierarchy || (t.classHierarchy = []), e.getClassName = () => t.classHierarchy[t.classHierarchy.length - 1] || "CastClient", e.isA = (n) => t.classHierarchy.includes(n), typeof e.delete != "function" && (e.delete = () => {
+// ../../SlicerHub-js-clients/packages/client/dist/hub-client.js
+function Ar(e, t) {
+  t.classHierarchy || (t.classHierarchy = []), e.getClassName = () => t.classHierarchy[t.classHierarchy.length - 1] || "HubClient", e.isA = (n) => t.classHierarchy.includes(n), typeof e.delete != "function" && (e.delete = () => {
   });
 }
-function yn(e, t, n) {
-  n.forEach((r) => {
-    const i = `get${r.charAt(0).toUpperCase()}${r.slice(1)}`;
-    e[i] = () => t[r];
+function Ir(e, t, n) {
+  n.forEach((i) => {
+    const r = `get${i.charAt(0).toUpperCase()}${i.slice(1)}`;
+    e[r] = () => t[i];
   });
 }
-function gn(e, t) {
+function Ur(e, t) {
   return () => {
     e(), typeof t == "function" && t();
   };
 }
-function Sn(e, t) {
-  return function(r = {}) {
-    const i = {};
-    return e(i, { classHierarchy: [t] }, r), i;
+function xr(e, t) {
+  return function(i = {}) {
+    const r = {};
+    return e(r, { classHierarchy: [t] }, i), r;
   };
 }
-var Me = "CAST";
-var lt = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-function Tt(e, t = Me) {
+var Et = "UNKNOWN";
+var Kt = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function dn(e, t = Et) {
   return String(e || t).trim().replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "") || t;
 }
-function Cn(e) {
-  return `${Tt(e)}-`;
+function Hr(e) {
+  return `${dn(e)}-`;
 }
-function ce(e) {
+function Re(e) {
   return typeof crypto < "u" && crypto.randomUUID ? e + crypto.randomUUID().replace(/-/g, "").slice(0, 16) : e + Math.random().toString(36).substring(2, 18);
 }
-function je(e = Me) {
-  const t = Tt(e);
+function wt(e = Et) {
+  const t = dn(e);
   let n = "";
-  for (let r = 0; r < 6; r++) {
-    const i = Math.floor(Math.random() * lt.length);
-    n += lt[i];
+  for (let i = 0; i < 6; i++) {
+    const r = Math.floor(Math.random() * Kt.length);
+    n += Kt[r];
   }
   return `${t}-${n}`;
 }
-var ft = [
+var Qt = [
   "dicom",
   "nifti",
   "jpg",
@@ -7728,142 +7738,143 @@ var ft = [
   "scene"
   // scene-update (LiveSync HubBlobs multipart)
 ];
-function qe(e) {
+function ve(e) {
   if (typeof e != "string") return false;
   const t = e.trim().toLowerCase();
   if (!t) return false;
-  for (let n = 0; n < ft.length; n++) {
-    const r = ft[n];
-    if (t === r || t.startsWith(`${r}-`) || t.startsWith(`${r}_`))
+  for (let n = 0; n < Qt.length; n++) {
+    const i = Qt[n];
+    if (t === i || t.startsWith(`${i}-`) || t.startsWith(`${i}_`))
       return true;
   }
   return false;
 }
-function wn(e) {
+var $r = ve;
+function kr(e) {
   return typeof ArrayBuffer < "u" && ArrayBuffer.isView(e);
 }
-async function fe(e) {
+async function Fe(e) {
   if (e instanceof ArrayBuffer)
     return e;
-  if (wn(e)) {
-    const { buffer: t, byteOffset: n, byteLength: r } = e;
-    return t.slice(n, n + r);
+  if (kr(e)) {
+    const { buffer: t, byteOffset: n, byteLength: i } = e;
+    return t.slice(n, n + i);
   }
   if (typeof Blob < "u" && e instanceof Blob && typeof e.arrayBuffer == "function")
     return e.arrayBuffer();
   throw new Error(
-    "CastClient: binary resource.data must be ArrayBuffer, TypedArray, DataView, Blob, or File"
+    "HubClient: binary resource.data must be ArrayBuffer, TypedArray, DataView, Blob, or File"
   );
 }
-function ee(e) {
+function Ae(e) {
   const t = e && e.context;
   if (!t || typeof t != "object" || Array.isArray(t))
     return [];
   const n = t.files;
-  return Array.isArray(n) ? n.filter((r) => r && typeof r == "object") : [];
+  return Array.isArray(n) ? n.filter((i) => i && typeof i == "object") : [];
 }
-function ze(e) {
+function Tt(e) {
   if (!e || typeof e != "object" || e.data != null)
     return { payloadIds: [], chunkByteLengths: [] };
   const t = e.payloadIds;
   if (Array.isArray(t) && t.length) {
-    const r = t.map((s) => typeof s == "string" ? s.trim() : "").filter(Boolean), i = Array.isArray(e.chunkByteLengths) ? e.chunkByteLengths.filter((s) => typeof s == "number" && s >= 0) : [];
-    if (i.length === r.length)
-      return { payloadIds: r, chunkByteLengths: i };
-    if (r.length === 1) {
-      const s = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
+    const i = t.map((o) => typeof o == "string" ? o.trim() : "").filter(Boolean), r = Array.isArray(e.chunkByteLengths) ? e.chunkByteLengths.filter((o) => typeof o == "number" && o >= 0) : [];
+    if (r.length === i.length)
+      return { payloadIds: i, chunkByteLengths: r };
+    if (i.length === 1) {
+      const o = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
       return {
-        payloadIds: r,
-        chunkByteLengths: s != null ? [s] : []
+        payloadIds: i,
+        chunkByteLengths: o != null ? [o] : []
       };
     }
   }
   const n = typeof e.payloadId == "string" ? e.payloadId.trim() : "";
   if (n) {
-    const r = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
+    const i = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
     return {
       payloadIds: [n],
-      chunkByteLengths: r != null ? [r] : []
+      chunkByteLengths: i != null ? [i] : []
     };
   }
   return { payloadIds: [], chunkByteLengths: [] };
 }
-function En(e) {
-  const t = ee(e);
+function _r(e) {
+  const t = Ae(e);
   for (let n = 0; n < t.length; n++) {
-    const r = t[n];
-    if (r.data == null) {
-      const i = ze(r);
-      if (i.payloadIds.length)
+    const i = t[n];
+    if (i.data == null) {
+      const r = Tt(i);
+      if (r.payloadIds.length)
         return {
           kind: "files",
           index: n,
           chunkIndex: 0,
-          payloadId: i.payloadIds[0],
-          expectedChunkBytes: i.chunkByteLengths[0] ?? null
+          payloadId: r.payloadIds[0],
+          expectedChunkBytes: r.chunkByteLengths[0] ?? null
         };
     }
   }
   return null;
 }
-function Nt(e) {
-  return En(e);
+function bn(e) {
+  return _r(e);
 }
-function ke(e) {
-  return !!Nt(e);
+function ut(e) {
+  return !!bn(e);
 }
-function Ue(e, t) {
+function lt(e, t) {
   return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? t === 0 ? "nifti-send.nii.gz" : `nifti-send-${t + 1}.nii.gz` : t === 0 ? "dicom-send.dcm" : `dicom-send-${t + 1}.dcm`;
 }
-function $e(e) {
+function ft(e) {
   return (typeof e == "string" ? e.trim().toLowerCase() : "").startsWith("nifti") ? "application/octet-stream" : "application/dicom";
 }
-function Le(e) {
+function ct(e) {
   const t = e && e.event;
-  if (!t || !qe(t["hub.event"]) || ee(t).length)
+  if (!t || !ve(t["hub.event"]) || Ae(t).length)
     return e;
-  const n = t["hub.event"], r = t.context;
-  let i = [];
-  Array.isArray(r) ? i = r : r != null && (i = [r]);
-  const s = [];
-  for (let o = 0; o < i.length; o++) {
-    const a = i[o];
+  const n = t["hub.event"], i = t.context;
+  let r = [];
+  Array.isArray(i) ? r = i : i != null && (r = [i]);
+  const o = [];
+  for (let s = 0; s < r.length; s++) {
+    const a = r[s];
     if (a && typeof a == "object") {
-      const d = a.resource;
-      if (d && typeof d == "object" && d.data != null) {
-        const f = { ...d };
-        (typeof f.fileName != "string" || !f.fileName.trim()) && (f.fileName = Ue(n, o)), (typeof f.mimeType != "string" || !f.mimeType.trim()) && (f.mimeType = $e(n)), s.push(f);
+      const l = a.resource;
+      if (l && typeof l == "object" && l.data != null) {
+        const h = { ...l };
+        (typeof h.fileName != "string" || !h.fileName.trim()) && (h.fileName = lt(n, s)), (typeof h.mimeType != "string" || !h.mimeType.trim()) && (h.mimeType = ft(n)), o.push(h);
       }
     }
   }
-  return s.length ? {
+  return o.length ? {
     ...e,
     event: {
       ...t,
       context: {
-        files: s
+        files: o
       }
     }
   } : e;
 }
-function Tn(e, t) {
-  const n = e && e.event, r = n && n.context;
-  let i = [];
-  Array.isArray(r) ? i = r : r != null && (i = [r]);
-  for (let s = 0; s < i.length; s++) {
-    const o = i[s];
-    if (o && typeof o == "object") {
-      const a = o.resource;
+function Rr(e, t) {
+  const n = e && e.event, i = n && n.context;
+  let r = [];
+  Array.isArray(i) ? r = i : i != null && (r = [i]);
+  for (let o = 0; o < r.length; o++) {
+    const s = r[o];
+    if (s && typeof s == "object") {
+      const a = s.resource;
       if (a && typeof a == "object") {
-        const d = typeof a.fileName == "string" ? a.fileName.trim() : "";
-        if (d)
-          return d;
+        const l = typeof a.fileName == "string" ? a.fileName.trim() : "";
+        if (l)
+          return l;
       }
     }
   }
   return t;
 }
-function de(e) {
+function De(e) {
   if (!e || typeof e != "object")
     return false;
   const t = typeof e.url == "string" ? e.url.trim() : "";
@@ -7872,65 +7883,65 @@ function de(e) {
   const n = t.toLowerCase();
   return n.startsWith("http://") || n.startsWith("https://");
 }
-function Nn(e) {
+function Or(e) {
   const t = [];
   for (let n = 0; n < e.length; n += 1)
-    de(e[n]) || t.push(n);
+    De(e[n]) || t.push(n);
   return t;
 }
-function An(e) {
+function Mr(e) {
   const t = e && e.event;
-  if (!t || !qe(t["hub.event"]))
+  if (!t || !ve(t["hub.event"]))
     return false;
-  const n = ee(t);
+  const n = Ae(t);
   return n.length ? n.some(
-    (r) => r.data != null && !de(r)
+    (i) => i.data != null && !De(i)
   ) : false;
 }
-async function vn(e, t = "", n = 0) {
+async function Pr(e, t = "", n = 0) {
   if (!e || typeof e != "object")
     throw new Error(
-      "CastClient: binary batch publish files[] entries must be objects"
+      "HubClient: binary batch publish files[] entries must be objects"
     );
-  const r = de(e);
-  let i = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
+  const i = De(e);
+  let r = typeof e.byteLength == "number" && e.byteLength >= 0 ? e.byteLength : null;
   if ("data" in e && e.data != null) {
     if (typeof e.data == "string")
       throw new Error(
-        "CastClient: binary batch publish string payloads are not supported; pass binary input instead"
+        "HubClient: binary batch publish string payloads are not supported; pass binary input instead"
       );
-    i = (await fe(e.data)).byteLength;
+    r = (await Fe(e.data)).byteLength;
   }
-  if (i == null && r) {
-    const o = { ...e };
-    return delete o.data, delete o.binaryTransfer, delete o.payloadId, delete o.payloadIds, delete o.chunkByteLengths, delete o.expiresAt, (typeof o.fileName != "string" || !o.fileName.trim()) && (o.fileName = Ue(t, n)), (typeof o.mimeType != "string" || !o.mimeType.trim()) && (o.mimeType = $e(t)), o;
+  if (r == null && i) {
+    const s = { ...e };
+    return delete s.data, delete s.binaryTransfer, delete s.payloadId, delete s.payloadIds, delete s.chunkByteLengths, delete s.expiresAt, (typeof s.fileName != "string" || !s.fileName.trim()) && (s.fileName = lt(t, n)), (typeof s.mimeType != "string" || !s.mimeType.trim()) && (s.mimeType = ft(t)), s;
   }
-  if (i == null)
+  if (r == null)
     throw new Error(
-      "CastClient: binary batch publish requires files[].data or files[].byteLength"
+      "HubClient: binary batch publish requires files[].data or files[].byteLength"
     );
-  const s = { ...e };
-  return delete s.data, delete s.binaryTransfer, r || delete s.url, delete s.payloadId, delete s.payloadIds, delete s.chunkByteLengths, delete s.expiresAt, s.byteLength = i, (typeof s.fileName != "string" || !s.fileName.trim()) && (s.fileName = Ue(t, n)), (typeof s.mimeType != "string" || !s.mimeType.trim()) && (s.mimeType = $e(t)), s;
+  const o = { ...e };
+  return delete o.data, delete o.binaryTransfer, i || delete o.url, delete o.payloadId, delete o.payloadIds, delete o.chunkByteLengths, delete o.expiresAt, o.byteLength = r, (typeof o.fileName != "string" || !o.fileName.trim()) && (o.fileName = lt(t, n)), (typeof o.mimeType != "string" || !o.mimeType.trim()) && (o.mimeType = ft(t)), o;
 }
-async function In(e) {
+async function Fr(e) {
   if (!e.event || typeof e.event != "object")
-    throw new Error("CastClient: binary batch publish requires event object");
+    throw new Error("HubClient: binary batch publish requires event object");
   const t = e.event;
-  if (!qe(t["hub.event"]))
+  if (!ve(t["hub.event"]))
     return e;
   const n = t.context;
   if (!n || typeof n != "object" || Array.isArray(n))
     throw new Error(
-      "CastClient: binary batch publish requires event.context object"
+      "HubClient: binary batch publish requires event.context object"
     );
-  const r = n.files;
-  if (!Array.isArray(r) || !r.length)
+  const i = n.files;
+  if (!Array.isArray(i) || !i.length)
     throw new Error(
-      "CastClient: binary batch publish requires non-empty event.context.files[]"
+      "HubClient: binary batch publish requires non-empty event.context.files[]"
     );
-  const i = t["hub.event"], s = await Promise.all(
-    r.map(
-      (o, a) => vn(o, i, a)
+  const r = t["hub.event"], o = await Promise.all(
+    i.map(
+      (s, a) => Pr(s, r, a)
     )
   );
   return {
@@ -7939,26 +7950,26 @@ async function In(e) {
       ...t,
       context: {
         ...n,
-        files: s
+        files: o
       }
     }
   };
 }
-async function dt(e) {
+async function en(e) {
   const t = e && e.event;
   if (!t)
     return [];
-  const r = ee(t).filter(
-    (i) => i && typeof i == "object" && i.data != null && !de(i)
+  const i = Ae(t).filter(
+    (r) => r && typeof r == "object" && r.data != null && !De(r)
   );
-  return Promise.all(r.map((i) => fe(i.data)));
+  return Promise.all(i.map((r) => Fe(r.data)));
 }
-function Ln(e, t, n) {
-  const r = new TextEncoder(), i = r.encode(`\r
-`), s = [], o = (a) => {
-    s.push(r.encode(a));
+function Dr(e, t, n) {
+  const i = new TextEncoder(), r = i.encode(`\r
+`), o = [], s = (a) => {
+    o.push(i.encode(a));
   };
-  o(
+  s(
     `--${e}\r
 Content-Type: application/dicom+json\r
 \r
@@ -7966,54 +7977,54 @@ ${t}\r
 `
   );
   for (let a = 0; a < n.length; a++) {
-    const d = n[a], f = d && d.mimeType && String(d.mimeType).trim() || "application/octet-stream";
-    o(`--${e}\r
-Content-Type: ${f}\r
+    const l = n[a], h = l && l.mimeType && String(l.mimeType).trim() || "application/octet-stream";
+    s(`--${e}\r
+Content-Type: ${h}\r
 \r
-`), s.push(new Uint8Array(d.buffer)), s.push(i);
+`), o.push(new Uint8Array(l.buffer)), o.push(r);
   }
-  return o(`--${e}--\r
-`), new Blob(s);
+  return s(`--${e}--\r
+`), new Blob(o);
 }
-async function _n({
+async function Br({
   msg: e,
   fileBytesList: t,
   hub: n,
-  messageIdPrefix: r
+  messageIdPrefix: i
 }) {
-  const i = await In(e), s = await Promise.all(
-    (t || []).map((b) => fe(b))
-  ), o = ee(i.event), a = Nn(o);
-  if (s.length !== a.length)
+  const r = await Fr(e), o = await Promise.all(
+    (t || []).map((u) => Fe(u))
+  ), s = Ae(r.event), a = Or(s);
+  if (o.length !== a.length)
     throw new Error(
-      `CastClient: binary batch publish expected ${a.length} file part(s), got ${s.length}`
+      `HubClient: binary batch publish expected ${a.length} file part(s), got ${o.length}`
     );
-  const d = s.map((b, l) => {
-    const u = a[l];
+  const l = o.map((u, d) => {
+    const f = a[d];
     return {
-      buffer: b,
-      mimeType: o[u] && o[u].mimeType || "application/octet-stream"
+      buffer: u,
+      mimeType: s[f] && s[f].mimeType || "application/octet-stream"
     };
-  }), f = `cast-batch-${ce(r())}`, c = Ln(
-    f,
-    JSON.stringify(i),
-    d
+  }), h = `hub-batch-${Re(i())}`, c = Dr(
+    h,
+    JSON.stringify(r),
+    l
   );
   try {
     return await fetch(n.hub_endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${n.token}`,
-        "Content-Type": `multipart/related; boundary="${f}"; type="application/dicom"`
+        "Content-Type": `multipart/related; boundary="${h}"; type="application/dicom"`
       },
       body: c
     });
-  } catch (b) {
-    const l = b instanceof Error ? b.message : String(b);
-    return console.debug("CastClient:", l), null;
+  } catch (u) {
+    const d = u instanceof Error ? u.message : String(u);
+    return console.debug("HubClient:", d), null;
   }
 }
-function be(e) {
+function Be(e) {
   const t = {
     responses: [],
     expected: [],
@@ -8029,11 +8040,11 @@ function be(e) {
   const n = (
     /** @type {Record<string, unknown>} */
     e
-  ), r = Array.isArray(n.responses) ? n.responses.filter((o) => o && typeof o == "object") : [], i = Array.isArray(n.expected) ? n.expected.map((o) => String(o)) : [], s = Array.isArray(n.missing) ? n.missing.map((o) => String(o)) : [];
+  ), i = Array.isArray(n.responses) ? n.responses.filter((s) => s && typeof s == "object") : [], r = Array.isArray(n.expected) ? n.expected.map((s) => String(s)) : [], o = Array.isArray(n.missing) ? n.missing.map((s) => String(s)) : [];
   return {
-    responses: r,
-    expected: i,
-    missing: s,
+    responses: i,
+    expected: r,
+    missing: o,
     timedOut: !!n.timedOut,
     ok: !!n.ok,
     id: n.id != null ? String(n.id) : null,
@@ -8041,84 +8052,100 @@ function be(e) {
     productName: n.productName != null ? String(n.productName) : null
   };
 }
-function kn(e) {
-  return be(e).responses;
+function jr(e) {
+  return Be(e).responses;
 }
-function At(e, t) {
+function hn(e, t) {
   if (t === "file:")
     return true;
   const n = String(e || "").toLowerCase();
   return !!(n === "localhost" || n === "127.0.0.1" || n === "[::1]" || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(n) || /^192\.168\.\d{1,3}\.\d{1,3}$/.test(n) || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(n));
 }
-function vt(e = typeof window < "u" ? window.location : null) {
-  return e ? !At(e.hostname, e.protocol) : false;
+function mn(e = typeof window < "u" ? window.location : null) {
+  return e ? !hn(e.hostname, e.protocol) : false;
 }
-function It(e) {
+function gn(e) {
   try {
     const t = new URL(e);
-    return !At(t.hostname, t.protocol);
+    return !hn(t.hostname, t.protocol);
   } catch {
     return false;
   }
 }
-function Un(e, t, n = vt()) {
-  const r = t.find((s) => {
+function qr(e, t, n = mn()) {
+  const i = t.find((o) => {
     var a;
-    const o = (a = e[s]) == null ? void 0 : a.hubEndpoint;
-    return o && It(o) === n;
+    const s = (a = e[o]) == null ? void 0 : a.hubEndpoint;
+    return s && gn(s) === n;
   });
-  if (r)
-    return r;
-  const i = n ? "cloud" : "local";
-  return e[i] ? i : t[0];
+  if (i)
+    return i;
+  const r = n ? "cloud" : "local";
+  return e[r] ? r : t[0];
 }
-var W = "-request";
-var J = "-response";
-function He(e) {
+var Se = "-request";
+var Ce = "-response";
+var Wr = "imagingstudy-open";
+var zr = "imagingstudy-close";
+var dt = "status-update";
+var Vr = "scene-update";
+var Gr = "annotation-update";
+var Xr = "annotation-delete";
+var Jr = "dicom-send";
+var Yr = "nifti-send";
+var Zr = "png-send";
+var Kr = "idc-claude-send";
+var Qr = "conference-chat";
+var ei = "dicomsr-update";
+var ti = "subscription-removed";
+var ni = "heartbeat";
+function Nt(e) {
   return typeof e != "string" ? "" : e.trim().toLowerCase();
 }
-function he(e) {
-  const t = He(e);
-  return t ? `${t}${W}` : "";
+function Ie(e) {
+  const t = Nt(e);
+  return t ? `${t}${Se}` : "";
 }
-function Lt(e) {
-  const t = He(e);
-  return t ? `${t}${J}` : "";
+function pn(e) {
+  const t = Nt(e);
+  return t ? `${t}${Ce}` : "";
 }
-function $n(e) {
-  return typeof e != "string" ? false : e.endsWith(W);
+function ri(e) {
+  return typeof e != "string" ? false : e.endsWith(Se);
 }
-function Rn(e) {
-  return typeof e != "string" ? false : e.endsWith(J);
+function ii(e) {
+  return typeof e != "string" ? false : e.endsWith(Ce);
 }
-function xn(e) {
-  return typeof e != "string" ? "" : e.endsWith(W) ? e.slice(0, -W.length) : e.endsWith(J) ? e.slice(0, -J.length) : "";
+function oi(e) {
+  return typeof e != "string" ? "" : e.endsWith(Se) ? e.slice(0, -Se.length) : e.endsWith(Ce) ? e.slice(0, -Ce.length) : "";
 }
-function On(e) {
+function yn(e) {
   if (!(e != null && e.length))
     return ["*"];
-  if (e.some((i) => String(i).trim() === "*"))
+  if (e.some((r) => String(r).trim() === "*"))
     return ["*"];
-  const t = he("STATUS"), n = new Set(
-    e.map((i) => String(i).trim().toLowerCase()).filter(Boolean)
-  ), r = [];
-  return t && !n.has(t.toLowerCase()) && (r.push(t), n.add(t.toLowerCase())), n.has("status-update") || r.push("status-update"), r.length ? [...e, ...r] : [...e];
+  const t = Ie("STATUS"), n = new Set(
+    e.map((r) => String(r).trim().toLowerCase()).filter(Boolean)
+  ), i = [];
+  return t && !n.has(t.toLowerCase()) && (i.push(t), n.add(t.toLowerCase())), n.has(dt) || i.push(dt), i.length ? [...e, ...i] : [...e];
 }
-var _t = "cast-radio-icon";
-var kt = `<svg class="${_t}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>`;
-var Ut = "cast-radio-status-icon";
-var $t = "cast-radio-slash";
-function Pn(e = {}) {
+var si = yn;
+var Sn = "hub-radio-icon";
+var Cn = `<svg class="${Sn}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>`;
+var En = "hub-radio-status-icon";
+var wn = "hub-radio-slash";
+var Tn = "hub-conference-icon";
+var ai = `<svg class="${Tn}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
+function ci(e = {}) {
   const t = e.slashId || "castRadioSlash";
-  return `<span class="${Ut}">${kt}<span id="${t}" class="${$t}" aria-hidden="true" hidden></span></span>`;
+  return `<span class="${En}">${Cn}<span id="${t}" class="${wn}" aria-hidden="true" hidden></span></span>`;
 }
-function Bn(e, t = {}) {
-  const n = !!t.conferenceActive;
-  return e === "connected" ? {
+function ui(e, t = {}) {
+  return t == null || t.conferenceActive, e === "connected" ? {
     tone: "connected",
     showSlash: false,
     pulse: false,
-    conferencePulse: n
+    conferencePulse: false
   } : e === "connecting" || e === "token-ready" ? {
     tone: "connecting",
     showSlash: false,
@@ -8136,7 +8163,7 @@ function Bn(e, t = {}) {
     conferencePulse: false
   };
 }
-function Dn() {
+function li() {
   return {
     name: "",
     friendlyName: "",
@@ -8148,7 +8175,7 @@ function Dn() {
     client_secret: ""
   };
 }
-function Fn() {
+function fi() {
   return {
     subscriberName: "",
     productName: "",
@@ -8161,21 +8188,21 @@ function Fn() {
     defaultTargetActor: ""
   };
 }
-function ae(e) {
+function Oe(e) {
   if (e == null)
     return;
   const t = String(e).trim();
   if (!(!t || t === "*"))
     return t;
 }
-function Rt(e) {
+function Nn(e) {
   if (e == null)
     return;
   const t = String(e).trim();
   if (!(!t || t === "*"))
     return t;
 }
-function Mn() {
+function di() {
   return {
     token: "",
     lastIdToken: "",
@@ -8185,7 +8212,7 @@ function Mn() {
     websocket: null
   };
 }
-function jn() {
+function bi() {
   if (typeof navigator > "u")
     return null;
   const e = {};
@@ -8197,22 +8224,22 @@ function jn() {
   }
   return Object.keys(e).length ? e : null;
 }
-function bt(e) {
+function tn(e) {
   return e || (typeof window < "u" ? `${window.location.origin}/castCallback` : "");
 }
-function ht(e, t, n, r = "") {
-  const i = new URLSearchParams();
-  i.append("hub.mode", e), i.append("hub.channel.type", "websocket"), i.append("hub.callback", n), i.append("hub.events", (t.events || []).toString()), i.append("hub.topic", t.topic || ""), i.append("hub.lease", String(t.lease || 999)), i.append("subscriber.name", t.subscriberName || ""), i.append("subscriber.product.name", t.productName || ""), i.append(
+function nn(e, t, n, i = "") {
+  const r = new URLSearchParams();
+  r.append("hub.mode", e), r.append("hub.channel.type", "websocket"), r.append("hub.callback", n), r.append("hub.events", (t.events || []).toString()), r.append("hub.topic", t.topic || ""), r.append("hub.lease", String(t.lease || 999)), r.append("subscriber.name", t.subscriberName || ""), r.append("subscriber.product.name", t.productName || ""), r.append(
     "subscriber.product.version",
-    t.productVersion || r || ""
+    t.productVersion || i || ""
   );
-  const s = (t.actors || []).map((a) => a.trim()).filter(Boolean);
-  s.length && i.append("subscriber.actors", JSON.stringify(s));
-  const o = jn();
-  return o && i.append("subscriber.client_info", JSON.stringify(o)), i;
+  const o = (t.actors || []).map((a) => a.trim()).filter(Boolean);
+  o.length && r.append("subscriber.actors", JSON.stringify(o));
+  const s = bi();
+  return s && r.append("subscriber.client_info", JSON.stringify(s)), r;
 }
-var M = 25;
-function qn(e) {
+var ae = 25;
+function hi(e) {
   try {
     const t = new URL(e);
     return t.hostname.toLowerCase() === "localhost" && (t.hostname = "127.0.0.1"), t.toString();
@@ -8220,187 +8247,187 @@ function qn(e) {
     return e;
   }
 }
-function zn(e) {
+function mi(e) {
   if (!(e instanceof Error))
     return false;
   const t = e.name || "";
   return t === "TypeError" || t === "NetworkError";
 }
-function Hn(e, t) {
+function gi(e, t) {
   if (!e)
     return "";
   try {
     const n = `/api/hub/payloads/${encodeURIComponent(e)}`;
-    return qn(new URL(n, t).toString());
+    return hi(new URL(n, t).toString());
   } catch (n) {
-    return console.warn("CastClient: invalid payloadId url", e, n), "";
+    return console.warn("HubClient: invalid payloadId url", e, n), "";
   }
 }
-function Gn(e) {
+function pi(e) {
   delete e.binaryTransfer, delete e.url, delete e.payloadId, delete e.payloadIds, delete e.chunkByteLengths, delete e.expiresAt;
 }
-function xt(e, t) {
-  const n = e.reduce((s, o) => s + o.byteLength, 0);
+function Ln(e, t) {
+  const n = e.reduce((o, s) => o + s.byteLength, 0);
   if (typeof t == "number" && t >= 0 && n !== t)
     throw new Error(
-      `CastClient: payload size mismatch expected=${t} received=${n}`
+      `HubClient: payload size mismatch expected=${t} received=${n}`
     );
-  const r = new Uint8Array(n);
-  let i = 0;
-  for (let s = 0; s < e.length; s++)
-    r.set(new Uint8Array(e[s]), i), i += e[s].byteLength;
-  return r.buffer;
+  const i = new Uint8Array(n);
+  let r = 0;
+  for (let o = 0; o < e.length; o++)
+    i.set(new Uint8Array(e[o]), r), r += e[o].byteLength;
+  return i.buffer;
 }
-function mt(e, t, n) {
-  const r = e && e.event, i = r && r.context, s = i && i.files, o = s && s[t];
-  return !o || typeof o != "object" ? false : (Gn(o), o.data = n, o.byteLength = n.byteLength, true);
+function rn(e, t, n) {
+  const i = e && e.event, r = i && i.context, o = r && r.files, s = o && o[t];
+  return !s || typeof s != "object" ? false : (pi(s), s.data = n, s.byteLength = n.byteLength, true);
 }
-async function Ot(e, t, { hubEndpoint: n, accessToken: r }) {
-  const i = Hn(e, n);
-  if (!i)
-    throw new Error("CastClient.fetchPayload: missing or invalid payloadId");
-  const s = {};
-  r && (s.Authorization = `Bearer ${r}`);
-  async function o() {
-    const a = await fetch(i, {
+async function vn(e, t, { hubEndpoint: n, accessToken: i }) {
+  const r = gi(e, n);
+  if (!r)
+    throw new Error("HubClient.fetchPayload: missing or invalid payloadId");
+  const o = {};
+  i && (o.Authorization = `Bearer ${i}`);
+  async function s() {
+    const a = await fetch(r, {
       method: "GET",
       credentials: "omit",
-      headers: s
+      headers: o
     });
     if (!a.ok)
       throw new Error(
-        `CastClient.fetchPayload: GET ${a.status} ${a.statusText}`
+        `HubClient.fetchPayload: GET ${a.status} ${a.statusText}`
       );
-    const d = await a.arrayBuffer();
-    if (typeof t == "number" && t >= 0 && d.byteLength !== t)
+    const l = await a.arrayBuffer();
+    if (typeof t == "number" && t >= 0 && l.byteLength !== t)
       throw new Error(
-        `CastClient.fetchPayload: chunk size mismatch payloadId=${e.slice(
+        `HubClient.fetchPayload: chunk size mismatch payloadId=${e.slice(
           0,
           8
-        )} expected=${t} received=${d.byteLength}`
+        )} expected=${t} received=${l.byteLength}`
       );
-    return d;
+    return l;
   }
   try {
-    return await o();
+    return await s();
   } catch (a) {
-    if (zn(a))
-      return o();
+    if (mi(a))
+      return s();
     throw a;
   }
 }
-async function Vn(e, t) {
-  const n = ze(e);
+async function yi(e, t) {
+  const n = Tt(e);
   if (!n.payloadIds.length)
-    throw new Error("CastClient.fetchPayload: no payloadIds on file entry");
-  const r = [];
-  for (let i = 0; i < n.payloadIds.length; i += M) {
-    const s = n.payloadIds.slice(
-      i,
-      i + M
-    ), o = n.chunkByteLengths.slice(
-      i,
-      i + M
+    throw new Error("HubClient.fetchPayload: no payloadIds on file entry");
+  const i = [];
+  for (let r = 0; r < n.payloadIds.length; r += ae) {
+    const o = n.payloadIds.slice(
+      r,
+      r + ae
+    ), s = n.chunkByteLengths.slice(
+      r,
+      r + ae
     ), a = await Promise.all(
-      s.map(
-        (d, f) => Ot(d, o[f] ?? null, t)
+      o.map(
+        (l, h) => vn(l, s[h] ?? null, t)
       )
     );
-    r.push(...a);
+    i.push(...a);
   }
-  return xt(
-    r,
+  return Ln(
+    i,
     typeof e.byteLength == "number" ? e.byteLength : null
   );
 }
-async function Wn(e, t, n = M) {
+async function Si(e, t, n = ae) {
   if (!e.length)
     return [];
-  const r = Math.max(1, n | 0), i = new Array(e.length);
-  let s = 0;
-  async function o() {
-    for (; s < e.length; ) {
-      const d = s++, f = e[d];
-      i[d] = await Ot(
-        f.payloadId,
-        f.expectedLength ?? null,
+  const i = Math.max(1, n | 0), r = new Array(e.length);
+  let o = 0;
+  async function s() {
+    for (; o < e.length; ) {
+      const l = o++, h = e[l];
+      r[l] = await vn(
+        h.payloadId,
+        h.expectedLength ?? null,
         t
       );
     }
   }
   const a = Array.from(
-    { length: Math.min(r, e.length) },
-    () => o()
+    { length: Math.min(i, e.length) },
+    () => s()
   );
-  return await Promise.all(a), i;
+  return await Promise.all(a), r;
 }
-function pt(e) {
+function on(e) {
   return JSON.parse(JSON.stringify(e));
 }
-function Jn(e) {
+function Ci(e) {
   const t = () => e();
   return {
     hasPendingPayload(n) {
-      const r = n && n.event;
-      return !!(r && ke(r));
+      const i = n && n.event;
+      return !!(i && ut(i));
     },
     async fetchPayload(n) {
-      const r = n && n.event;
-      if (!r || !ke(r))
+      const i = n && n.event;
+      if (!i || !ut(i))
         return n;
-      const i = Nt(r);
-      if (!i)
+      const r = bn(i);
+      if (!r)
         return n;
-      const s = typeof performance < "u" && performance.now ? performance.now() : Date.now(), o = r.context.files[i.index], a = await Vn(o, t()), d = pt(n);
-      if (!mt(d, i.index, a))
-        throw new Error("CastClient.fetchPayload: no payload slot on message");
-      const c = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - s;
+      const o = typeof performance < "u" && performance.now ? performance.now() : Date.now(), s = i.context.files[r.index], a = await yi(s, t()), l = on(n);
+      if (!rn(l, r.index, a))
+        throw new Error("HubClient.fetchPayload: no payload slot on message");
+      const c = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - o;
       return console.debug(
-        `CastClient: payload fetched fileIndex=${i.index} bytes=${a.byteLength} elapsed=${(c / 1e3).toFixed(2)}s`
-      ), d;
+        `HubClient: payload fetched fileIndex=${r.index} bytes=${a.byteLength} elapsed=${(c / 1e3).toFixed(2)}s`
+      ), l;
     },
     async fetchAllPayloads(n) {
-      const r = n && n.event, i = r && r.context, s = i && typeof i == "object" && !Array.isArray(i) && Array.isArray(i.files) ? i.files : [], o = [];
-      for (let u = 0; u < s.length; u++) {
-        const m = s[u];
+      const i = n && n.event, r = i && i.context, o = r && typeof r == "object" && !Array.isArray(r) && Array.isArray(r.files) ? r.files : [], s = [];
+      for (let f = 0; f < o.length; f++) {
+        const m = o[f];
         if (!m || typeof m != "object" || m.data != null)
           continue;
-        const h = ze(m);
-        if (h.payloadIds.length)
-          for (let y = 0; y < h.payloadIds.length; y++)
-            o.push({
-              fileIndex: u,
-              chunkIndex: y,
-              payloadId: h.payloadIds[y],
-              expectedLength: typeof h.chunkByteLengths[y] == "number" ? h.chunkByteLengths[y] : null
+        const g = Tt(m);
+        if (g.payloadIds.length)
+          for (let p = 0; p < g.payloadIds.length; p++)
+            s.push({
+              fileIndex: f,
+              chunkIndex: p,
+              payloadId: g.payloadIds[p],
+              expectedLength: typeof g.chunkByteLengths[p] == "number" ? g.chunkByteLengths[p] : null
             });
       }
-      if (!o.length)
+      if (!s.length)
         return n;
-      const a = typeof performance < "u" && performance.now ? performance.now() : Date.now(), d = t(), f = await Wn(
-        o,
-        d,
-        M
+      const a = typeof performance < "u" && performance.now ? performance.now() : Date.now(), l = t(), h = await Si(
+        s,
+        l,
+        ae
       ), c = /* @__PURE__ */ new Map();
-      for (let u = 0; u < o.length; u++) {
-        const { fileIndex: m, chunkIndex: h } = o[u];
-        let y = c.get(m);
-        y || (y = [], c.set(m, y)), y[h] = f[u];
+      for (let f = 0; f < s.length; f++) {
+        const { fileIndex: m, chunkIndex: g } = s[f];
+        let p = c.get(m);
+        p || (p = [], c.set(m, p)), p[g] = h[f];
       }
-      const b = pt(n);
-      for (const [u, m] of c) {
-        const h = b.event.context.files[u], y = typeof h.byteLength == "number" ? h.byteLength : null, S = xt(m, y);
-        if (!mt(b, u, S))
-          throw new Error("CastClient.fetchAllPayloads: attach failed");
+      const u = on(n);
+      for (const [f, m] of c) {
+        const g = u.event.context.files[f], p = typeof g.byteLength == "number" ? g.byteLength : null, S = Ln(m, p);
+        if (!rn(u, f, S))
+          throw new Error("HubClient.fetchAllPayloads: attach failed");
       }
-      const l = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - a;
+      const d = (typeof performance < "u" && performance.now ? performance.now() : Date.now()) - a;
       return console.debug(
-        `CastClient: fetchAllPayloads files=${c.size} chunks=${o.length} concurrent=${M} elapsed=${(l / 1e3).toFixed(2)}s`
-      ), b;
+        `HubClient: fetchAllPayloads files=${c.size} chunks=${s.length} concurrent=${ae} elapsed=${(d / 1e3).toFixed(2)}s`
+      ), u;
     }
   };
 }
-function te(e) {
+function Ue(e) {
   const t = String(e ?? "").trim();
   if (!t)
     return null;
@@ -8411,439 +8438,1117 @@ function te(e) {
     return null;
   }
 }
-function Kn(e) {
-  const t = te(e);
+function Ei(e) {
+  const t = Ue(e);
   if (!t)
     return "";
   const n = t.href.endsWith("/") ? t.href : `${t.href}/`;
   return new URL("admin", n).href;
 }
-function Yn(e, t = {}) {
-  var d, f, c, b;
-  const n = te(e);
+function wi(e, t = {}) {
+  var l, h, c, u;
+  const n = Ue(e);
   if (!n)
     return "";
-  const r = new URL("/api/hub/conference-client", n.origin), i = (d = t.subscriberName) == null ? void 0 : d.trim(), s = (f = t.topic) == null ? void 0 : f.trim(), o = ((c = t.theme) == null ? void 0 : c.trim()) || "volview", a = ((b = t.mode) == null ? void 0 : b.trim().toLowerCase()) === "light" ? "light" : "dark";
-  return i && r.searchParams.set("subscriberName", i), s && r.searchParams.set("topic", s), r.searchParams.set("theme", o), r.searchParams.set("mode", a), r.href;
+  const i = new URL("/api/hub/conference-client", n.origin), r = (l = t.subscriberName) == null ? void 0 : l.trim(), o = (h = t.topic) == null ? void 0 : h.trim(), s = ((c = t.theme) == null ? void 0 : c.trim()) || "volview", a = ((u = t.mode) == null ? void 0 : u.trim().toLowerCase()) === "light" ? "light" : "dark";
+  return r && i.searchParams.set("subscriberName", r), o && i.searchParams.set("topic", o), i.searchParams.set("theme", s), i.searchParams.set("mode", a), i.href;
 }
-var Xn = { width: 336, height: 288 };
-function Zn(e, t, n = { width: 800, height: 600 }) {
+var Ti = { width: 336, height: 288 };
+var Ni = "hubViewer-reporting";
+var Li = "hubViewer-classroom";
+var vi = "hubViewer-worklist";
+function Ai(e = null) {
+  const t = typeof globalThis < "u" ? globalThis.screen : null, n = typeof globalThis < "u" && globalThis.window ? globalThis.window : null, i = Number(t == null ? void 0 : t.availLeft) || 0, r = Number(t == null ? void 0 : t.availTop) || 0, o = (t == null ? void 0 : t.availWidth) || (t == null ? void 0 : t.width) || 1200, s = (t == null ? void 0 : t.availHeight) || (t == null ? void 0 : t.height) || 800, a = (e == null ? void 0 : e.left) ?? (n == null ? void 0 : n.screenX) ?? (n == null ? void 0 : n.screenLeft) ?? 0, l = (e == null ? void 0 : e.top) ?? (n == null ? void 0 : n.screenY) ?? (n == null ? void 0 : n.screenTop) ?? 0, h = Math.max(
+    1,
+    Number(
+      (e == null ? void 0 : e.width) ?? (n == null ? void 0 : n.outerWidth) ?? Math.floor(o * 0.5)
+    ) || Math.floor(o * 0.5)
+  ), c = Math.min(756, Math.max(600, Math.floor(o * 0.444))), u = Math.min(784, Math.max(624, Math.floor(s * 0.688))), d = Math.max(0, Math.floor(h * 0.1));
+  let f = a + h - d, m = l;
+  return f + c > i + o && (f = Math.max(i, i + o - c)), m + u > r + s && (m = Math.max(r, r + s - u)), f = Math.max(i, Math.min(f, i + o - c)), m = Math.max(r, Math.min(m, r + s - u)), {
+    width: c,
+    height: u,
+    left: Math.floor(f),
+    top: Math.floor(m)
+  };
+}
+function Ii(e) {
+  return [
+    "popup",
+    `width=${e.width}`,
+    `height=${e.height}`,
+    `left=${e.left}`,
+    `top=${e.top}`
+  ].join(",");
+}
+function Ui(e, t) {
+  if (!(!e || !t))
+    try {
+      e.resizeTo(t.width, t.height), e.moveTo(t.left, t.top), e.focus();
+    } catch {
+    }
+}
+function xi(e, t, n = { width: 800, height: 600 }) {
   if (!e || typeof window > "u")
     return;
-  const r = n.width, i = n.height, s = Math.max(0, Math.floor((window.screen.width - r) / 2)), o = Math.max(0, Math.floor((window.screen.height - i) / 2)), a = [
+  const i = n.width, r = n.height, o = Math.max(0, Math.floor((window.screen.width - i) / 2)), s = Math.max(0, Math.floor((window.screen.height - r) / 2)), a = [
     "popup",
-    `width=${r}`,
-    `height=${i}`,
-    `left=${s}`,
-    `top=${o}`,
+    `width=${i}`,
+    `height=${r}`,
+    `left=${o}`,
+    `top=${s}`,
     "noopener",
     "noreferrer"
   ].join(",");
   window.open(e, t, a);
 }
-var Qn = 3e4;
-var Pt = 1200;
-var Bt = [
-  "Test conference",
-  "US annotations",
+var Hi = 3e4;
+var An = 1200;
+var In = [
+  "ST-444 \xB7 Anatomie humaine",
   "Tumor Board",
   "Case discussion",
   "Pedicle screw"
 ];
-function Ge(e, t) {
-  const n = te(e);
+function xe(e, t) {
+  const n = Ue(e);
   return n ? new URL(t, n.origin).href : null;
 }
-function Ve(e) {
+function Lt(e) {
   if (!Array.isArray(e))
     return [];
   const t = /* @__PURE__ */ new Set();
   return e.map((n) => String(n ?? "").trim()).filter((n) => !n || t.has(n) ? false : (t.add(n), true));
 }
-function ne(e) {
+function X(e) {
   return String((e == null ? void 0 : e.hostTopic) ?? (e == null ? void 0 : e.user) ?? "").trim();
 }
-function We(e, t) {
-  const n = ne(t), r = String(e ?? "").trim();
-  return !r || !n ? false : r === n || r.toLowerCase() === n.toLowerCase();
+function vt(e) {
+  const t = X(e);
+  return String((e == null ? void 0 : e.sceneLeaderTopic) ?? "").trim() || t;
 }
-function Je(e, t, n) {
-  const r = String(e ?? "").trim(), i = String(t ?? "").trim(), s = ne(n), o = Array.isArray(n == null ? void 0 : n.topics) ? n.topics.map((a) => String(a).trim()).filter(Boolean) : [];
-  return !!(r && (r === s || o.includes(r)) || i && i === s);
+function At(e, t) {
+  const n = X(t), i = String(e ?? "").trim();
+  return !i || !n ? false : i === n || i.toLowerCase() === n.toLowerCase();
 }
-function K(e, t, n) {
+function Un(e, t) {
+  const n = vt(t), i = String(e ?? "").trim();
+  return !i || !n ? false : i === n || i.toLowerCase() === n.toLowerCase();
+}
+function It(e, t, n) {
+  const i = String(e ?? "").trim(), r = String(t ?? "").trim(), o = X(n), s = Array.isArray(n == null ? void 0 : n.topics) ? n.topics.map((a) => String(a).trim()).filter(Boolean) : [];
+  return !!(i && (i === o || s.includes(i)) || r && r === o);
+}
+function Ee(e, t, n) {
   return n.find(
-    (r) => Je(e, t, r)
+    (i) => It(e, t, i)
   ) || null;
 }
-async function Dt(e) {
-  const t = Ge(e, "/api/hub/conference-topics");
+async function xn(e) {
+  const t = xe(e, "/api/hub/conference-topics");
   if (!t)
     return [];
   try {
     const n = await fetch(t);
     if (!n.ok)
       return [];
-    const r = await n.json();
-    return Array.isArray(r) ? r.map((i) => String(i).trim()).filter((i) => i && i !== "*") : [];
+    const i = await n.json();
+    if (!Array.isArray(i))
+      return [];
+    const r = [];
+    for (const o of i) {
+      if (o && typeof o == "object") {
+        const a = String(o.topic ?? "").trim();
+        if (!a || a === "*") continue;
+        r.push({
+          topic: a,
+          timezone: String(o.timezone ?? "").trim()
+        });
+        continue;
+      }
+      const s = String(o ?? "").trim();
+      !s || s === "*" || r.push({ topic: s, timezone: "" });
+    }
+    return r;
   } catch {
     return [];
   }
 }
-async function Y(e) {
-  const t = te(e);
+async function we(e) {
+  const t = Ue(e);
   if (!t)
     return [];
   const n = new URL("/api/hub/conference", t.origin).href;
   try {
-    const r = await fetch(n);
-    if (!r.ok)
+    const i = await fetch(n);
+    if (!i.ok)
       return [];
-    const i = await r.json();
-    return Array.isArray(i) ? i : [];
+    const r = await i.json();
+    return Array.isArray(r) ? r : [];
   } catch {
     return [];
   }
 }
-async function Ft(e, t, n, r, i) {
-  const s = Ge(e, "/api/hub/conference");
-  if (!s)
+async function Hn(e, t, n, i, r) {
+  const o = xe(e, "/api/hub/conference");
+  if (!o)
+    throw new Error("Invalid hub endpoint");
+  const s = {
+    hostTopic: String(t).trim(),
+    title: String(n).trim(),
+    topics: i
+  }, a = String(r ?? "").trim();
+  a && (s.hostUserName = a);
+  const l = await fetch(o, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(s)
+  });
+  if (!l.ok) {
+    const h = await l.text();
+    throw new Error(h || `HTTP ${l.status}`);
+  }
+}
+async function $n(e, t, n, i) {
+  const r = xe(e, "/api/hub/conference/join");
+  if (!r)
     throw new Error("Invalid hub endpoint");
   const o = {
     hostTopic: String(t).trim(),
-    title: String(n).trim(),
-    topics: r
-  }, a = String(i ?? "").trim();
-  a && (o.hostUserName = a);
-  const d = await fetch(s, {
-    method: "POST",
+    joinTopic: String(n).trim()
+  }, s = String(i ?? "").trim();
+  s && (o.joinUserName = s);
+  const a = await fetch(r, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(o)
   });
-  if (!d.ok) {
-    const f = await d.text();
-    throw new Error(f || `HTTP ${d.status}`);
+  if (!a.ok) {
+    const l = await a.text();
+    throw new Error(l || `HTTP ${a.status}`);
   }
 }
-async function Ke(e, t, n) {
-  const r = Ge(e, "/api/hub/conference");
-  if (!r)
+async function Ut(e, t, n) {
+  const i = xe(e, "/api/hub/conference");
+  if (!i)
     throw new Error("Invalid hub endpoint");
-  const i = { hostTopic: String(t).trim() }, s = n == null ? void 0 : n.trim();
-  s && (i.leaveTopic = s);
-  const o = await fetch(r, {
+  const r = { hostTopic: String(t).trim() }, o = n == null ? void 0 : n.trim();
+  o && (r.leaveTopic = o);
+  const s = await fetch(i, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(i)
+    body: JSON.stringify(r)
   });
-  if (!o.ok) {
-    const a = await o.text();
-    throw new Error(a || `HTTP ${o.status}`);
+  if (!s.ok) {
+    const a = await s.text();
+    throw new Error(a || `HTTP ${s.status}`);
   }
 }
-async function er(e, t, n) {
-  const r = await Y(e), i = K(t, n, r);
+async function $i(e, t, n, i) {
+  const r = xe(e, "/api/hub/conference/lead");
+  if (!r)
+    throw new Error("Invalid hub endpoint");
+  const o = {
+    hostTopic: String(t).trim(),
+    sceneLeaderTopic: String(n).trim()
+  }, s = String(i ?? "").trim();
+  s && (o.leaderUserName = s);
+  const a = await fetch(r, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(o)
+  });
+  if (!a.ok) {
+    const l = await a.text();
+    throw new Error(l || `HTTP ${a.status}`);
+  }
+  try {
+    return await a.json();
+  } catch {
+    return { status: "updated" };
+  }
+}
+async function ki(e, t, n) {
+  const i = await we(e), r = Ee(t, n, i);
   return {
-    active: !!i,
-    title: String((i == null ? void 0 : i.title) ?? "").trim(),
-    participants: Ve(i == null ? void 0 : i.participants)
+    active: !!r,
+    title: String((r == null ? void 0 : r.title) ?? "").trim(),
+    participants: Lt(r == null ? void 0 : r.participants)
   };
 }
-function Ye(e, t) {
+function xt(e, t) {
   if (!t)
     return null;
-  const n = String((e == null ? void 0 : e.topic) ?? "").trim(), r = String((e == null ? void 0 : e.subscriberName) ?? "").trim(), i = String((e == null ? void 0 : e.userName) ?? "").trim(), s = ne(t);
-  if (!s || !Je(n, r, t))
+  const n = String((e == null ? void 0 : e.topic) ?? "").trim(), i = String((e == null ? void 0 : e.subscriberName) ?? "").trim(), r = String((e == null ? void 0 : e.userName) ?? "").trim(), o = X(t);
+  if (!o || !It(n, i, t))
     return null;
-  const o = Array.isArray(t.topics) ? t.topics.map((u) => String(u).trim()).filter(Boolean) : [], a = Ve(t.participants), d = [], f = /* @__PURE__ */ new Set();
-  for (const u of [n, s, ...o])
-    !u || f.has(u) || (f.add(u), d.push(u));
-  const c = We(n, t) ? "leading" : "following", b = s, l = d.map((u) => {
-    const m = !!n && (u === n || u.toLowerCase() === n.toLowerCase()), h = u === b || u.toLowerCase() === b.toLowerCase(), y = h && c === "following";
-    let S = "";
-    return m ? S = c === "leading" ? "You \xB7 leading" : "You" : y ? S = "Following" : c === "leading" && (S = "Following you"), {
-      placeId: u,
-      label: m && i ? i : u,
-      isSelf: m,
-      isLeading: h,
-      isFollowing: y,
-      statusLabel: S
+  const s = Array.isArray(t.topics) ? t.topics.map((m) => String(m).trim()).filter(Boolean) : [], a = Lt(t.participants), l = [], h = /* @__PURE__ */ new Set();
+  for (const m of [n, o, ...s])
+    !m || h.has(m) || (h.add(m), l.push(m));
+  const c = vt(t), u = At(n, t), d = Un(n, t) ? "leading" : "following", f = l.map((m) => {
+    const g = !!n && (m === n || m.toLowerCase() === n.toLowerCase()), p = m === c || m.toLowerCase() === c.toLowerCase(), S = p && d === "following";
+    let A = "";
+    return g ? A = d === "leading" ? "You \xB7 leading" : "You" : S ? A = "Following" : d === "leading" && (A = "Following you"), {
+      placeId: m,
+      label: g && r ? r : m,
+      isSelf: g,
+      isLeading: p,
+      isFollowing: S,
+      statusLabel: A
     };
   });
   return {
     title: String(t.title ?? "").trim(),
-    places: l,
+    places: f,
     selfPlaceId: n,
-    leadingPlaceId: b,
-    selfRole: c,
-    hostTopic: s,
-    attendeeTopics: o,
+    leadingPlaceId: c,
+    selfRole: d,
+    isConferenceOwner: u,
+    hostTopic: o,
+    sceneLeaderTopic: c,
+    attendeeTopics: s,
     participants: a
   };
 }
-async function Mt(e, t, n, r) {
-  const i = await Y(e), s = K(t, n, i);
-  return Ye({ topic: t, subscriberName: n, userName: r }, s);
+async function kn(e, t, n, i) {
+  const r = await we(e), o = Ee(t, n, r);
+  return xt({ topic: t, subscriberName: n, userName: i }, o);
 }
-function C(e, t) {
+var bt = Object.freeze({
+  // Dialog shell
+  dialogTitle: "Conferencing",
+  close: "Close",
+  closeAria: "Close",
+  // Session (user / topic)
+  sessionSection: "User / topic",
+  sessionInfo: "Session info",
+  participantsAria: "Participants",
+  userLabel: "User:",
+  changeUserName: "Change user name",
+  changeUserNameTitle: "Change user name",
+  userNamePlaceholder: "Enter user name",
+  openAnotherUser: "Open another user",
+  openAnotherUserTitle: "Open another user session to test conferencing",
+  userNameSavedNote: "Saved. Reload the page to apply.",
+  done: "Done",
+  // Create
+  createSection: "Create a conference",
+  conferenceTitle: "Conference title",
+  selectConferenceTitle: "Select a conference title",
+  otherTitle: "Other\u2026",
+  customTitle: "Custom title",
+  customTitlePlaceholder: "Enter conference title",
+  users: "Users",
+  loadingUsers: "Loading users\u2026",
+  noUsers: "No users available",
+  createConference: "Create conference",
+  creating: "Creating\u2026",
+  // Join
+  joinSection: "Join a conference",
+  activeConferences: "Active conferences",
+  noConferences: "No conferences available",
+  selectConference: "Select a conference",
+  untitled: "Untitled",
+  joinConference: "Join conference",
+  joining: "Joining\u2026",
+  // Manage
+  manageSection: "Manage conference",
+  titleLabel: "Title:",
+  na: "N/A",
+  participants: "Participants",
+  noPlaces: "No places",
+  leaveConference: "Leave conference",
+  endConference: "End conference",
+  ending: "Ending\u2026",
+  leaving: "Leaving\u2026",
+  conferenceEnded: "Conference ended.",
+  leftConference: "Left conference.",
+  // Errors / status
+  connectHubFirst: "Connect to the Slicer hub first.",
+  topicRequiredHost: "Hub topic is required to host a conference.",
+  topicRequiredJoin: "Hub topic is required to join a conference.",
+  titleRequired: "Conference title is required.",
+  selectAttendee: "Select at least one attendee topic.",
+  selectConferenceToJoin: "Select a conference to join.",
+  failedCreate: "Failed to create conference.",
+  failedJoin: "Failed to join conference.",
+  failedUpdate: "Failed to update conference.",
+  // Invite
+  inviteTitle: "Conference invitation",
+  joinAndFollow: "Join and follow",
+  joinNoFollow: "Join but do not follow",
+  doNotJoin: "Do not join",
+  hostFallback: "host",
+  /** {{title}} — join and follow {{host}}? */
+  inviteLeadWithTitle: "{{title}} \u2014 join and follow {{host}}?",
+  /** Join conference and follow {{host}}? */
+  inviteLeadNoTitle: "Join conference and follow {{host}}?",
+  /** Join and follow {{host}} */
+  joinAndFollowHost: "Join and follow {{host}}",
+  // Takeover
+  takeoverTitle: "Take over?",
+  takeoverBody: "The host and all participants will be notified that you are taking over. You will lead scene updates for this conference.",
+  cancel: "Cancel",
+  takeOver: "Take over",
+  // Header
+  conferencing: "Conferencing",
+  subscribeHubFirst: "Subscribe to the hub first",
+  stopFollowing: "Stop following",
+  resumeFollowing: "Resume following"
+});
+function ye(e, t = {}) {
+  return String(e || "").replace(
+    /\{\{(\w+)\}\}/g,
+    (n, i) => t[i] != null ? String(t[i]) : ""
+  );
+}
+function ee(e) {
+  return !e || typeof e != "object" ? { ...bt } : { ...bt, ...e };
+}
+function F(e, t) {
   return `${e}-${t}`;
 }
-function B(e) {
+function Ht(e) {
+  var i;
+  if (!((i = e == null ? void 0 : e.places) != null && i.length)) return null;
+  const t = e.places.find((r) => r && r.isLeading);
+  if (t) return t;
+  const n = String(e.leadingPlaceId || "").trim();
+  return n && e.places.find(
+    (r) => r && (r.placeId === n || r.placeId.toLowerCase() === n.toLowerCase())
+  ) || null;
+}
+function _n(e, t = true) {
+  return e != null && e.isFollowing ? t ? "Following" : "Skipping" : String((e == null ? void 0 : e.statusLabel) || "").trim();
+}
+function $t(e, t, n = "short", i = true, r = "") {
+  if ((t === "leading" || t === "following" ? t : e != null && e.isLeading ? "leading" : "following") === "leading")
+    return n === "full" ? "You \xB7 leading" : "Leading";
+  const s = String(r || "").trim();
+  if (!i)
+    return s ? `Skipping ${s}` : n === "full" ? "You \xB7 skipping" : "Skipping";
+  if (s) return `Following ${s}`;
+  if (n === "full") {
+    const a = String((e == null ? void 0 : e.statusLabel) || "").trim();
+    return a || "You";
+  }
+  return "Following";
+}
+function Rn(e, t, n = true) {
+  if (!e) return "";
+  if (e.isSelf) {
+    const i = Ht(t);
+    return $t(
+      e,
+      t == null ? void 0 : t.selfRole,
+      "short",
+      n,
+      i && !i.isSelf ? i.label : ""
+    );
+  }
+  return _n(e, n);
+}
+function _i(e, t) {
+  e.classList.remove(t, `${t}-leading`);
+  const n = e.querySelector("[data-hub-conference-role]");
+  n instanceof HTMLElement && (n.hidden = true, n.textContent = "");
+}
+function On(e, t, n, i, r) {
+  const o = (t.places || []).filter((s) => s && (r || !s.isSelf));
+  for (const s of o) {
+    const a = document.createElement("div");
+    a.className = F(n, "chip"), a.setAttribute("role", "listitem"), s.isSelf && a.classList.add(F(n, "chip-self")), s.isLeading && a.classList.add(F(n, "chip-leading")), s.isFollowing && (a.classList.add(F(n, "chip-following")), i || a.classList.add(F(n, "chip-skipping")));
+    const l = Rn(
+      s,
+      t,
+      i
+    ), h = document.createElement("span");
+    h.className = F(n, "chip-name"), h.textContent = s.label;
+    const c = [s.label, l, s.placeId].map((u) => String(u || "").trim()).filter(Boolean).join(" \u2014 ");
+    if (h.title = c, a.title = c, a.append(h), l) {
+      const u = document.createElement("span");
+      u.className = F(n, "chip-status"), u.textContent = l, a.append(u);
+    }
+    e.append(a);
+  }
+}
+function Ri(e) {
+  var p;
+  const t = (e == null ? void 0 : e.view) ?? null, n = e == null ? void 0 : e.statusControl, i = (e == null ? void 0 : e.chipsHost) instanceof HTMLElement ? e.chipsHost : null, r = String((e == null ? void 0 : e.classPrefix) || "hub-conference").trim() || "hub-conference", o = String((e == null ? void 0 : e.statusClassPrefix) || F(r, "user")).trim() || F(r, "user"), s = (e == null ? void 0 : e.selfStatusMode) === "full" ? "full" : "short", a = (e == null ? void 0 : e.followHost) !== false, l = F(r, "chip-status");
+  if (!(n instanceof HTMLElement))
+    return;
+  if (!!!((p = t == null ? void 0 : t.places) != null && p.length)) {
+    _i(n, o), i && (i.replaceChildren(), i.hidden = true), W();
+    return;
+  }
+  const c = t.places.find((S) => S && S.isSelf) || null, u = Ht(t), d = t.selfRole === "leading" || !!(c != null && c.isLeading), f = u && !u.isSelf ? String(u.label || "").trim() : "";
+  n.classList.add(o), n.classList.toggle(`${o}-leading`, d);
+  let m = n.querySelector("[data-hub-conference-role]");
+  if (m instanceof HTMLElement || (m = document.createElement("span"), m.dataset.hubConferenceRole = "1", n.append(m)), m.className = l, m.hidden = false, m.textContent = $t(
+    c,
+    t.selfRole,
+    s,
+    a,
+    f
+  ), !i)
+    return;
+  if (i.replaceChildren(), !t.places.filter((S) => S && !S.isSelf).length) {
+    i.hidden = true;
+    return;
+  }
+  i.hidden = false, On(i, t, r, a, false);
+}
+var K = null;
+function W() {
+  K && (K.cleanup(), K = null);
+}
+function Oi() {
+  return !!K;
+}
+function Mi(e) {
+  var g;
+  const t = e == null ? void 0 : e.anchor, n = (e == null ? void 0 : e.view) ?? null, i = (e == null ? void 0 : e.followHost) !== false, r = String((e == null ? void 0 : e.classPrefix) || "hub-conference").trim() || "hub-conference", o = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
+  if (!(t instanceof HTMLElement) || !o || !((g = n == null ? void 0 : n.places) != null && g.length))
+    return W(), { close: W, open: false };
+  if (K) {
+    const p = K.panel.__castAnchor === t;
+    if (W(), p)
+      return { close: W, open: false };
+  }
+  const s = document.createElement("div");
+  s.className = F(r, "participants-popup"), s.setAttribute("role", "dialog"), s.setAttribute("aria-label", "Conference participants"), s.dataset.castParticipantsPopup = "1", s.__castAnchor = t;
+  const a = document.createElement("div");
+  a.className = F(r, "participants-popup-title"), a.textContent = "Participants", s.append(a);
+  const l = document.createElement("div");
+  l.className = F(r, "participants-popup-list"), l.setAttribute("role", "list"), On(l, n, r, i, true), s.append(l), o.appendChild(s);
+  const h = () => {
+    const p = t.getBoundingClientRect(), S = 6, A = Math.max(220, Math.min(320, s.offsetWidth || 260));
+    let U = p.left, w = p.bottom + S;
+    const N = window.innerWidth - A - 8;
+    U > N && (U = Math.max(8, N)), w + s.offsetHeight > window.innerHeight - 8 && (w = Math.max(8, p.top - s.offsetHeight - S)), s.style.position = "fixed", s.style.left = `${Math.round(U)}px`, s.style.top = `${Math.round(w)}px`, s.style.zIndex = "10030", s.style.minWidth = "220px", s.style.maxWidth = "320px";
+  };
+  h();
+  const c = (p) => {
+    const S = p.target;
+    S instanceof Node && (s.contains(S) || t.contains(S) || W());
+  }, u = (p) => {
+    p.key === "Escape" && W();
+  }, d = () => h(), f = window.setTimeout(() => {
+    document.addEventListener("pointerdown", c, true);
+  }, 0);
+  return document.addEventListener("keydown", u, true), window.addEventListener("resize", d), K = { panel: s, cleanup: () => {
+    window.clearTimeout(f), document.removeEventListener("pointerdown", c, true), document.removeEventListener("keydown", u, true), window.removeEventListener("resize", d), s.remove();
+  } }, requestAnimationFrame(h), { close: W, open: true };
+}
+function Mn(e = {}) {
+  var d;
+  const t = ee(e.strings), n = e.view ?? null, i = !!e.followHost, r = !!e.connected, o = !!((d = n == null ? void 0 : n.places) != null && d.length), s = (n == null ? void 0 : n.selfRole) === "leading", l = !!(n != null && n.isConferenceOwner) ? t.endConference : t.leaveConference, h = o && !s && i, c = o && !s && !i, u = r ? t.conferencing : t.subscribeHubFirst;
+  return {
+    active: o,
+    start: {
+      // Keep Conferencing available while active so User/topic + Manage stay reachable.
+      hidden: false,
+      disabled: !r,
+      label: t.conferencing,
+      title: u,
+      ariaLabel: t.conferencing
+    },
+    leave: {
+      hidden: !o,
+      disabled: !r || !o,
+      label: l,
+      title: l,
+      ariaLabel: l
+    },
+    stopFollowing: {
+      hidden: !h,
+      label: t.stopFollowing,
+      title: t.stopFollowing,
+      ariaLabel: t.stopFollowing
+    },
+    resumeFollowing: {
+      hidden: !c,
+      label: t.resumeFollowing,
+      title: t.resumeFollowing,
+      ariaLabel: t.resumeFollowing
+    },
+    takeOver: {
+      hidden: !c,
+      disabled: !r || !c,
+      label: t.takeOver,
+      title: t.takeOver,
+      ariaLabel: t.takeOver
+    }
+  };
+}
+function pe(e, t) {
+  e instanceof HTMLElement && (typeof t.hidden == "boolean" && (e.hidden = t.hidden), typeof t.disabled == "boolean" && "disabled" in e && (e.disabled = t.disabled, t.disabled || e.removeAttribute("disabled")), typeof t.label == "string" && !e.querySelector("svg") && (e.textContent = t.label), typeof t.title == "string" && (e.title = t.title), typeof t.ariaLabel == "string" && e.setAttribute("aria-label", t.ariaLabel));
+}
+function Pi(e = {}) {
+  const t = Mn({
+    view: e.view,
+    followHost: e.followHost,
+    connected: e.connected,
+    strings: e.strings
+  });
+  return pe(e.startBtn, t.start), pe(e.endBtn, t.leave), pe(e.stopFollowBtn, t.stopFollowing), pe(e.resumeFollowBtn, t.resumeFollowing), pe(e.takeOverBtn, t.takeOver), t;
+}
+function kt(e, t, n = "hub-dialog-anchored") {
+  e instanceof HTMLElement && e.classList.remove(n), t instanceof HTMLElement && (t.style.top = "", t.style.left = "", t.style.right = "", t.style.bottom = "", t.style.maxWidth = "", t.style.position = "", t.style.margin = "");
+}
+function Pn(e) {
+  const t = e == null ? void 0 : e.overlay, n = e == null ? void 0 : e.dialog, i = e == null ? void 0 : e.anchor, r = String((e == null ? void 0 : e.anchoredClass) || "hub-dialog-anchored").trim(), o = Number.isFinite(e == null ? void 0 : e.gap) ? Number(e.gap) : 6, s = Number.isFinite(e == null ? void 0 : e.pad) ? Number(e.pad) : 8, a = (e == null ? void 0 : e.align) === "end";
+  if (!(t instanceof HTMLElement) || !(n instanceof HTMLElement))
+    return;
+  if (!(i instanceof HTMLElement)) {
+    kt(t, n, r);
+    return;
+  }
+  const l = i.getBoundingClientRect();
+  t.classList.add(r), n.style.position = "absolute", n.style.margin = "0";
+  const h = Math.max(
+    280,
+    Math.min(n.offsetWidth || 480, window.innerWidth - s * 2)
+  );
+  let c = a ? l.right - h : l.left, u = l.bottom + o;
+  const d = window.innerWidth - h - s;
+  c > d && (c = Math.max(s, d)), c < s && (c = s);
+  const f = n.offsetHeight || 280;
+  u + f > window.innerHeight - s && (u = Math.max(s, l.top - f - o)), n.style.left = `${Math.round(c)}px`, n.style.top = `${Math.round(u)}px`, n.style.maxWidth = `${Math.round(h)}px`;
+}
+function y(e, t) {
+  return `${e}-${t}`;
+}
+function Z(e) {
   return String(e ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function tr(e) {
-  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, r = String((e == null ? void 0 : e.classPrefix) || "cast-conference").trim(), i = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
-  if (!i)
-    throw new Error("createCastConferenceDialog requires a DOM root");
-  let s = null, o = false;
-  const a = document.createElement("div");
-  a.className = C(r, "overlay"), a.hidden = true, a.innerHTML = `
-    <div class="${C(r, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${C(r, "title")}" tabindex="-1">
-      <div class="${C(r, "header")}">
-        <h2 id="${C(r, "title")}" class="${C(r, "title")}">Conferencing</h2>
-        <button type="button" class="${C(r, "close")}" data-cast-conference-close aria-label="Close">\xD7</button>
+function Fi(e, t) {
+  const n = String(e || "").trim();
+  if (!n) return false;
+  const i = X(t);
+  return i && (i === n || i.toLowerCase() === n.toLowerCase()) ? true : (Array.isArray(t == null ? void 0 : t.topics) ? t.topics : []).some((o) => {
+    const s = String(o || "").trim();
+    return s === n || s.toLowerCase() === n.toLowerCase();
+  });
+}
+function Di(e) {
+  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, i = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, r = String((e == null ? void 0 : e.classPrefix) || "hub-conference").trim(), o = (e == null ? void 0 : e.anchorAlign) === "end" ? "end" : "start", s = (e == null ? void 0 : e.root) || (typeof document < "u" ? document.body : null);
+  if (!s)
+    throw new Error("createHubConferenceDialog requires a DOM root");
+  let a = ee(e == null ? void 0 : e.strings), l = null, h = false, c = null;
+  const u = document.createElement("div");
+  u.className = y(r, "overlay"), u.hidden = true, u.innerHTML = `
+    <div class="${y(r, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${y(r, "title")}" tabindex="-1">
+      <div class="${y(r, "header")}">
+        <h2 id="${y(r, "title")}" class="${y(r, "title")}" data-hub-conference-dialog-title></h2>
+        <button type="button" class="${y(r, "close")}" data-hub-conference-close aria-label="">\xD7</button>
       </div>
-      <div class="${C(r, "body")}">
-        <p class="${C(r, "status")}" data-cast-conference-status role="alert" hidden></p>
-        <div data-cast-conference-create>
-          <div class="${C(r, "field")}">
-            <label class="${C(r, "label")}" for="${C(r, "title-select")}">Conference title</label>
-            <select id="${C(r, "title-select")}" class="${C(r, "select")}" data-cast-conference-title-select>
-              <option value="">Select a conference title</option>
-              ${Bt.map(
-    (p) => `<option value="${B(p)}"${p === "Test conference" ? " selected" : ""}>${B(p)}</option>`
-  ).join("")}
-              <option value="other">Other\u2026</option>
-            </select>
-          </div>
-          <div class="${C(r, "field")}" data-cast-conference-custom-group hidden>
-            <label class="${C(r, "label")}" for="${C(r, "custom-title")}">Custom title</label>
-            <input id="${C(r, "custom-title")}" class="${C(r, "input")}" type="text" placeholder="Enter conference title" data-cast-conference-custom-title />
-          </div>
-          <div class="${C(r, "field")}">
-            <span class="${C(r, "label")}">Users</span>
-            <div class="${C(r, "topics")}" data-cast-conference-topics>
-              <p class="${C(r, "muted")}">Loading users\u2026</p>
+      <div class="${y(r, "body")}">
+        <p class="${y(r, "status")}" data-hub-conference-status role="alert" hidden></p>
+        <div data-hub-conference-create>
+          <div class="${y(r, "section")}" data-hub-conference-create-form>
+            <div class="${y(r, "section-title")}" data-hub-conference-create-section></div>
+            <div class="${y(r, "field")}">
+              <label class="${y(r, "label")}" for="${y(r, "title-select")}" data-hub-conference-title-label></label>
+              <select id="${y(r, "title-select")}" class="${y(r, "select")}" data-hub-conference-title-select>
+              </select>
             </div>
+            <div class="${y(r, "field")}" data-hub-conference-custom-group hidden>
+              <label class="${y(r, "label")}" for="${y(r, "custom-title")}" data-hub-conference-custom-label></label>
+              <input id="${y(r, "custom-title")}" class="${y(r, "input")}" type="text" data-hub-conference-custom-title />
+            </div>
+            <div class="${y(r, "field")}">
+              <span class="${y(r, "label")}" data-hub-conference-users-label></span>
+              <div class="${y(r, "topics")}" data-hub-conference-topics>
+                <p class="${y(r, "muted")}" data-hub-conference-loading-users></p>
+              </div>
+            </div>
+            <button type="button" class="${y(r, "primary")}" data-hub-conference-create-btn></button>
           </div>
-          <button type="button" class="${C(r, "primary")}" data-cast-conference-create-btn>Create conference</button>
+          <div class="${y(r, "section")}" data-hub-conference-join-section>
+            <div class="${y(r, "section-title")}" data-hub-conference-join-section-title></div>
+            <div class="${y(r, "field")}">
+              <label class="${y(r, "label")}" for="${y(r, "join-select")}" data-hub-conference-active-label></label>
+              <select id="${y(r, "join-select")}" class="${y(r, "select")}" data-hub-conference-join-select>
+              </select>
+            </div>
+            <button type="button" class="${y(r, "primary")}" data-hub-conference-join-btn disabled></button>
+          </div>
         </div>
-        <div data-cast-conference-manage hidden>
-          <div class="${C(r, "label")}">Manage conference</div>
-          <div class="${C(r, "info")}" data-cast-conference-info></div>
-          <button type="button" class="${C(r, "primary")}" data-cast-conference-exit-btn>Leave conference</button>
+        <div data-hub-conference-manage hidden>
+          <div class="${y(r, "label")}" data-hub-conference-manage-label></div>
+          <div class="${y(r, "info")}" data-hub-conference-info></div>
+          <button type="button" class="${y(r, "primary")}" data-hub-conference-exit-btn></button>
         </div>
       </div>
-      <div class="${C(r, "actions")}">
-        <button type="button" class="${C(r, "secondary")}" data-cast-conference-close>Close</button>
+      <div class="${y(r, "section")} ${y(r, "section-session")}" data-hub-conference-session>
+        <div class="${y(r, "user-row")}">
+          <span class="${y(r, "label")}" data-hub-conference-user-label></span>
+          <span
+            class="${y(r, "user-display")}"
+            data-hub-conference-user-display
+            id="sessionUserNameDisplay"
+          >\u2014</span>
+          <button
+            type="button"
+            id="sessionChangeUserBtn"
+            class="${y(r, "secondary")}"
+            data-hub-conference-change-user
+          ></button>
+        </div>
+        <p id="sessionChangeUserNote" class="${y(r, "muted")}" data-hub-conference-user-note hidden></p>
       </div>
     </div>
-  `, i.appendChild(a);
-  const d = a.querySelector(`.${C(r, "dialog")}`), f = a.querySelector("[data-cast-conference-status]"), c = a.querySelector("[data-cast-conference-create]"), b = a.querySelector("[data-cast-conference-manage]"), l = a.querySelector("[data-cast-conference-title-select]"), u = a.querySelector("[data-cast-conference-custom-group]"), m = a.querySelector("[data-cast-conference-custom-title]"), h = a.querySelector("[data-cast-conference-topics]"), y = a.querySelector("[data-cast-conference-info]"), S = a.querySelector("[data-cast-conference-create-btn]"), g = a.querySelector("[data-cast-conference-exit-btn]");
-  function E(p, L) {
+    <div
+      class="${y(r, "change-user-overlay")}"
+      data-hub-conference-change-user-overlay
+      hidden
+    >
+      <div
+        class="${y(r, "change-user-dialog")}"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="${y(r, "change-user-title")}"
+        tabindex="-1"
+      >
+        <div class="${y(r, "change-user-header")}">
+          <h3
+            id="${y(r, "change-user-title")}"
+            class="${y(r, "change-user-title")}"
+            data-hub-conference-change-user-title
+          ></h3>
+          <button
+            type="button"
+            class="${y(r, "close")}"
+            data-hub-conference-change-user-close
+            aria-label=""
+          >\xD7</button>
+        </div>
+        <div class="${y(r, "field")}">
+          <label
+            class="${y(r, "label")}"
+            for="sessionUserNameInput"
+            data-hub-conference-user-label
+          ></label>
+          <input
+            type="text"
+            id="sessionUserNameInput"
+            class="${y(r, "input")} ${y(r, "user-input")}"
+            autocomplete="username"
+            data-hub-conference-user-input
+          />
+        </div>
+        <div class="${y(r, "change-user-actions")}">
+          <button
+            type="button"
+            id="openConferenceTestWorklistBtn"
+            class="${y(r, "secondary")} ${y(r, "open-another-user")}"
+            data-hub-conference-open-another-user
+          ></button>
+          <button
+            type="button"
+            class="${y(r, "primary")}"
+            data-hub-conference-change-user-done
+          ></button>
+        </div>
+      </div>
+    </div>
+  `, s.appendChild(u);
+  const d = u.querySelector(`.${y(r, "dialog")}`), f = u.querySelector("[data-hub-conference-status]"), m = u.querySelector(
+    "[data-hub-conference-open-another-user]"
+  ), g = u.querySelector(
+    "[data-hub-conference-user-display]"
+  ), p = u.querySelector(
+    "[data-hub-conference-change-user]"
+  ), S = u.querySelector(
+    "[data-hub-conference-change-user-overlay]"
+  ), A = u.querySelector(
+    "[data-hub-conference-change-user-done]"
+  ), U = u.querySelector(
+    "[data-hub-conference-change-user-close]"
+  ), w = u.querySelector("#sessionUserNameInput"), N = u.querySelector("#sessionChangeUserNote"), E = typeof (e == null ? void 0 : e.onUserNameChange) == "function" ? e.onUserNameChange : null, x = u.querySelector("[data-hub-conference-create]"), H = u.querySelector(
+    "[data-hub-conference-create-form]"
+  ), Wt = u.querySelector("[data-hub-conference-manage]"), J = u.querySelector("[data-hub-conference-join-section]"), $ = u.querySelector("[data-hub-conference-title-select]"), _e = u.querySelector("[data-hub-conference-custom-group]"), Y = u.querySelector("[data-hub-conference-custom-title]"), ne = u.querySelector("[data-hub-conference-topics]"), I = u.querySelector("[data-hub-conference-join-select]"), zt = u.querySelector("[data-hub-conference-info]"), D = u.querySelector("[data-hub-conference-create-btn]"), _ = u.querySelector("[data-hub-conference-join-btn]"), M = u.querySelector("[data-hub-conference-exit-btn]"), he = u.querySelector("[data-hub-conference-close]");
+  function Vt(b) {
+    !x || !H || !J || (b ? x.insertBefore(J, H) : x.insertBefore(H, J));
+  }
+  function dr() {
+    if (!($ instanceof HTMLSelectElement)) return;
+    const b = String($.value || "");
+    $.replaceChildren();
+    const C = document.createElement("option");
+    C.value = "", C.textContent = a.selectConferenceTitle, $.appendChild(C);
+    for (const L of In) {
+      const v = document.createElement("option");
+      v.value = L, v.textContent = L, L === "Tumor Board" && (v.selected = true), $.appendChild(v);
+    }
+    const T = document.createElement("option");
+    T.value = "other", T.textContent = a.otherTitle, $.appendChild(T), b && [...$.options].some((L) => L.value === b) && ($.value = b);
+  }
+  function Gt() {
+    const b = (C, T) => {
+      const L = u.querySelector(C);
+      L && (L.textContent = T);
+    };
+    b("[data-hub-conference-dialog-title]", a.dialogTitle), b("[data-hub-conference-create-section]", a.createSection), b("[data-hub-conference-title-label]", a.conferenceTitle), b("[data-hub-conference-custom-label]", a.customTitle), b("[data-hub-conference-users-label]", a.users), b("[data-hub-conference-loading-users]", a.loadingUsers), b("[data-hub-conference-join-section-title]", a.joinSection), b("[data-hub-conference-active-label]", a.activeConferences), b("[data-hub-conference-manage-label]", a.manageSection), D && (D.textContent = a.createConference), _ && (_.textContent = a.joinConference), M && (M.textContent = l != null && l.isConferenceOwner ? a.endConference : a.leaveConference), u.querySelectorAll("[data-hub-conference-user-label]").forEach((C) => {
+      C instanceof HTMLElement && (C.textContent = a.userLabel);
+    }), p instanceof HTMLElement && (p.textContent = a.changeUserName, p.title = a.changeUserNameTitle), b("[data-hub-conference-change-user-title]", a.changeUserNameTitle), m instanceof HTMLElement && (m.textContent = a.openAnotherUser, m.title = a.openAnotherUserTitle), A instanceof HTMLElement && (A.textContent = a.done), N instanceof HTMLElement && (N.textContent = a.userNameSavedNote), w instanceof HTMLInputElement && (w.placeholder = a.userNamePlaceholder), Y instanceof HTMLInputElement && (Y.placeholder = a.customTitlePlaceholder), he instanceof HTMLElement && he.setAttribute("aria-label", a.closeAria), U instanceof HTMLElement && U.setAttribute("aria-label", a.closeAria), dr(), Xt();
+  }
+  function br() {
+  }
+  function Xt() {
+    const b = String(ie().userName || "").trim() || "\u2014";
+    g instanceof HTMLElement && (g.textContent = b);
+  }
+  function hr() {
+    const b = new URL(window.location.href);
+    b.searchParams.set("freshUser", "1"), b.searchParams.delete("topic"), window.open(b.href, "_blank", "noopener,noreferrer");
+  }
+  function mr() {
+    S instanceof HTMLElement && (w instanceof HTMLInputElement && (w.value = String(ie().userName || "").trim()), N instanceof HTMLElement && (N.hidden = true), S.hidden = false, w instanceof HTMLInputElement && (w.focus(), w.select()));
+  }
+  function re() {
+    S instanceof HTMLElement && (S.hidden = true);
+  }
+  function Jt() {
+    if (!(w instanceof HTMLInputElement)) return;
+    const b = w.value.trim();
+    E && E(b), g instanceof HTMLElement && (g.textContent = b || "\u2014"), N instanceof HTMLElement && (N.hidden = false, N.textContent = a.userNameSavedNote), re();
+  }
+  Gt();
+  function R(b, C) {
     if (!f)
       return;
-    const T = String(L || "").trim();
+    const T = String(C || "").trim();
     if (f.classList.remove(
-      C(r, "status-success"),
-      C(r, "status-error")
+      y(r, "status-success"),
+      y(r, "status-error")
     ), !T) {
       f.hidden = true, f.textContent = "";
       return;
     }
-    f.hidden = false, f.textContent = T, p === "success" ? f.classList.add(C(r, "status-success")) : p === "error" && f.classList.add(C(r, "status-error"));
+    f.hidden = false, f.textContent = T, b === "success" ? f.classList.add(y(r, "status-success")) : b === "error" && f.classList.add(y(r, "status-error"));
   }
-  function w(p) {
-    s = p, n && n(p);
+  function it(b) {
+    l = b, n && n(b);
   }
-  function I() {
-    const p = t() || {};
+  function ie() {
+    const b = t() || {};
     return {
-      hubEndpoint: String(p.hubEndpoint ?? "").trim(),
-      topic: String(p.topic ?? "").trim(),
-      subscriberName: String(p.subscriberName ?? "").trim(),
-      userName: String(p.userName ?? "").trim(),
-      connected: !!p.connected
+      hubEndpoint: String(b.hubEndpoint ?? "").trim(),
+      topic: String(b.topic ?? "").trim(),
+      subscriberName: String(b.subscriberName ?? "").trim(),
+      userName: String(b.userName ?? "").trim(),
+      connected: !!b.connected
     };
   }
-  function U() {
-    const p = String((l == null ? void 0 : l.value) || "").trim();
-    return p === "other" ? String((m == null ? void 0 : m.value) || "").trim() : p;
+  function gr() {
+    const b = String(($ == null ? void 0 : $.value) || "").trim();
+    return b === "other" ? String((Y == null ? void 0 : Y.value) || "").trim() : b;
   }
-  function at() {
-    return h ? Array.from(
-      h.querySelectorAll(
-        'input[type="checkbox"][data-cast-conference-topic]:checked'
+  function pr() {
+    return ne ? Array.from(
+      ne.querySelectorAll(
+        'input[type="checkbox"][data-hub-conference-topic]:checked'
       )
-    ).map((p) => String(p.value || "").trim()).filter(Boolean) : [];
+    ).map((b) => String(b.value || "").trim()).filter(Boolean) : [];
   }
-  function O(p, L) {
-    if (h) {
-      if (h.replaceChildren(), !p.length) {
-        const T = document.createElement("p");
-        T.className = C(r, "muted"), T.textContent = "No users available", h.appendChild(T);
+  function yr(b) {
+    var T;
+    const C = String(b || "").trim();
+    if (!C) return "";
+    try {
+      const v = (T = new Intl.DateTimeFormat("en", {
+        timeZone: C,
+        timeZoneName: "shortOffset"
+      }).formatToParts(/* @__PURE__ */ new Date()).find((k) => k.type === "timeZoneName")) == null ? void 0 : T.value;
+      return v ? `${C} (${v})` : C;
+    } catch {
+      return C;
+    }
+  }
+  function Yt(b) {
+    if (ne) {
+      if (ne.replaceChildren(), !b.length) {
+        const C = document.createElement("p");
+        C.className = y(r, "muted"), C.textContent = a.noUsers, ne.appendChild(C);
         return;
       }
-      for (const T of p) {
-        const N = document.createElement("label");
-        N.className = C(r, "topic-row");
-        const A = document.createElement("input");
-        A.type = "checkbox", A.dataset.castConferenceTopic = "1", A.value = T, A.checked = true;
-        const $ = document.createElement("span");
-        $.textContent = T, N.appendChild(A), N.appendChild($), h.appendChild(N);
+      for (const C of b) {
+        const T = typeof C == "string" ? String(C).trim() : String((C == null ? void 0 : C.topic) ?? "").trim();
+        if (!T) continue;
+        const L = typeof C == "string" ? "" : String((C == null ? void 0 : C.timezone) ?? "").trim(), v = document.createElement("label");
+        v.className = y(r, "topic-row");
+        const k = document.createElement("input");
+        k.type = "checkbox", k.dataset.hubConferenceTopic = "1", k.value = T, k.checked = true;
+        const q = document.createElement("span");
+        q.className = y(r, "topic-label"), q.textContent = T, v.appendChild(k), v.appendChild(q);
+        const ge = yr(L);
+        if (ge) {
+          const G = document.createElement("span");
+          G.className = y(r, "topic-timezone"), G.textContent = ge, v.appendChild(G);
+        }
+        ne.appendChild(v);
       }
     }
   }
-  function ut(p) {
-    if (c && (c.hidden = !!p), b && (b.hidden = !p), p && y) {
-      const L = p.places.length ? `<div class="${C(r, "places")}">${p.places.map((T) => {
-        const N = [C(r, "place")];
-        T.isSelf && N.push(C(r, "place-self")), T.isLeading && N.push(C(r, "place-leading")), T.isFollowing && N.push(C(r, "place-following"));
-        const A = T.statusLabel ? `<span class="${C(r, "place-status")}">${B(
+  function Zt(b, C) {
+    if (!I || !_) return;
+    const T = (Array.isArray(b) ? b : []).filter(
+      (q) => q && typeof q == "object" && !Fi(
+        C,
+        /** @type {Record<string, unknown>} */
+        q
+      )
+    ), L = String(I.value || "");
+    if (I.replaceChildren(), !T.length) {
+      I.replaceChildren(), I.disabled = true, _.disabled = true, J instanceof HTMLElement && (J.hidden = true), Vt(false);
+      return;
+    }
+    J instanceof HTMLElement && (J.hidden = false);
+    const v = document.createElement("option");
+    v.value = "", v.textContent = a.selectConference, I.appendChild(v);
+    const k = [];
+    for (const q of T) {
+      const ge = (
+        /** @type {Record<string, unknown>} */
+        q
+      ), G = X(ge);
+      if (!G) continue;
+      k.push(G);
+      const vr = String(ge.title || "").trim() || a.untitled, at = document.createElement("option");
+      at.value = G, at.textContent = `${vr} \u2014 ${G}`, I.appendChild(at);
+    }
+    I.disabled = false, L && k.includes(L) ? I.value = L : k.length && (I.value = k[0]), _.disabled = !String(I.value || "").trim(), Vt(true);
+  }
+  function ot(b) {
+    if (x && (x.hidden = !!b), Wt && (Wt.hidden = !b), b && zt) {
+      const C = b.places.length ? `<div class="${y(r, "places")}">${b.places.map((T) => {
+        const L = [y(r, "place")];
+        T.isSelf && L.push(y(r, "place-self")), T.isLeading && L.push(y(r, "place-leading")), T.isFollowing && L.push(y(r, "place-following"));
+        const v = T.statusLabel ? `<span class="${y(r, "place-status")}">${Z(
           T.statusLabel
         )}</span>` : "";
-        return `<span class="${N.join(
+        return `<span class="${L.join(
           " "
-        )}" title="${B(T.placeId)}"><span class="${C(
+        )}" title="${Z(T.placeId)}"><span class="${y(
           r,
           "place-name"
-        )}">${B(T.label)}</span>${A}</span>`;
-      }).join("")}</div>` : `<div class="${C(r, "muted")}">No places</div>`;
-      y.innerHTML = `<div><strong>Title:</strong> ${B(
-        p.title || "N/A"
-      )}</div><div class="${C(r, "places-label")}">Participants</div>${L}`;
+        )}">${Z(T.label)}</span>${v}</span>`;
+      }).join("")}</div>` : `<div class="${y(r, "muted")}">${Z(a.noPlaces)}</div>`;
+      zt.innerHTML = `<div><strong>${Z(a.titleLabel)}</strong> ${Z(
+        b.title || a.na
+      )}</div><div class="${y(r, "places-label")}">${Z(
+        a.participants
+      )}</div>${C}`;
     }
-    g && (g.textContent = (p == null ? void 0 : p.selfRole) === "leading" ? "End conference" : "Leave conference");
+    M && (M.textContent = b != null && b.isConferenceOwner ? a.endConference : a.leaveConference);
   }
-  async function oe() {
-    const p = I();
-    if (!p.hubEndpoint || !p.connected)
-      return O([], p.topic), ut(null), w(null), null;
-    const [L, T] = await Promise.all([
-      Dt(p.hubEndpoint),
-      Y(p.hubEndpoint)
-    ]), N = K(
-      p.topic,
-      p.subscriberName,
+  async function me() {
+    const b = ie();
+    if (!b.hubEndpoint || !b.connected)
+      return Yt([]), Zt([], b.topic), ot(null), it(null), null;
+    const [C, T] = await Promise.all([
+      xn(b.hubEndpoint),
+      we(b.hubEndpoint)
+    ]), L = Ee(
+      b.topic,
+      b.subscriberName,
       T
-    ), A = Ye(p, N);
-    return N || O(L, p.topic), ut(A), w(A), A;
+    ), v = xt(b, L);
+    return L || (Yt(C), Zt(T, b.topic)), ot(v), it(v), v;
   }
-  async function dn() {
-    if (o)
+  async function Sr() {
+    if (h)
       return;
-    const p = I(), L = U(), T = at();
-    if (!p.connected) {
-      E("error", "Connect to the Cast hub first.");
-      return;
-    }
-    if (!p.topic) {
-      E("error", "Cast topic is required to host a conference.");
+    const b = ie(), C = gr(), T = pr();
+    if (!b.connected) {
+      R("error", a.connectHubFirst);
       return;
     }
-    if (!L) {
-      E("error", "Conference title is required.");
+    if (!b.topic) {
+      R("error", a.topicRequiredHost);
+      return;
+    }
+    if (!C) {
+      R("error", a.titleRequired);
       return;
     }
     if (!T.length) {
-      E("error", "Select at least one attendee topic.");
+      R("error", a.selectAttendee);
       return;
     }
-    o = true, S && (S.disabled = true, S.textContent = "Creating\u2026"), E("", "");
+    h = true, D && (D.disabled = true, D.textContent = a.creating), R("", "");
     try {
-      await Ft(
-        p.hubEndpoint,
-        p.topic,
-        L,
+      await Hn(
+        b.hubEndpoint,
+        b.topic,
+        C,
         T,
-        p.userName
-      ), await oe(), P();
-    } catch (N) {
-      E(
+        b.userName
+      ), await me(), V();
+    } catch (L) {
+      R(
         "error",
-        N instanceof Error ? N.message : "Failed to create conference."
+        L instanceof Error ? L.message : a.failedCreate
       );
     } finally {
-      o = false, S && (S.disabled = false, S.textContent = "Create conference");
+      h = false, D && (D.disabled = false, D.textContent = a.createConference);
     }
   }
-  async function bn() {
-    if (o)
+  async function Cr() {
+    if (h) return;
+    const b = ie(), C = String((I == null ? void 0 : I.value) || "").trim();
+    if (!b.connected) {
+      R("error", a.connectHubFirst);
       return;
-    const p = I(), L = await Y(p.hubEndpoint), T = K(
-      p.topic,
-      p.subscriberName,
-      L
+    }
+    if (!b.topic) {
+      R("error", a.topicRequiredJoin);
+      return;
+    }
+    if (!C) {
+      R("error", a.selectConferenceToJoin);
+      return;
+    }
+    h = true, _ && (_.disabled = true, _.textContent = a.joining), R("", "");
+    try {
+      await $n(
+        b.hubEndpoint,
+        C,
+        b.topic,
+        b.userName
+      ), i == null || i(true), await me(), V();
+    } catch (T) {
+      R(
+        "error",
+        T instanceof Error ? T.message : a.failedJoin
+      );
+    } finally {
+      h = false, _ && (_.textContent = a.joinConference, _.disabled = !String((I == null ? void 0 : I.value) || "").trim());
+    }
+  }
+  async function Er() {
+    if (h)
+      return;
+    const b = ie(), C = await we(b.hubEndpoint), T = Ee(
+      b.topic,
+      b.subscriberName,
+      C
     );
     if (!T) {
-      await oe();
+      await me();
       return;
     }
-    const N = ne(T), A = We(p.topic, T);
-    o = true, g && (g.disabled = true, g.textContent = A ? "Ending\u2026" : "Leaving\u2026"), E("", "");
+    const L = X(T), v = At(b.topic, T);
+    h = true, M && (M.disabled = true, M.textContent = v ? a.ending : a.leaving), R("", "");
     try {
-      await Ke(
-        p.hubEndpoint,
-        N,
-        A ? void 0 : p.topic
-      ), w(null), E(
+      await Ut(
+        b.hubEndpoint,
+        L,
+        v ? void 0 : b.topic
+      ), it(null), R(
         "success",
-        A ? "Conference ended." : "Left conference."
-      ), await new Promise(($) => {
-        setTimeout($, Pt);
-      }), P();
-    } catch ($) {
-      E(
+        v ? a.conferenceEnded : a.leftConference
+      ), await new Promise((k) => {
+        setTimeout(k, An);
+      }), V();
+    } catch (k) {
+      R(
         "error",
-        $ instanceof Error ? $.message : "Failed to update conference."
+        k instanceof Error ? k.message : a.failedUpdate
       );
     } finally {
-      o = false, g && (g.disabled = false, g.textContent = A ? "End conference" : "Leave conference");
+      h = false, M && (M.disabled = false, M.textContent = v ? a.endConference : a.leaveConference);
     }
   }
-  function hn() {
-    E("", ""), l && (l.value = "Test conference"), m && (m.value = ""), u && (u.hidden = true), a.hidden = false, d instanceof HTMLElement && d.focus({ preventScroll: true }), oe().catch(() => {
+  function wr() {
+    kt(
+      u,
+      d instanceof HTMLElement ? d : null,
+      y(r, "overlay-anchored")
+    );
+  }
+  function st(b) {
+    Pn({
+      overlay: u,
+      dialog: d instanceof HTMLElement ? d : null,
+      anchor: b,
+      anchoredClass: y(r, "overlay-anchored"),
+      align: o
     });
   }
-  function P() {
-    a.hidden = true, E("", "");
-  }
-  function mn() {
-    P(), a.remove();
-  }
-  return l == null || l.addEventListener("change", () => {
-    u && (u.hidden = String(l.value || "") !== "other");
-  }), S == null || S.addEventListener("click", () => {
-    dn().catch(() => {
+  function Tr(b) {
+    R("", ""), $ && ($.value = "Tumor Board"), Y && (Y.value = ""), _e && (_e.hidden = true), re(), N instanceof HTMLElement && (N.hidden = true), Xt(), c = b instanceof HTMLElement ? b : null, u.hidden = false, st(c), d instanceof HTMLElement && d.focus({ preventScroll: true }), me().then(() => st(c)).catch(() => {
     });
-  }), g == null || g.addEventListener("click", () => {
-    bn().catch(() => {
+  }
+  function V() {
+    re(), u.hidden = true, R("", ""), wr(), c = null;
+  }
+  function Nr() {
+    V(), u.remove();
+  }
+  function Lr(b) {
+    a = ee(b), Gt(), l && ot(l);
+  }
+  return $ == null || $.addEventListener("change", () => {
+    _e && (_e.hidden = String($.value || "") !== "other");
+  }), I == null || I.addEventListener("change", () => {
+    _ && (_.disabled = !String(I.value || "").trim() || h);
+  }), D == null || D.addEventListener("click", () => {
+    Sr().catch(() => {
     });
-  }), a.querySelectorAll("[data-cast-conference-close]").forEach((p) => {
-    p.addEventListener("click", () => P());
-  }), a.addEventListener("click", (p) => {
-    p.target === a && P();
+  }), _ == null || _.addEventListener("click", () => {
+    Cr().catch(() => {
+    });
+  }), M == null || M.addEventListener("click", () => {
+    Er().catch(() => {
+    });
+  }), he == null || he.addEventListener("click", (b) => {
+    b.stopPropagation(), V();
+  }), p == null || p.addEventListener("click", (b) => {
+    b.stopPropagation(), mr();
+  }), A == null || A.addEventListener("click", (b) => {
+    b.stopPropagation(), Jt();
+  }), U == null || U.addEventListener("click", (b) => {
+    b.stopPropagation(), re();
+  }), m == null || m.addEventListener("click", (b) => {
+    b.stopPropagation(), hr(), V();
+  }), w == null || w.addEventListener("keydown", (b) => {
+    b.key === "Enter" ? (b.preventDefault(), Jt()) : b.key === "Escape" && (b.preventDefault(), re());
+  }), S == null || S.addEventListener("click", (b) => {
+    b.target === S && re();
+  }), u.addEventListener("click", (b) => {
+    b.target === u && V();
+  }), window.addEventListener("resize", () => {
+    u.hidden || st(c);
   }), {
-    open: hn,
-    close: P,
-    destroy: mn,
-    refresh: oe,
-    getView: () => s,
+    open: Tr,
+    close: V,
+    destroy: Nr,
+    refresh: me,
+    setStrings: Lr,
+    syncSessionControl: br,
+    getSessionControl: () => ({
+      button: null,
+      label: null
+    }),
+    getView: () => l,
     get element() {
-      return a;
+      return u;
     }
   };
 }
-var Re = "ID";
-function nr(e = {}) {
-  const t = Array.isArray(e.selfActors) ? e.selfActors.map((s) => String(s || "").trim()).filter(Boolean) : [], n = Array.isArray(e.connectedActors) ? e.connectedActors.map((s) => String(s || "").trim()).filter(Boolean) : [];
+var ht = "ID";
+function Bi(e = {}) {
+  const t = Array.isArray(e.selfActors) ? e.selfActors.map((o) => String(o || "").trim()).filter(Boolean) : [], n = Array.isArray(e.connectedActors) ? e.connectedActors.map((o) => String(o || "").trim()).filter(Boolean) : [];
   return t.some(
-    (s) => s === Re || s.toUpperCase() === "ID"
+    (o) => o === ht || o.toUpperCase() === "ID"
   ) ? true : !n.some(
-    (s) => s === Re || s.toUpperCase() === "ID"
+    (o) => o === ht || o.toUpperCase() === "ID"
   );
 }
-function jt(e) {
+function Fn(e) {
   const t = e && typeof e == "object" ? (
     /** @type {{ event?: Record<string, unknown> }} */
     e.event
@@ -8851,218 +9556,343 @@ function jt(e) {
   if (!t || typeof t != "object")
     return null;
   const n = String(t["hub.event"] || "").trim().toLowerCase();
-  if (n !== "conference-start" && n !== "conference-end")
+  if (n !== "conference-start" && n !== "conference-end" && n !== "conference-lead")
     return null;
-  const r = t.context && typeof t.context == "object" ? (
+  const i = t.context && typeof t.context == "object" ? (
     /** @type {Record<string, unknown>} */
     t.context
-  ) : {}, i = String(
-    r.hostTopic || t["hub.topic"] || ""
-  ).trim(), s = String(r.title || "").trim(), o = String(r.hostUserName || "").trim();
+  ) : {}, r = String(
+    i.hostTopic || t["hub.topic"] || ""
+  ).trim(), o = String(i.title || "").trim(), s = String(i.hostUserName || "").trim(), a = String(i.sceneLeaderTopic || "").trim(), l = String(
+    i.leaderUserName || i.leaderLabel || ""
+  ).trim(), h = l || a || s || r || "host", c = String(i.joinedTopic || "").trim();
   return {
     hubEvent: n,
-    title: s,
-    hostTopic: i,
-    hostUserName: o,
-    hostLabel: o || i || "host"
+    title: o,
+    hostTopic: r,
+    hostUserName: s,
+    hostLabel: s || r || "host",
+    sceneLeaderTopic: a,
+    leaderUserName: l,
+    leaderLabel: h,
+    joinedTopic: c
   };
 }
-function v(e, t) {
+function O(e, t) {
   return `${e}-${t}`;
 }
-function qt(e = {}) {
+function Dn(e = {}) {
   const t = typeof e.onDecision == "function" ? e.onDecision : null, n = String(
-    e.classPrefix || "cast-conference-invite"
-  ).trim(), r = e.root || (typeof document < "u" ? document.body : null);
-  if (!r)
-    throw new Error("createCastConferenceInviteDialog requires a DOM root");
-  let i = null, s = false;
-  const o = document.createElement("div");
-  o.className = v(n, "overlay"), o.hidden = true, o.innerHTML = `
-    <div class="${v(n, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${v(n, "title")}" tabindex="-1">
-      <div class="${v(n, "header")}">
-        <h2 id="${v(n, "title")}" class="${v(n, "title")}">Conference invitation</h2>
-        <button type="button" class="${v(n, "close")}" data-cast-invite-close aria-label="Close">\xD7</button>
+    e.classPrefix || "hub-conference-invite"
+  ).trim(), i = e.root || (typeof document < "u" ? document.body : null);
+  if (!i)
+    throw new Error("createHubConferenceInviteDialog requires a DOM root");
+  let r = ee(e.strings), o = null, s = false;
+  const a = document.createElement("div");
+  a.className = O(n, "overlay"), a.hidden = true, a.innerHTML = `
+    <div class="${O(n, "dialog")}" role="dialog" aria-modal="true" aria-labelledby="${O(n, "title")}" tabindex="-1">
+      <div class="${O(n, "header")}">
+        <h2 id="${O(n, "title")}" class="${O(n, "title")}" data-hub-invite-title></h2>
+        <button type="button" class="${O(n, "close")}" data-hub-invite-close aria-label="">\xD7</button>
       </div>
-      <div class="${v(n, "body")}">
-        <p class="${v(n, "lead")}" data-cast-invite-lead></p>
-        <p class="${v(n, "status")}" data-cast-invite-status role="alert" hidden></p>
-        <div class="${v(n, "actions")}">
-          <button type="button" class="${v(n, "primary")}" data-cast-invite-follow>Join and follow</button>
-          <button type="button" class="${v(n, "secondary")}" data-cast-invite-join>Join but do not follow</button>
-          <button type="button" class="${v(n, "secondary")}" data-cast-invite-decline>Do not join</button>
+      <div class="${O(n, "body")}">
+        <p class="${O(n, "lead")}" data-hub-invite-lead></p>
+        <p class="${O(n, "status")}" data-hub-invite-status role="alert" hidden></p>
+        <div class="${O(n, "actions")}">
+          <button type="button" class="${O(n, "primary")}" data-hub-invite-follow></button>
+          <button type="button" class="${O(n, "secondary")}" data-hub-invite-join></button>
+          <button type="button" class="${O(n, "secondary")}" data-hub-invite-decline></button>
         </div>
       </div>
     </div>
-  `, r.appendChild(o);
-  const a = o.querySelector(`.${v(n, "dialog")}`), d = o.querySelector("[data-cast-invite-lead]"), f = o.querySelector("[data-cast-invite-status]"), c = o.querySelector("[data-cast-invite-follow]"), b = o.querySelector("[data-cast-invite-join]"), l = o.querySelector("[data-cast-invite-decline]");
-  function u(g, E) {
-    if (!(f instanceof HTMLElement)) return;
-    const w = String(E || "").trim();
-    f.hidden = !w, f.textContent = w, f.classList.toggle(v(n, "status-error"), g === "error");
+  `, i.appendChild(a);
+  const l = a.querySelector(`.${O(n, "dialog")}`), h = a.querySelector("[data-hub-invite-title]"), c = a.querySelector("[data-hub-invite-lead]"), u = a.querySelector("[data-hub-invite-status]"), d = a.querySelector("[data-hub-invite-follow]"), f = a.querySelector("[data-hub-invite-join]"), m = a.querySelector("[data-hub-invite-decline]"), g = a.querySelector("[data-hub-invite-close]");
+  function p() {
+    h && (h.textContent = r.inviteTitle), f && (f.textContent = r.joinNoFollow), m && (m.textContent = r.doNotJoin), g instanceof HTMLElement && g.setAttribute("aria-label", r.closeAria), d && o ? d.textContent = ye(
+      r.joinAndFollowHost,
+      { host: o.hostLabel || r.hostFallback }
+    ) : d && (d.textContent = r.joinAndFollow);
   }
-  function m(g) {
-    s = g;
-    for (const E of [c, b, l])
-      E instanceof HTMLButtonElement && (E.disabled = g);
+  p();
+  function S(E, x) {
+    if (!(u instanceof HTMLElement)) return;
+    const H = String(x || "").trim();
+    u.hidden = !H, u.textContent = H, u.classList.toggle(O(n, "status-error"), E === "error");
   }
-  function h() {
-    o.hidden = true, i = null, u("", ""), m(false);
+  function A(E) {
+    s = E;
+    for (const x of [d, f, m])
+      x instanceof HTMLButtonElement && (x.disabled = E);
   }
-  function y(g) {
-    const E = String((g == null ? void 0 : g.hostLabel) || (g == null ? void 0 : g.hostUserName) || (g == null ? void 0 : g.hostTopic) || "host").trim() || "host", w = String((g == null ? void 0 : g.title) || "").trim();
-    i = {
+  function U() {
+    a.hidden = true, o = null, S("", ""), A(false);
+  }
+  function w(E) {
+    const x = String(
+      (E == null ? void 0 : E.hostLabel) || (E == null ? void 0 : E.hostUserName) || (E == null ? void 0 : E.hostTopic) || r.hostFallback
+    ).trim() || r.hostFallback, H = String((E == null ? void 0 : E.title) || "").trim();
+    o = {
       hubEvent: "conference-start",
-      title: w,
-      hostTopic: String((g == null ? void 0 : g.hostTopic) || "").trim(),
-      hostUserName: String((g == null ? void 0 : g.hostUserName) || "").trim(),
-      hostLabel: E
-    }, d instanceof HTMLElement && (d.textContent = w ? `${w} \u2014 join and follow ${E}?` : `Join conference and follow ${E}?`), c instanceof HTMLElement && (c.textContent = `Join and follow ${E}`), u("", ""), o.hidden = false, a instanceof HTMLElement && a.focus({ preventScroll: true });
+      title: H,
+      hostTopic: String((E == null ? void 0 : E.hostTopic) || "").trim(),
+      hostUserName: String((E == null ? void 0 : E.hostUserName) || "").trim(),
+      hostLabel: x
+    }, c instanceof HTMLElement && (c.textContent = H ? ye(r.inviteLeadWithTitle, {
+      title: H,
+      host: x
+    }) : ye(r.inviteLeadNoTitle, {
+      host: x
+    })), d instanceof HTMLElement && (d.textContent = ye(
+      r.joinAndFollowHost,
+      { host: x }
+    )), S("", ""), a.hidden = false, l instanceof HTMLElement && l.focus({ preventScroll: true });
   }
-  async function S(g) {
-    if (s || !i) return;
-    const E = i;
-    m(true);
+  async function N(E) {
+    if (s || !o) return;
+    const x = o;
+    A(true);
     try {
-      t && await t(g, E), h();
-    } catch (w) {
-      u(
+      t && await t(E, x), U();
+    } catch (H) {
+      S(
         "error",
-        w instanceof Error ? w.message : "Failed to update conference."
-      ), m(false);
+        H instanceof Error ? H.message : r.failedUpdate
+      ), A(false);
     }
   }
-  return c == null || c.addEventListener("click", () => {
-    S("join-follow");
-  }), b == null || b.addEventListener("click", () => {
-    S("join");
-  }), l == null || l.addEventListener("click", () => {
-    S("decline");
-  }), o.querySelectorAll("[data-cast-invite-close]").forEach((g) => {
-    g.addEventListener("click", () => h());
-  }), o.addEventListener("click", (g) => {
-    g.target === o && h();
+  return d == null || d.addEventListener("click", () => {
+    N("join-follow");
+  }), f == null || f.addEventListener("click", () => {
+    N("join");
+  }), m == null || m.addEventListener("click", () => {
+    N("decline");
+  }), a.querySelectorAll("[data-hub-invite-close]").forEach((E) => {
+    E.addEventListener("click", () => U());
+  }), a.addEventListener("click", (E) => {
+    E.target === a && U();
   }), {
-    open: y,
-    close: h,
+    open: w,
+    close: U,
+    /**
+     * @param {Partial<import('./conferenceStrings.js').CastConferenceStrings> | null | undefined} next
+     */
+    setStrings(E) {
+      r = ee(E), p(), o && !a.hidden && w(o);
+    },
     destroy() {
-      h(), o.remove();
+      U(), a.remove();
     },
     isOpen() {
-      return !o.hidden;
+      return !a.hidden;
     },
     getInvite() {
-      return i;
+      return o;
     },
-    element: o
+    element: a
   };
 }
-function rr(e) {
-  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.shouldShow) == "function" ? e.shouldShow : () => true, r = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, i = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, s = (e == null ? void 0 : e.dialog) || qt({
+function ji(e) {
+  const t = typeof (e == null ? void 0 : e.getSession) == "function" ? e.getSession : () => ({}), n = typeof (e == null ? void 0 : e.shouldShow) == "function" ? e.shouldShow : () => true, i = typeof (e == null ? void 0 : e.onConferenceChange) == "function" ? e.onConferenceChange : null, r = typeof (e == null ? void 0 : e.onFollowChange) == "function" ? e.onFollowChange : null, o = typeof (e == null ? void 0 : e.onLeadChange) == "function" ? e.onLeadChange : null, s = (e == null ? void 0 : e.dialog) || Dn({
     root: e == null ? void 0 : e.root,
     classPrefix: e == null ? void 0 : e.classPrefix,
-    onDecision: async (f, c) => {
-      await a(f, c);
+    strings: e == null ? void 0 : e.strings,
+    onDecision: async (c, u) => {
+      await l(c, u);
     }
   });
-  async function o() {
-    const f = t(), c = await Mt(
-      f.hubEndpoint || "",
-      f.topic || "",
-      f.subscriberName || "",
-      f.userName || ""
+  async function a() {
+    const c = t(), u = await kn(
+      c.hubEndpoint || "",
+      c.topic || "",
+      c.subscriberName || "",
+      c.userName || ""
     );
-    return r == null || r(c), c;
+    return i == null || i(u), u;
   }
-  async function a(f, c) {
-    const b = t(), l = String((c == null ? void 0 : c.hostTopic) || "").trim();
-    if (!l)
+  async function l(c, u) {
+    const d = t(), f = String((u == null ? void 0 : u.hostTopic) || "").trim();
+    if (!f)
       throw new Error("Missing conference host topic.");
-    if (f === "decline") {
-      await Ke(
-        b.hubEndpoint || "",
-        l,
-        b.topic || ""
-      ), i == null || i(false), r == null || r(null);
+    if (c === "decline") {
+      await Ut(
+        d.hubEndpoint || "",
+        f,
+        d.topic || ""
+      ), r == null || r(false), i == null || i(null);
       return;
     }
-    const u = f === "join-follow";
-    i == null || i(u, u ? c : void 0), await o();
+    const m = c === "join-follow";
+    r == null || r(m, m ? u : void 0), await a();
   }
-  function d(f) {
-    const c = jt(f);
-    if (!c) return false;
-    const b = t(), l = String(b.topic || "").trim();
-    if (c.hubEvent === "conference-end") {
-      const u = (
-        /** @type {{ context?: Record<string, unknown> }} */
-        f.event || {}
-      ), m = u.context && typeof u.context == "object" ? u.context : {}, h = String(m.leaveTopic || "").trim();
-      return !h || h === l ? (s.close(), i == null || i(false), r == null || r(null)) : o(), true;
+  function h(c) {
+    const u = Fn(c);
+    if (!u) return false;
+    const d = t(), f = String(d.topic || "").trim();
+    if (u.hubEvent === "conference-lead") {
+      const g = String(u.sceneLeaderTopic || "").trim(), p = !!f && !!g && (f === g || f.toLowerCase() === g.toLowerCase());
+      return r == null || r(!p, u), a().then(() => {
+        o == null || o(u);
+      }), true;
     }
-    return l && c.hostTopic && (l === c.hostTopic || l.toLowerCase() === c.hostTopic.toLowerCase()) ? (i == null || i(true), o(), true) : n() ? (s.open(c), o(), true) : (o(), true);
+    if (u.hubEvent === "conference-end") {
+      const g = (
+        /** @type {{ context?: Record<string, unknown> }} */
+        c.event || {}
+      ), p = g.context && typeof g.context == "object" ? g.context : {}, S = String(p.leaveTopic || "").trim();
+      return !S || S === f ? (s.close(), r == null || r(false), i == null || i(null)) : a(), true;
+    }
+    if (f && u.hostTopic && (f === u.hostTopic || f.toLowerCase() === u.hostTopic.toLowerCase()))
+      return r == null || r(false), a(), true;
+    const m = String(u.joinedTopic || "").trim();
+    return f && m && (f === m || f.toLowerCase() === m.toLowerCase()) ? (r == null || r(true, u), a(), true) : n() ? (s.open(u), a(), true) : (a(), true);
   }
   return {
-    handleHubMessage: d,
-    open: (f) => s.open(f),
+    handleHubMessage: h,
+    open: (c) => s.open(c),
     close: () => s.close(),
     destroy: () => s.destroy(),
-    refresh: o,
+    refresh: a,
+    /**
+     * @param {Partial<import('./conferenceStrings.js').CastConferenceStrings> | null | undefined} next
+     */
+    setStrings(c) {
+      var u;
+      (u = s.setStrings) == null || u.call(s, c);
+    },
     dialog: s
   };
 }
-var re = "http://fhircast.hl7.org/StructureDefinition/fhircast-imaging-study-open";
-var ie = "urn:dicom:uid";
-var Xe = "urn:cast:nifti-url";
-var Ze = "urn:cast:nifti-filename";
-var me = "urn:cast:volview-sample-id";
-var H = "urn:cast:worklist-sample-id";
-var pe = "urn:cast:ohif-mode";
-var G = "urn:cast:open-mode";
-var X = "dicomweb";
-var ye = "dicom-url";
-var j = "files";
-var ge = "idc";
-var Se = "local-dicom";
-var Ce = "idc";
-var we = "idc-source-bucket";
-var Qe = "urn:cast:dicomweb-root";
-function _(e) {
+function qi(e = {}) {
+  return new Promise((t) => {
+    if (typeof document > "u") {
+      t(false);
+      return;
+    }
+    const n = ee(e.strings), i = String(
+      e.classPrefix || "hub-conference-takeover"
+    ).trim(), r = e.root || document.body, o = document.createElement("div");
+    o.className = `${i}-overlay`, o.setAttribute("role", "presentation"), o.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      "z-index:10040",
+      "display:flex",
+      "align-items:center",
+      "justify-content:center",
+      "background:rgba(0,0,0,.45)",
+      "padding:16px"
+    ].join(";");
+    const s = document.createElement("div");
+    s.className = `${i}-dialog`, s.setAttribute("role", "dialog"), s.setAttribute("aria-modal", "true"), s.setAttribute("aria-labelledby", `${i}-title`), s.tabIndex = -1, s.style.cssText = [
+      "width:min(420px,100%)",
+      "background:#121820",
+      "color:#e8eef8",
+      "border:1px solid #33507e",
+      "border-radius:10px",
+      "box-shadow:0 16px 40px rgba(0,0,0,.4)",
+      "padding:18px 18px 14px",
+      "font:14px/1.45 -apple-system,system-ui,sans-serif"
+    ].join(";"), s.innerHTML = `
+      <h2 id="${i}-title" style="margin:0 0 10px;font:700 16px/1.3 -apple-system,system-ui,sans-serif;"></h2>
+      <p data-hub-takeover-body style="margin:0 0 16px;opacity:.92;"></p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+        <button type="button" data-hub-takeover-cancel style="padding:7px 12px;border-radius:6px;border:1px solid #4a628a;background:#1a2332;color:#e8eef8;cursor:pointer;font:600 13px -apple-system,system-ui,sans-serif;"></button>
+        <button type="button" data-hub-takeover-confirm style="padding:7px 12px;border-radius:6px;border:1px solid #2b6cb0;background:#2b6cb0;color:#fff;cursor:pointer;font:600 13px -apple-system,system-ui,sans-serif;"></button>
+      </div>
+    `;
+    const a = s.querySelector(`#${i}-title`), l = s.querySelector("[data-hub-takeover-body]"), h = s.querySelector("[data-hub-takeover-cancel]"), c = s.querySelector("[data-hub-takeover-confirm]");
+    a && (a.textContent = n.takeoverTitle), l && (l.textContent = n.takeoverBody), h && (h.textContent = n.cancel), c && (c.textContent = n.takeOver), o.appendChild(s), r.appendChild(o);
+    let u = false;
+    const d = (f) => {
+      u || (u = true, o.remove(), t(!!f));
+    };
+    o.addEventListener("click", (f) => {
+      f.target === o && d(false);
+    }), h == null || h.addEventListener("click", () => d(false)), c == null || c.addEventListener("click", () => d(true)), s.addEventListener("keydown", (f) => {
+      f.key === "Escape" && (f.preventDefault(), d(false));
+    }), s.focus({ preventScroll: true });
+  });
+}
+function Wi(e, t = {}) {
+  var l;
+  const n = String(e || "").trim();
+  if (!n || typeof document > "u")
+    return;
+  const i = Math.max(1e3, Number(t.ms) || 4e3), r = String(t.classPrefix || "hub-info-toast").trim(), o = t.root || (typeof document < "u" ? document.body : null);
+  if (!o)
+    return;
+  const s = (l = o.querySelector) == null ? void 0 : l.call(o, `.${r}`);
+  s && s.remove();
+  const a = document.createElement("div");
+  a.className = r, a.setAttribute("role", "status"), a.textContent = n, a.style.cssText = [
+    "position:fixed",
+    "left:50%",
+    "bottom:28px",
+    "transform:translateX(-50%)",
+    "z-index:10050",
+    "max-width:min(420px,calc(100vw - 32px))",
+    "padding:10px 16px",
+    "border-radius:8px",
+    "background:#1a2332",
+    "color:#e8eef8",
+    "font:600 13px/1.35 -apple-system,system-ui,sans-serif",
+    "box-shadow:0 8px 28px rgba(0,0,0,.35)",
+    "pointer-events:none"
+  ].join(";"), o.appendChild(a), window.setTimeout(() => {
+    a.remove();
+  }, i);
+}
+var He = "http://fhircast.hl7.org/StructureDefinition/fhircast-imaging-study-open";
+var $e = "urn:dicom:uid";
+var _t = "urn:cast:nifti-url";
+var Rt = "urn:cast:nifti-filename";
+var je = "urn:cast:volview-sample-id";
+var fe = "urn:cast:worklist-sample-id";
+var qe = "urn:cast:ohif-mode";
+var de = "urn:cast:open-mode";
+var Te = "dicomweb";
+var We = "dicom-url";
+var ce = "files";
+var ze = "idc";
+var Ve = "local-dicom";
+var Ge = "idc";
+var Xe = "idc-source-bucket";
+var Ot = "urn:cast:dicomweb-root";
+function B(e) {
   return typeof e != "string" ? "" : e.trim().replace(/^urn:oid:/i, "");
 }
-function yt(e) {
+function sn(e) {
   return typeof e == "string" ? e.trim().toLowerCase() : "";
 }
-function z(e, t) {
+function le(e, t) {
   if (!Array.isArray(e))
     return null;
-  const n = String(t || "").trim().toLowerCase(), r = e.find(
-    (i) => i && typeof i == "object" && typeof i.key == "string" && i.key.trim().toLowerCase() === n
+  const n = String(t || "").trim().toLowerCase(), i = e.find(
+    (r) => r && typeof r == "object" && typeof r.key == "string" && r.key.trim().toLowerCase() === n
   );
-  return !(r != null && r.resource) || typeof r.resource != "object" ? null : r.resource;
+  return !(i != null && i.resource) || typeof i.resource != "object" ? null : i.resource;
 }
-function k(e, t) {
-  const n = z(e, "study");
+function j(e, t) {
+  const n = le(e, "study");
   if (!n)
     return "";
-  const r = Array.isArray(n.identifier) ? n.identifier : [], i = yt(t), s = r.find(
-    (o) => yt(o == null ? void 0 : o.system) === i
+  const i = Array.isArray(n.identifier) ? n.identifier : [], r = sn(t), o = i.find(
+    (s) => sn(s == null ? void 0 : s.system) === r
   );
-  return typeof (s == null ? void 0 : s.value) == "string" ? s.value.trim() : "";
+  return typeof (o == null ? void 0 : o.value) == "string" ? o.value.trim() : "";
 }
-function F(e) {
-  const t = z(e, "study");
-  return t ? _(t.uid) || _(k(e, ie)) : "";
+function se(e) {
+  const t = le(e, "study");
+  return t ? B(t.uid) || B(j(e, $e)) : "";
 }
-function D(e) {
-  const t = z(e, "series");
+function oe(e) {
+  const t = le(e, "series");
   if (t)
-    return _(t.uid);
-  const n = z(e, "study"), i = (Array.isArray(n == null ? void 0 : n.series) ? n.series : [])[0];
-  return !i || typeof i != "object" ? "" : _(i.uid);
+    return B(t.uid);
+  const n = le(e, "study"), r = (Array.isArray(n == null ? void 0 : n.series) ? n.series : [])[0];
+  return !r || typeof r != "object" ? "" : B(r.uid);
 }
-function xe(e) {
-  const t = k(e, Qe);
+function mt(e) {
+  const t = j(e, Ot);
   if (!t)
     return "";
   try {
@@ -9074,8 +9904,8 @@ function xe(e) {
   }
   return "";
 }
-function Z(e) {
-  const t = k(e, Xe);
+function Ne(e) {
+  const t = j(e, _t);
   if (!t)
     return "";
   try {
@@ -9087,120 +9917,120 @@ function Z(e) {
   }
   return "";
 }
-function et(e) {
-  return k(e, Ze);
+function Mt(e) {
+  return j(e, Rt);
 }
-function zt(e) {
-  return k(e, pe);
+function Bn(e) {
+  return j(e, qe);
 }
-function Ht(e) {
-  return k(e, me) || k(e, H);
+function jn(e) {
+  return j(e, je) || j(e, fe);
 }
-function ir(e) {
+function zi(e) {
   return typeof e.url == "string" ? e.url.trim() : typeof e.uri == "string" ? e.uri.trim() : "";
 }
-function sr(e) {
+function Vi(e) {
   return typeof e.fileName == "string" ? e.fileName.trim() : typeof e.filename == "string" ? e.filename.trim() : "";
 }
-var or = /* @__PURE__ */ new Set(["http:", "https:", "s3:", "gs:"]);
-function Ee(e) {
+var Gi = /* @__PURE__ */ new Set(["http:", "https:", "s3:", "gs:"]);
+function Je(e) {
   if (!e || typeof e != "object")
     return null;
-  const t = ir(e);
+  const t = zi(e);
   if (!t)
     return null;
   try {
-    const o = new URL(t);
-    if (!or.has(o.protocol))
+    const s = new URL(t);
+    if (!Gi.has(s.protocol))
       return null;
   } catch {
     return null;
   }
-  const n = sr(e), r = typeof e.mimeType == "string" ? e.mimeType.trim() : "", i = typeof e.role == "string" ? e.role.trim() : "", s = typeof e.label == "string" ? e.label.trim() : "";
+  const n = Vi(e), i = typeof e.mimeType == "string" ? e.mimeType.trim() : "", r = typeof e.role == "string" ? e.role.trim() : "", o = typeof e.label == "string" ? e.label.trim() : "";
   return {
     url: t,
     fileName: n,
-    mimeType: r,
-    role: i,
-    label: s
+    mimeType: i,
+    role: r,
+    label: o
   };
 }
-function q(e) {
-  const t = z(e, "files"), r = (Array.isArray(t == null ? void 0 : t.files) ? t.files : []).map((s) => Ee(s)).filter((s) => s !== null);
-  if (r.length > 0)
-    return r;
-  const i = Z(e);
-  return i ? [
+function ue(e) {
+  const t = le(e, "files"), i = (Array.isArray(t == null ? void 0 : t.files) ? t.files : []).map((o) => Je(o)).filter((o) => o !== null);
+  if (i.length > 0)
+    return i;
+  const r = Ne(e);
+  return r ? [
     {
-      url: i,
-      fileName: et(e),
+      url: r,
+      fileName: Mt(e),
       mimeType: "",
       role: "",
       label: ""
     }
   ] : [];
 }
-function Oe(e) {
-  return _(k(e, Ce));
+function gt(e) {
+  return B(j(e, Ge));
 }
-function Pe(e) {
-  return k(
+function pt(e) {
+  return j(
     e,
-    we
+    Xe
   ).toLowerCase() === "gcs" ? "gcs" : "aws";
 }
-function Gt(e) {
-  const t = k(e, G);
-  return t === X || t === ye || t === j || t === ge || t === Se ? t : q(e).length > 0 || Z(e) ? j : F(e) && !Z(e) ? X : "";
+function qn(e) {
+  const t = j(e, de);
+  return t === Te || t === We || t === ce || t === ze || t === Ve ? t : ue(e).length > 0 || Ne(e) ? ce : se(e) && !Ne(e) ? Te : "";
 }
-function Vt({
+function Wn({
   id: e,
   files: t,
   patientReference: n,
-  openMode: r,
-  includeLegacyNiftiIdentifiers: i = false
+  openMode: i,
+  includeLegacyNiftiIdentifiers: r = false
 }) {
-  const s = String(e || "").trim() || "study", o = (Array.isArray(t) ? t : []).map((c) => Ee(c)).filter((c) => c !== null), a = [
-    { system: G, value: r },
+  const o = String(e || "").trim() || "study", s = (Array.isArray(t) ? t : []).map((c) => Je(c)).filter((c) => c !== null), a = [
+    { system: de, value: i },
     {
-      system: H,
-      value: s
+      system: fe,
+      value: o
     },
     {
-      system: me,
-      value: s
+      system: je,
+      value: o
     }
   ];
-  if (i && o.length === 1) {
-    const [c] = o;
+  if (r && s.length === 1) {
+    const [c] = s;
     a.push({
-      system: Xe,
+      system: _t,
       value: c.url
     }), c.fileName && a.push({
-      system: Ze,
+      system: Rt,
       value: c.fileName
     });
   }
-  const d = {
+  const l = {
     resourceType: "ImagingStudy",
-    id: s,
+    id: o,
     meta: {
-      profile: [re]
+      profile: [He]
     },
     identifier: a,
     status: "available"
   };
-  n && (d.subject = { reference: String(n).trim() });
-  const f = [
+  n && (l.subject = { reference: String(n).trim() });
+  const h = [
     {
       key: "study",
-      resource: d
+      resource: l
     }
   ];
-  return o.length > 0 && f.push({
+  return s.length > 0 && h.push({
     key: "files",
     resource: {
-      files: o.map((c) => ({
+      files: s.map((c) => ({
         url: c.url,
         fileName: c.fileName || void 0,
         mimeType: c.mimeType || void 0,
@@ -9208,91 +10038,91 @@ function Vt({
         label: c.label || void 0
       }))
     }
-  }), f;
+  }), h;
 }
-function Wt({
+function zn({
   id: e,
   files: t,
   patientReference: n,
-  includeLegacyNiftiIdentifiers: r = true
+  includeLegacyNiftiIdentifiers: i = true
 }) {
-  return Vt({
+  return Wn({
     id: e,
     files: t,
     patientReference: n,
-    openMode: j,
-    includeLegacyNiftiIdentifiers: r
+    openMode: ce,
+    includeLegacyNiftiIdentifiers: i
   });
 }
-function cr({
+function Xi({
   id: e,
   files: t,
   patientReference: n
 }) {
-  return Vt({
+  return Wn({
     id: e,
     files: t,
     patientReference: n,
-    openMode: ye,
+    openMode: We,
     includeLegacyNiftiIdentifiers: false
   });
 }
-function ar({
+function Ji({
   id: e,
   studyInstanceUID: t,
   seriesInstanceUID: n,
-  dicomwebRoot: r,
-  patientReference: i,
-  ohifMode: s,
-  files: o,
+  dicomwebRoot: i,
+  patientReference: r,
+  ohifMode: o,
+  files: s,
   sourceBucket: a
 }) {
-  const d = String(e || "").trim() || "study", f = _(t), c = _(n), b = String(r || "").trim().replace(/\/$/, ""), l = [
-    { system: G, value: X },
-    { system: ie, value: f },
+  const l = String(e || "").trim() || "study", h = B(t), c = B(n), u = String(i || "").trim().replace(/\/$/, ""), d = [
+    { system: de, value: Te },
+    { system: $e, value: h },
     {
-      system: H,
-      value: d
+      system: fe,
+      value: l
     }
   ];
-  b && l.push({ system: Qe, value: b });
-  const u = String(s || "").trim();
-  u && l.push({
-    system: pe,
-    value: u
+  u && d.push({ system: Ot, value: u });
+  const f = String(o || "").trim();
+  f && d.push({
+    system: qe,
+    value: f
   });
-  const m = (Array.isArray(o) ? o : []).map((S) => Ee(S)).filter((S) => S !== null);
+  const m = (Array.isArray(s) ? s : []).map((S) => Je(S)).filter((S) => S !== null);
   if (m.length > 0) {
     const S = String(a || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws";
-    l.push({
-      system: we,
+    d.push({
+      system: Xe,
       value: S
-    }), c && l.push({ system: Ce, value: c });
+    }), c && d.push({ system: Ge, value: c });
   }
-  const h = {
+  const g = {
     resourceType: "ImagingStudy",
-    id: d,
-    uid: f,
+    id: l,
+    uid: h,
     meta: {
-      profile: [re]
+      profile: [He]
     },
-    identifier: l,
+    identifier: d,
     status: "available"
   };
-  i && (h.subject = { reference: String(i).trim() });
-  const y = [
+  r && (g.subject = { reference: String(r).trim() });
+  const p = [
     {
       key: "study",
-      resource: h
+      resource: g
     }
   ];
-  return c && y.push({
+  return c && p.push({
     key: "series",
     resource: {
       resourceType: "ImagingStudy",
       uid: c
     }
-  }), m.length > 0 && y.push({
+  }), m.length > 0 && p.push({
     key: "files",
     resource: {
       files: m.map((S) => ({
@@ -9303,237 +10133,237 @@ function ar({
         label: S.label || void 0
       }))
     }
-  }), y;
+  }), p;
 }
-function ur({
+function Yi({
   id: e,
   studyInstanceUID: t,
   seriesInstanceUID: n,
-  patientReference: r
+  patientReference: i
 }) {
-  const i = String(e || "").trim() || "study", s = _(t), o = _(n), d = {
+  const r = String(e || "").trim() || "study", o = B(t), s = B(n), l = {
     resourceType: "ImagingStudy",
-    id: i,
-    uid: s,
+    id: r,
+    uid: o,
     meta: {
-      profile: [re]
+      profile: [He]
     },
     identifier: [
-      { system: G, value: Se },
-      { system: ie, value: s },
+      { system: de, value: Ve },
+      { system: $e, value: o },
       {
-        system: H,
-        value: i
+        system: fe,
+        value: r
       }
     ],
     status: "available"
   };
-  r && (d.subject = { reference: String(r).trim() });
-  const f = [
+  i && (l.subject = { reference: String(i).trim() });
+  const h = [
     {
       key: "study",
-      resource: d
+      resource: l
     }
   ];
-  return o && f.push({
+  return s && h.push({
     key: "series",
     resource: {
       resourceType: "ImagingStudy",
-      uid: o
+      uid: s
     }
-  }), f;
+  }), h;
 }
-function lr({
+function Zi({
   id: e,
   studyInstanceUID: t,
   seriesInstanceUID: n,
-  sourceBucket: r,
-  files: i,
-  patientReference: s,
-  ohifMode: o
+  sourceBucket: i,
+  files: r,
+  patientReference: o,
+  ohifMode: s
 }) {
-  const a = String(e || "").trim() || "study", d = _(t), f = _(n), c = String(r || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws", b = (Array.isArray(i) ? i : []).map((y) => Ee(y)).filter((y) => y !== null), l = [
-    { system: G, value: ge },
-    { system: ie, value: d },
+  const a = String(e || "").trim() || "study", l = B(t), h = B(n), c = String(i || "aws").trim().toLowerCase() === "gcs" ? "gcs" : "aws", u = (Array.isArray(r) ? r : []).map((p) => Je(p)).filter((p) => p !== null), d = [
+    { system: de, value: ze },
+    { system: $e, value: l },
     {
-      system: H,
+      system: fe,
       value: a
     },
     {
-      system: me,
+      system: je,
       value: a
     },
-    { system: we, value: c }
+    { system: Xe, value: c }
   ];
-  f && l.push({ system: Ce, value: f });
-  const u = String(o || "").trim();
-  u && l.push({
-    system: pe,
-    value: u
+  h && d.push({ system: Ge, value: h });
+  const f = String(s || "").trim();
+  f && d.push({
+    system: qe,
+    value: f
   });
   const m = {
     resourceType: "ImagingStudy",
     id: a,
-    uid: d,
+    uid: l,
     meta: {
-      profile: [re]
+      profile: [He]
     },
-    identifier: l,
+    identifier: d,
     status: "available"
   };
-  s && (m.subject = { reference: String(s).trim() });
-  const h = [
+  o && (m.subject = { reference: String(o).trim() });
+  const g = [
     {
       key: "study",
       resource: m
     }
   ];
-  return f && h.push({
+  return h && g.push({
     key: "series",
     resource: {
       resourceType: "ImagingStudy",
-      uid: f
+      uid: h
     }
-  }), b.length > 0 && h.push({
+  }), u.length > 0 && g.push({
     key: "files",
     resource: {
-      files: b.map((y) => ({
-        url: y.url,
-        fileName: y.fileName || void 0,
-        mimeType: y.mimeType || void 0,
-        role: y.role || void 0,
-        label: y.label || void 0
+      files: u.map((p) => ({
+        url: p.url,
+        fileName: p.fileName || void 0,
+        mimeType: p.mimeType || void 0,
+        role: p.role || void 0,
+        label: p.label || void 0
       }))
     }
-  }), h;
+  }), g;
 }
-function fr({
+function Ki({
   id: e,
   url: t,
   filename: n,
-  patientReference: r
+  patientReference: i
 }) {
-  return Wt({
+  return zn({
     id: e,
     files: [{ url: t, fileName: n }],
-    patientReference: r,
+    patientReference: i,
     includeLegacyNiftiIdentifiers: true
   });
 }
-function tt(e) {
+function Pt(e) {
   if (Array.isArray(e) || !e || typeof e != "object")
     return e;
-  const t = Object.entries(e).reduce((n, [r, i]) => (i && typeof i == "object" && !Array.isArray(i) && n.push({ key: r, resource: i }), n), []);
+  const t = Object.entries(e).reduce((n, [i, r]) => (r && typeof r == "object" && !Array.isArray(r) && n.push({ key: i, resource: r }), n), []);
   return t.length ? t : e;
 }
-function gt(e, t, n) {
-  const r = tt(e), i = q(r);
-  return i.length === 0 ? null : { mode: "files", studyId: t, files: i, ohifMode: n };
+function an(e, t, n) {
+  const i = Pt(e), r = ue(i);
+  return r.length === 0 ? null : { mode: "files", studyId: t, files: r, ohifMode: n };
 }
-function dr(e) {
-  const t = tt(e), n = Ht(t) || "study", r = Gt(t), i = zt(t) || void 0;
-  if (r === X) {
-    const d = F(t);
-    if (!d)
+function Qi(e) {
+  const t = Pt(e), n = jn(t) || "study", i = qn(t), r = Bn(t) || void 0;
+  if (i === Te) {
+    const l = se(t);
+    if (!l)
       return null;
-    const f = {
+    const h = {
       mode: "dicomweb",
       studyId: n,
-      studyInstanceUID: d,
-      seriesInstanceUID: D(t) || void 0,
-      dicomwebRoot: xe(t) || void 0,
-      ohifMode: i
-    }, c = q(t);
-    return c.length > 0 && (f.idcFallback = {
-      studyInstanceUID: d,
-      seriesInstanceUID: Oe(t) || D(t) || void 0,
-      sourceBucket: Pe(t),
+      studyInstanceUID: l,
+      seriesInstanceUID: oe(t) || void 0,
+      dicomwebRoot: mt(t) || void 0,
+      ohifMode: r
+    }, c = ue(t);
+    return c.length > 0 && (h.idcFallback = {
+      studyInstanceUID: l,
+      seriesInstanceUID: gt(t) || oe(t) || void 0,
+      sourceBucket: pt(t),
       files: c
-    }), f;
+    }), h;
   }
-  if (r === j) {
-    const d = gt(t, n, i);
-    if (d)
-      return d;
+  if (i === ce) {
+    const l = an(t, n, r);
+    if (l)
+      return l;
   }
-  if (r === ye) {
-    const d = q(t);
-    return d.length ? { mode: "dicom-url", studyId: n, files: d, ohifMode: i } : null;
+  if (i === We) {
+    const l = ue(t);
+    return l.length ? { mode: "dicom-url", studyId: n, files: l, ohifMode: r } : null;
   }
-  if (r === ge) {
-    const d = F(t);
-    if (!d)
+  if (i === ze) {
+    const l = se(t);
+    if (!l)
       return null;
-    const f = q(t);
-    return f.length ? {
+    const h = ue(t);
+    return h.length ? {
       mode: "idc",
       studyId: n,
-      studyInstanceUID: d,
-      seriesInstanceUID: Oe(t) || D(t) || void 0,
-      sourceBucket: Pe(t),
-      files: f,
-      ohifMode: i
+      studyInstanceUID: l,
+      seriesInstanceUID: gt(t) || oe(t) || void 0,
+      sourceBucket: pt(t),
+      files: h,
+      ohifMode: r
     } : null;
   }
-  if (r === Se) {
-    const d = F(t);
-    return d ? {
+  if (i === Ve) {
+    const l = se(t);
+    return l ? {
       mode: "local-dicom",
       studyId: n,
-      studyInstanceUID: d,
-      seriesInstanceUID: D(t) || void 0,
-      ohifMode: i
+      studyInstanceUID: l,
+      seriesInstanceUID: oe(t) || void 0,
+      ohifMode: r
     } : null;
   }
-  const s = gt(t, n, i);
-  if (s)
-    return s;
-  const o = Z(t);
-  if (o) {
-    const d = et(t);
+  const o = an(t, n, r);
+  if (o)
+    return o;
+  const s = Ne(t);
+  if (s) {
+    const l = Mt(t);
     return {
       mode: "files",
       studyId: n,
-      files: [{ url: o, fileName: d || "volume.nii.gz", label: n }],
-      ohifMode: i
+      files: [{ url: s, fileName: l || "volume.nii.gz", label: n }],
+      ohifMode: r
     };
   }
-  const a = F(t);
+  const a = se(t);
   return a ? {
     mode: "dicomweb",
     studyId: n,
     studyInstanceUID: a,
-    seriesInstanceUID: D(t) || void 0,
-    dicomwebRoot: xe(t) || void 0,
-    ohifMode: i
+    seriesInstanceUID: oe(t) || void 0,
+    dicomwebRoot: mt(t) || void 0,
+    ohifMode: r
   } : null;
 }
-function Be(e) {
+function yt(e) {
   return typeof e != "string" ? "" : e.trim().replace(/^urn:oid:/i, "");
 }
-function br(e) {
+function eo(e) {
   if (!e || typeof e != "object")
     return "";
-  const t = Be(e.uid);
+  const t = yt(e.uid);
   if (t)
     return t;
-  const r = (Array.isArray(e.identifier) ? e.identifier : []).find(
-    (i) => typeof (i == null ? void 0 : i.system) == "string" && i.system.toLowerCase() === "urn:dicom:uid"
+  const i = (Array.isArray(e.identifier) ? e.identifier : []).find(
+    (r) => typeof (r == null ? void 0 : r.system) == "string" && r.system.toLowerCase() === "urn:dicom:uid"
   );
-  return Be(r == null ? void 0 : r.value);
+  return yt(i == null ? void 0 : i.value);
 }
-function se(e) {
+function ke(e) {
   const t = e == null ? void 0 : e["hub.event"];
   return typeof t == "string" ? t.trim().toLowerCase() : "";
 }
-function Jt(e) {
+function Vn(e) {
   return typeof e == "string" ? e.trim().toUpperCase() : !e || typeof e != "object" ? "" : (typeof e.keyword == "string" && e.keyword || typeof e.id == "string" && e.id || typeof e.key == "string" && e.key || "").trim().toUpperCase();
 }
-function hr(e) {
+function to(e) {
   const t = e == null ? void 0 : e["target.actor"];
-  return t == null ? "" : Jt(t);
+  return t == null ? "" : Vn(t);
 }
-function mr(e) {
+function no(e) {
   if (!Array.isArray(e))
     return [];
   try {
@@ -9546,129 +10376,129 @@ function mr(e) {
     }
   }
 }
-function pr(e) {
+function ro(e) {
   const t = e == null ? void 0 : e.event;
   return t && typeof t == "object" && t.context != null ? t.context : [];
 }
-function yr(e) {
+function io(e) {
   return String(
     (e == null ? void 0 : e["subscriber.name"]) || (e == null ? void 0 : e.subscriber) || ""
   ).trim() || null;
 }
-function gr(e) {
+function oo(e) {
   return String((e == null ? void 0 : e["subscriber.product.name"]) || "").trim();
 }
-function Sr(e) {
+function so(e) {
   const t = String((e == null ? void 0 : e["subscriber.actor"]) || "").trim();
   if (t)
     return t;
   const n = e == null ? void 0 : e["subscriber.actors"];
   if (Array.isArray(n))
-    for (const r of n) {
-      const i = String(r || "").trim();
-      if (i)
-        return i;
+    for (const i of n) {
+      const r = String(i || "").trim();
+      if (r)
+        return r;
     }
   return "";
 }
-function Cr(e) {
+function ao(e) {
   const t = e == null ? void 0 : e.event;
-  if (se(t) !== "status-update")
+  if (ke(t) !== "status-update")
     return null;
   const n = t != null && t.context && typeof t.context == "object" && !Array.isArray(t.context) ? t.context : {};
   return { message: String(n.message ?? "").trim(), level: String(n.level ?? "info") };
 }
-function wr(e) {
+function co(e) {
   const t = atob(e), n = new Uint8Array(t.length);
-  for (let r = 0; r < t.length; r += 1)
-    n[r] = t.charCodeAt(r);
+  for (let i = 0; i < t.length; i += 1)
+    n[i] = t.charCodeAt(i);
   return n;
 }
-function Kt(e) {
+function Gn(e) {
   try {
-    const t = wr(e), n = new ArrayBuffer(t.byteLength);
+    const t = co(e), n = new ArrayBuffer(t.byteLength);
     return new Uint8Array(n).set(t), n;
   } catch {
     return null;
   }
 }
-function Yt(e) {
+function Xn(e) {
   const t = e == null ? void 0 : e.context;
   if (!t || typeof t != "object" || Array.isArray(t))
     return [];
   const n = t.files;
-  return Array.isArray(n) ? n.filter((r) => !!(r && typeof r == "object")) : [];
+  return Array.isArray(n) ? n.filter((i) => !!(i && typeof i == "object")) : [];
 }
-function Er(e) {
+function uo(e) {
   const t = e == null ? void 0 : e.context;
   return Array.isArray(t) ? t : t != null ? [t] : [];
 }
-function St(e, t, n) {
+function cn(e, t, n) {
   return e instanceof ArrayBuffer ? { arrayBuffer: e, fileName: t, mimeType: n } : typeof e == "string" && e ? { fileName: t, data: e, mimeType: n } : null;
 }
-function Xt(e) {
+function Jn(e) {
   return e === "nifti-send" ? "application/vnd.unknown.nifti-1" : "application/dicom";
 }
-function Tr(e, t) {
-  return e === "nifti-send" ? `cast-nifti-send-${t + 1}.nii.gz` : `cast-dicom-send-${t + 1}.dcm`;
+function lo(e, t) {
+  return e === "nifti-send" ? `hub-nifti-send-${t + 1}.nii.gz` : `hub-dicom-send-${t + 1}.dcm`;
 }
-function Nr(e, t) {
-  return e === "nifti-send" ? `cast-nifti-send-${t + 1}.nii.gz` : "dicom-sr.dcm";
+function fo(e, t) {
+  return e === "nifti-send" ? `hub-nifti-send-${t + 1}.nii.gz` : "dicom-sr.dcm";
 }
-function Ar(e, t) {
-  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : Xt(t);
+function bo(e, t) {
+  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : Jn(t);
 }
-function vr(e, t) {
-  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : typeof e.contentType == "string" && e.contentType.trim() ? e.contentType.trim() : Xt(t);
+function ho(e, t) {
+  return typeof e.mimeType == "string" && e.mimeType.trim() ? e.mimeType.trim() : typeof e.contentType == "string" && e.contentType.trim() ? e.contentType.trim() : Jn(t);
 }
-function Ir(e, t) {
+function mo(e, t) {
   const n = e == null ? void 0 : e.event;
-  if (se(n) !== t.toLowerCase())
+  if (ke(n) !== t.toLowerCase())
     return [];
-  const r = Yt(n);
-  if (r.length) {
-    const s = r.map((o, a) => {
-      const d = Ar(o, t), f = typeof o.fileName == "string" && o.fileName.trim() ? o.fileName.trim() : Tr(t, a);
-      return St(o.data, f, d);
+  const i = Xn(n);
+  if (i.length) {
+    const o = i.map((s, a) => {
+      const l = bo(s, t), h = typeof s.fileName == "string" && s.fileName.trim() ? s.fileName.trim() : lo(t, a);
+      return cn(s.data, h, l);
     }).filter(Boolean);
-    if (s.length)
-      return s;
+    if (o.length)
+      return o;
   }
-  return Er(n).map((s, o) => {
-    if (!s || typeof s != "object")
+  return uo(n).map((o, s) => {
+    if (!o || typeof o != "object")
       return null;
-    const a = s.resource;
+    const a = o.resource;
     if (!a || typeof a != "object")
       return null;
-    const d = vr(a, t), f = typeof a.fileName == "string" && a.fileName.trim() ? a.fileName.trim() : Nr(t, o);
-    return St(a.data, f, d);
+    const l = ho(a, t), h = typeof a.fileName == "string" && a.fileName.trim() ? a.fileName.trim() : fo(t, s);
+    return cn(a.data, h, l);
   }).filter(Boolean);
 }
-function Zt(e) {
-  return (e == null ? void 0 : e.arrayBuffer) instanceof ArrayBuffer ? e.arrayBuffer : typeof (e == null ? void 0 : e.data) == "string" ? Kt(e.data) : null;
+function Yn(e) {
+  return (e == null ? void 0 : e.arrayBuffer) instanceof ArrayBuffer ? e.arrayBuffer : typeof (e == null ? void 0 : e.data) == "string" ? Gn(e.data) : null;
 }
-function Lr(e, t, n) {
-  const r = Zt(e);
-  if (!r)
+function go(e, t, n) {
+  const i = Yn(e);
+  if (!i)
     return null;
-  const i = (e == null ? void 0 : e.fileName) || t, s = (e == null ? void 0 : e.mimeType) || n;
-  return new File([r], i, { type: s });
+  const r = (e == null ? void 0 : e.fileName) || t, o = (e == null ? void 0 : e.mimeType) || n;
+  return new File([i], r, { type: o });
 }
-var Ct = 4e3;
-var _r = 480;
-var ue = "[binary/redacted]";
-function le(e, t) {
-  return t > 8 ? "[max-depth]" : e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? ue : typeof e == "string" ? e.length > _r ? `${e.slice(0, 160)}\u2026 (${e.length} chars)` : e : Array.isArray(e) ? e.map((n) => le(n, t + 1)) : e && typeof e == "object" ? Object.entries(e).reduce((n, [r, i]) => (r.toLowerCase() === "data" && typeof i == "string" && i.length > 200 ? n[r] = ue : n[r] = le(i, t + 1), n), {}) : e;
+var un = 4e3;
+var po = 480;
+var Me = "[binary/redacted]";
+function Pe(e, t) {
+  return t > 8 ? "[max-depth]" : e instanceof ArrayBuffer || ArrayBuffer.isView(e) ? Me : typeof e == "string" ? e.length > po ? `${e.slice(0, 160)}\u2026 (${e.length} chars)` : e : Array.isArray(e) ? e.map((n) => Pe(n, t + 1)) : e && typeof e == "object" ? Object.entries(e).reduce((n, [i, r]) => (i.toLowerCase() === "data" && typeof r == "string" && r.length > 200 ? n[i] = Me : n[i] = Pe(r, t + 1), n), {}) : e;
 }
-function De(e) {
+function St(e) {
   try {
-    const t = JSON.stringify(le(e, 0));
-    return t.length > Ct ? `${t.slice(0, Ct)}\u2026` : t;
+    const t = JSON.stringify(Pe(e, 0));
+    return t.length > un ? `${t.slice(0, un)}\u2026` : t;
   } catch {
     return "[unserializable]";
   }
 }
-function nt(e) {
+function Ft(e) {
   if (!e)
     return 0;
   const { context: t } = e;
@@ -9680,206 +10510,359 @@ function nt(e) {
   }
   return 0;
 }
-function Qt(e, t) {
+function Zn(e, t) {
   if (!e)
     return t === 1 ? "1 object" : `${t} objects`;
   if (t === 0)
     return e;
-  const n = e === "dicom-send" || e === "nifti-send" ? "image" : "object", r = t === 1 ? n : `${n}s`;
-  return `${e} (${t} ${r})`;
+  const n = e === "dicom-send" || e === "nifti-send" ? "image" : "object", i = t === 1 ? n : `${n}s`;
+  return `${e} (${t} ${i})`;
 }
-function kr(e) {
-  const t = e != null && e.event && typeof e.event == "object" ? e.event : void 0, r = se(t) || "publish", i = nt(t);
-  return { label: Qt(r, i), detail: "" };
+function yo(e) {
+  const t = e != null && e.event && typeof e.event == "object" ? e.event : void 0, i = ke(t) || "publish", r = Ft(t);
+  return { label: Zn(i, r), detail: "" };
 }
-function Ur(e) {
+function So(e) {
   if (!e || typeof e != "object")
-    return { label: "raw", detail: De(e) };
-  const t = e.event, r = se(t) || (typeof (t == null ? void 0 : t.event) == "string" ? String(t.event) : "message"), i = nt(t);
-  return { label: Qt(r, i), detail: De(e) };
+    return { label: "raw", detail: St(e) };
+  const t = e.event, i = ke(t) || (typeof (t == null ? void 0 : t.event) == "string" ? String(t.event) : "message"), r = Ft(t);
+  return { label: Zn(i, r), detail: St(e) };
 }
-function $r(e) {
-  return le(e, 0);
+function Co(e) {
+  return Pe(e, 0);
 }
-var R = "*";
-var Te = "ID";
-var Rr = {
-  subscriberName: R,
-  subscriberActor: Te,
-  targetActor: R,
-  targetProductName: R
+var Q = "*";
+var Ye = "ID";
+var Eo = {
+  subscriberName: Q,
+  subscriberActor: Ye,
+  targetActor: Q,
+  targetProductName: Q
 };
-function Q(e) {
-  return String(e ?? "").trim() || R;
+function Le(e) {
+  return String(e ?? "").trim() || Q;
 }
-function xr(e, t) {
+function wo(e, t) {
   return {
-    subscriberName: (e.subscriberName ?? "").trim() || t.subscriberName || R,
-    subscriberActor: (e.subscriberActor ?? "").trim() || Te,
-    targetActor: Q(e.targetActor),
-    targetProductName: Q(e.targetProductName)
+    subscriberName: (e.subscriberName ?? "").trim() || t.subscriberName || Q,
+    subscriberActor: (e.subscriberActor ?? "").trim() || Ye,
+    targetActor: Le(e.targetActor),
+    targetProductName: Le(e.targetProductName)
   };
 }
-function Or(e, t) {
-  e["subscriber.name"] = t.subscriberName.trim() || R, e["subscriber.actor"] = t.subscriberActor.trim() || Te, e["target.actor"] = Q(t.targetActor), e["target.product.name"] = Q(
+function To(e, t) {
+  e["subscriber.name"] = t.subscriberName.trim() || Q, e["subscriber.actor"] = t.subscriberActor.trim() || Ye, e["target.actor"] = Le(t.targetActor), e["target.product.name"] = Le(
     t.targetProductName
   );
 }
-function en(e) {
+function Kn(e) {
   const t = e == null ? void 0 : e.event;
-  return !!(t && ke(t));
+  return !!(t && ut(t));
 }
-async function Pr(e, t) {
-  var i, s;
-  if (!(((i = e == null ? void 0 : e.hasPendingPayload) == null ? void 0 : i.call(e, t)) || en(t)))
+async function No(e, t) {
+  var r, o;
+  if (!(((r = e == null ? void 0 : e.hasPendingPayload) == null ? void 0 : r.call(e, t)) || Kn(t)))
     return t;
-  let r = t;
+  let i = t;
   if (e != null && e.fetchAllPayloads)
-    r = await e.fetchAllPayloads(t);
+    i = await e.fetchAllPayloads(t);
   else if (e != null && e.fetchPayload)
-    for (; (s = e.hasPendingPayload) != null && s.call(e, r); )
-      r = await e.fetchPayload(r);
-  return r;
+    for (; (o = e.hasPendingPayload) != null && o.call(e, i); )
+      i = await e.fetchPayload(i);
+  return i;
 }
-var tn = [
+var Qn = [
   "TOTALSEG",
   "TOTAL_SEGMENTATOR",
   "TOTAL-SEGMENTATOR"
 ];
-var nn = [
+var er = [
   "LUNGSCREENING",
   "LUNG_SCREENING"
 ];
-var rn = [
+var tr = [
   "NEURO_SEG",
   "NEUROSEG",
   "NEURO-SEG"
 ];
-function Fe(e) {
+var nr = [
+  "DENTAL_SEG",
+  "DENTALSEG",
+  "DENTAL-SEG",
+  "DENTALSEGMENTATOR"
+];
+var rr = [
+  "TORCHXRAYVISION",
+  "TXRV",
+  "TORCH_XRAY_VISION",
+  "TORCH-XRAY-VISION"
+];
+var Lo = ["FLEXRAY", "FLEX_RAY", "FLEX-RAY"];
+var ir = ["MHUB", "MHUB_AI", "MHUBAI"];
+function Ct(e) {
   return String(e || "").trim().toUpperCase().replace(/-/g, "_");
 }
-function rt(e, t) {
-  const n = Fe(e);
+function te(e, t) {
+  const n = Ct(e);
   if (!n)
     return false;
-  const r = n.replace(/_/g, "");
-  return t.some((i) => {
-    const s = Fe(i);
-    return s === n || s.replace(/_/g, "") === r;
+  const i = n.replace(/_/g, "");
+  return t.some((r) => {
+    const o = Ct(r);
+    return o === n || o.replace(/_/g, "") === i;
   });
 }
-function Ne(e) {
-  return rt(e, tn);
+function Ze(e) {
+  return te(e, Qn);
 }
-function Ae(e) {
-  return rt(e, nn);
+function Ke(e) {
+  return te(e, er);
 }
-function ve(e) {
-  return rt(e, rn);
+function Qe(e) {
+  return te(e, tr);
 }
-function Br(e) {
-  return Ne(e) || Ae(e) || ve(e);
+function et(e) {
+  return te(e, nr);
 }
-function it(e, t) {
+function tt(e) {
+  return te(e, rr);
+}
+function Dt(e) {
+  return te(e, Lo);
+}
+function nt(e) {
+  return te(e, ir);
+}
+function vo(e) {
+  return nt(e) || Ze(e) || Ke(e) || Qe(e) || et(e) || tt(e) || Dt(e);
+}
+function Bt(e, t) {
   if (!Array.isArray(e))
     return;
-  const n = String(t).trim().toLowerCase(), r = e.find((s) => !s || typeof s != "object" ? false : String(s.key ?? "").trim().toLowerCase() === n);
-  if (!r)
+  const n = String(t).trim().toLowerCase(), i = e.find((o) => !o || typeof o != "object" ? false : String(o.key ?? "").trim().toLowerCase() === n);
+  if (!i)
     return;
-  const i = r.value;
-  return typeof i == "string" ? i.trim() : void 0;
+  const r = i.value;
+  return typeof r == "string" ? r.trim() : void 0;
 }
-function st(e) {
+function jt(e) {
   if (!e || typeof e != "object" || e.source !== "status")
     return false;
-  const t = it(e.items, "availability");
+  const t = Bt(e.items, "availability");
   return t ? t.toLowerCase() === "online" : Array.isArray(e.items) && e.items.length > 0;
 }
-function Ie(e) {
+function rt(e) {
   const t = String((e == null ? void 0 : e.productName) ?? "").trim();
   if (t)
     return t;
   const n = e == null ? void 0 : e.data;
   if (n && typeof n == "object") {
-    const r = String(n.product ?? "").trim();
-    if (r)
-      return r;
+    const i = String(n.product ?? "").trim();
+    if (i)
+      return i;
   }
   return "";
 }
-function ot(e, t) {
+function be(e, t) {
   return Array.isArray(e) ? e.some((n) => {
-    const r = Ie(n);
-    return t(r) && st(n.data);
+    const i = rt(n);
+    return t(i) && jt(n.data);
   }) : false;
 }
-function Dr(e) {
-  return ot(
+function Ao(e) {
+  return be(
     e,
-    Ne
+    Ze
   );
 }
-function Fr(e) {
-  return ot(e, Ae);
+function Io(e) {
+  return be(e, Ke);
 }
-function Mr(e) {
-  return ot(e, ve);
+function Uo(e) {
+  return be(e, Qe);
 }
-function jr(e) {
+function xo(e) {
+  return be(e, et);
+}
+function Ho(e) {
+  return be(
+    e,
+    tt
+  );
+}
+function $o(e) {
+  return be(e, nt);
+}
+function ko(e) {
   return typeof e != "string" ? false : e.trim().toUpperCase() === "STATUS";
 }
-var qr = "lung";
-var zr = "LUNGSCREENING";
-var Hr = "Lung Screening";
-var Gr = "Toronto, Canada";
-var Vr = "CT lung screening (dicom-send / nifti-send). Returns a 2048-D vector.";
-var Wr = "https://github.com/rphellan/slicerW45";
-var Jr = "dicom-send";
-var Kr = {
-  id: qr,
-  product: zr,
-  title: Hr,
-  location: Gr,
-  summary: Vr,
-  githubUrl: Wr,
-  hubEvent: Jr
+var _o = "mhub";
+var Ro = "MHUB";
+var Oo = "MHub models";
+var Mo = "Boston, USA";
+var Po = "Medical Imaging Model Hub \u2014 peer-reviewed deep learning models via standardized Docker I/O.";
+var Fo = "https://github.com/MHubAI/";
+var Do = "https://mhub.ai";
+var Bo = "dicom-send";
+var jo = true;
+var qo = "https://github.com/MHubAI.png";
+var Wo = {
+  id: _o,
+  product: Ro,
+  title: Oo,
+  location: Mo,
+  summary: Po,
+  githubUrl: Fo,
+  websiteUrl: Do,
+  hubEvent: Bo,
+  enabled: jo,
+  iconUrl: qo
 };
-var Yr = "totalseg";
-var Xr = "TOTALSEG";
-var Zr = "Total Segmentator";
-var Qr = "Frankfurt, Germany";
-var ei = "Whole-body CT/MR multi-organ segmentation (dicom-send / nifti-send jobs). Returns DICOM SEG via dicom-send.";
-var ti = "https://github.com/wasserth/TotalSegmentator";
-var ni = "https://totalsegmentator.com/";
-var ri = "dicom-send";
-var ii = {
-  id: Yr,
-  product: Xr,
-  title: Zr,
-  location: Qr,
-  summary: ei,
-  githubUrl: ti,
-  websiteUrl: ni,
-  hubEvent: ri
+var zo = "lung";
+var Vo = "LUNGSCREENING";
+var Go = "Lung Screening";
+var Xo = "Toronto, Canada";
+var Jo = "CT lung screening.";
+var Yo = "https://github.com/rphellan/slicerW45";
+var Zo = "https://projectweek.na-mic.org/PW45_2026_Boston/Projects/ExtractingDeepLearningFeaturesFromCtImagesOfTheThoracicRegionForLungCancerApplications/";
+var Ko = "dicom-send";
+var Qo = false;
+var es = {
+  id: zo,
+  product: Vo,
+  title: Go,
+  location: Xo,
+  summary: Jo,
+  githubUrl: Yo,
+  websiteUrl: Zo,
+  hubEvent: Ko,
+  enabled: Qo
 };
-var si = "neuro";
-var oi = "NEURO_SEG";
-var ci = "Subcortical segmentation";
-var ai = "Montreal, Canada";
-var ui = "Neuro / subcortical segmentation (nifti-send). Prefers a NIfTI volume input.";
-var li = "https://github.com/cast-interface/slicer-cast-extension/blob/main/CastInterface/cast_resource_servers/products/neuro_seg.py";
-var fi = "nifti-send";
-var di = {
-  id: si,
-  product: oi,
-  title: ci,
-  location: ai,
-  summary: ui,
-  githubUrl: li,
-  hubEvent: fi
+var ts = "totalseg";
+var ns = "TOTALSEG";
+var rs = "Total Segmentator";
+var is = "Basel, Switzerland";
+var os = "Whole-body CT/MR multi-organ segmentation.";
+var ss = "https://github.com/wasserth/TotalSegmentator";
+var as = "https://totalsegmentator.com/";
+var cs = "https://www.buymeacoffee.com/totalsegmentator";
+var us = "dicom-send";
+var ls = true;
+var fs = "https://pubs.rsna.org/doi/10.1148/ryai.230024";
+var ds = {
+  id: ts,
+  product: ns,
+  title: rs,
+  location: is,
+  summary: os,
+  githubUrl: ss,
+  websiteUrl: as,
+  buyMeACoffeeUrl: cs,
+  hubEvent: us,
+  enabled: ls,
+  citeUrl: fs
 };
-function _e(e) {
-  const t = String(e.summary || e.capabilities || "").trim(), n = e.hubEvent === "nifti-send" ? "nifti-send" : "dicom-send", r = {
+var bs = "neuro";
+var hs = "NEURO_SEG";
+var ms = "Subcortical segmentation";
+var gs = "Montreal, Canada";
+var ps = "Neuro / subcortical segmentation. Improved white and pial surfaces and parcellation (aparc+aseg) from recon-all pipeline (FreeSurfer 7.4.1) through added dataset";
+var ys = "https://projectweek.na-mic.org/PW45_2026_Boston/Projects/ReconAllCorrectionScriptBasedOnManualSubcorticalSegmentationFiles/";
+var Ss = "nifti-send";
+var Cs = true;
+var Es = {
+  id: bs,
+  product: hs,
+  title: ms,
+  location: gs,
+  summary: ps,
+  websiteUrl: ys,
+  hubEvent: Ss,
+  enabled: Cs
+};
+var ws = "dental";
+var Ts = "DENTAL_SEG";
+var Ns = "Dental Segmentator";
+var Ls = "Paris, France";
+var vs = "Fully automatic CT/CBCT dental segmentation (maxilla, mandible, upper/lower teeth, mandibular canal).";
+var As = "https://github.com/gaudot/SlicerDentalSegmentator";
+var Is = "https://www.kitware.com/dental-segmentator/";
+var Us = "Apache-2.0";
+var xs = "https://www.apache.org/licenses/LICENSE-2.0";
+var Hs = "dicom-send";
+var $s = true;
+var ks = {
+  id: ws,
+  product: Ts,
+  title: Ns,
+  location: Ls,
+  summary: vs,
+  githubUrl: As,
+  websiteUrl: Is,
+  license: Us,
+  licenseUrl: xs,
+  hubEvent: Hs,
+  enabled: $s
+};
+var _s = "txrv";
+var Rs = "TORCHXRAYVISION";
+var Os = "TorchXRayVision";
+var Ms = "Montreal, Canada";
+var Ps = "Chest X-ray pathology classification (18 findings) and lung/heart anatomy segmentation.";
+var Fs = "https://github.com/mlmed/torchxrayvision";
+var Ds = "https://mlmed.org/torchxrayvision/";
+var Bs = "Cohen et al., TorchXRayVision: A library of chest X-ray datasets and models, MIDL 2022";
+var js = "https://arxiv.org/abs/2111.00595";
+var qs = "dicom-send";
+var Ws = true;
+var zs = {
+  id: _s,
+  product: Rs,
+  title: Os,
+  location: Ms,
+  summary: Ps,
+  githubUrl: Fs,
+  websiteUrl: Ds,
+  cite: Bs,
+  citeUrl: js,
+  hubEvent: qs,
+  enabled: Ws
+};
+var Vs = "flexray";
+var Gs = "FLEXRAY";
+var Xs = "FleXray";
+var Js = "local - in browser";
+var Ys = "Foundation model for universal clinical X-ray anatomy segmentation (60 structures) across body regions, views, and acquisition settings. Designed for on-device / local inference.";
+var Zs = "https://flexray.csail.mit.edu/";
+var Ks = "https://github.com/VictorButoi/FleXray";
+var Qs = "CC-BY-NC-4.0";
+var ea = "https://creativecommons.org/licenses/by-nc/4.0/";
+var ta = "Not for commercial use";
+var na = "Victor Ion Butoi, Vivek Gopalakrishnan, John V. Guttag, Adrian V. Dalca, and Neel Dey (2026). FleXray: Universal Clinical X-ray Segmentation. arXiv:2609.26756";
+var ra = "https://arxiv.org/abs/2609.26756";
+var ia = "dicom-send";
+var oa = true;
+var sa = true;
+var aa = {
+  id: Vs,
+  product: Gs,
+  title: Xs,
+  location: Js,
+  summary: Ys,
+  websiteUrl: Zs,
+  githubUrl: Ks,
+  license: Qs,
+  licenseUrl: ea,
+  licenseRestriction: ta,
+  cite: na,
+  citeUrl: ra,
+  hubEvent: ia,
+  enabled: oa,
+  localCapable: sa
+};
+var ca = "data:image/svg+xml,%3csvg%20width='35'%20height='50'%20viewBox='0%200%2035%2050'%20fill='none'%20xmlns='http://www.w3.org/2000/svg'%3e%3cpath%20d='M30.7512%2011.6307L30.7171%2011.6106L30.6382%2011.5865C30.6699%2011.6134%2030.7097%2011.6289%2030.7512%2011.6307Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M31.2481%2015.2031L31.21%2015.2138L31.2481%2015.2031Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.7659%2011.6253C30.761%2011.6247%2030.7563%2011.6236%2030.7517%2011.6219C30.7514%2011.6251%2030.7514%2011.6283%2030.7517%2011.6314C30.7569%2011.6307%2030.7618%2011.6286%2030.7659%2011.6253Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.7515%2011.6314H30.7572V11.6278L30.7515%2011.6314Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M31.2178%2015.1962L31.2753%2015.1634L31.2967%2015.1514L31.3161%2015.1307C31.2796%2015.1464%2031.2463%2015.1686%2031.2178%2015.1962Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M30.8507%2011.7088L30.7945%2011.6553L30.7563%2011.6345C30.7768%2011.6707%2030.8107%2011.6973%2030.8507%2011.7088Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M16.715%2046.3714C16.6701%2046.3908%2016.6307%2046.4212%2016.6006%2046.4597L16.636%2046.4369C16.6601%2046.4149%2016.6942%2046.3888%2016.715%2046.3714Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M24.9235%2044.7473C24.9235%2044.6965%2024.8987%2044.7059%2024.9048%2044.8864C24.9048%2044.8717%2024.9108%2044.857%2024.9134%2044.843C24.9168%2044.8109%2024.9195%2044.7794%2024.9235%2044.7473Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M24.0719%2046.3714C24.027%2046.3908%2023.9877%2046.4212%2023.9575%2046.4597L23.993%2046.4369C24.017%2046.4149%2024.0512%2046.3888%2024.0719%2046.3714Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M10.9344%2046.7574C10.9003%2046.7277%2010.8586%2046.7082%2010.814%2046.7012C10.8501%2046.7186%2010.8862%2046.736%2010.9103%2046.7493L10.9344%2046.7574Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M9.63391%2045.5042C9.62859%2045.4515%209.61242%2045.4005%209.58643%2045.3544C9.60484%2045.4024%209.62025%2045.4516%209.63258%2045.5015L9.63391%2045.5042Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M18.3715%2023.0976C16.5857%2023.8665%2014.5591%2024.7382%2011.9326%2024.7382C10.8339%2024.736%209.74049%2024.5844%208.68213%2024.2875L10.4987%2043.0444C10.563%2043.8284%2010.9181%2044.5594%2011.4935%2045.0923C12.0689%2045.6251%2012.8225%2045.9208%2013.6047%2045.9207C13.6047%2045.9207%2016.1804%2046.0552%2017.0398%2046.0552C17.9648%2046.0552%2020.7385%2045.9207%2020.7385%2045.9207C21.5205%2045.9207%2022.274%2045.6249%2022.8493%2045.092C23.4245%2044.5592%2023.7795%2043.8283%2023.8438%2043.0444L25.7895%2022.3173C24.92%2022.0187%2024.0425%2021.8203%2023.0533%2021.8203C21.3424%2021.8196%2019.964%2022.4122%2018.3715%2023.0976Z'%20fill='%23FFFFFF'/%3e%3cpath%20d='M3.05859%2015.095L3.08936%2015.1238L3.10943%2015.1358C3.09397%2015.1205%203.07693%2015.1068%203.05859%2015.095Z'%20fill='%23FFDD00'/%3e%3cpath%20d='M34.1896%2013.3639L33.916%2011.9762C33.6706%2010.7312%2033.1134%209.55468%2031.8426%209.10468C31.4353%208.96073%2030.9732%208.89885%2030.6608%208.60086C30.3485%208.30288%2030.2562%207.84009%2030.1839%207.41094C30.0502%206.62326%2029.9244%205.83492%2029.7873%205.04859C29.6689%204.37257%2029.5753%203.61315%2029.267%202.99296C28.8657%202.16022%2028.033%201.67322%2027.205%201.35102C26.7807%201.19173%2026.3477%201.05698%2025.9081%200.947426C23.8394%200.398542%2021.6644%200.196746%2019.5362%200.0817228C16.9817%20-0.0600379%2014.4204%20-0.0173274%2011.872%200.209526C9.97525%200.383071%207.97745%200.592939%206.17495%201.25281C5.51616%201.49429%204.8373%201.7842%204.33634%202.29609C3.72169%202.92502%203.52104%203.89768%203.96982%204.68199C4.28886%205.23895%204.82927%205.63245%205.40246%205.89276C6.14906%206.22818%206.92877%206.48341%207.72865%206.65421C9.95585%207.14928%2012.2626%207.34368%2014.538%207.42641C17.0599%207.52878%2019.5859%207.44582%2022.0958%207.1782C22.7165%207.10959%2023.336%207.0273%2023.9545%206.93134C24.6828%206.81901%2025.1503%205.86115%2024.9356%205.19388C24.6788%204.39611%2023.9886%204.08669%2023.208%204.2071C23.093%204.22526%2022.9786%204.24208%2022.8636%204.25889L22.7807%204.271C22.5163%204.30463%2022.2518%204.33602%2021.9874%204.36517C21.4412%204.42437%2020.8937%204.4728%2020.3448%204.51046C19.1155%204.59656%2017.8828%204.63625%2016.6508%204.63827C15.4403%204.63827%2014.229%204.60396%2013.0211%204.52392C12.47%204.48759%2011.9202%204.4414%2011.3718%204.38535C11.1223%204.35912%2010.8735%204.33154%2010.6247%204.3006L10.3879%204.27033L10.3364%204.26293L10.091%204.22728C9.58933%204.15127%209.08771%204.06382%208.59144%203.95822C8.54136%203.94704%208.49657%203.91902%208.46446%203.87879C8.43236%203.83855%208.41486%203.7885%208.41486%203.73691C8.41486%203.68533%208.43236%203.63528%208.46446%203.59504C8.49657%203.55481%208.54136%203.52679%208.59144%203.51561H8.6008C9.03086%203.42346%209.46426%203.34476%209.899%203.27615C10.0439%203.25328%2010.1893%203.23086%2010.3351%203.20888H10.3391C10.6113%203.19072%2010.8849%203.14162%2011.1557%203.10933C13.5125%202.86279%2015.8832%202.77874%2018.2513%202.85776C19.4011%202.89139%2020.5501%202.95933%2021.6945%203.07637C21.9406%203.10193%2022.1854%203.12884%2022.4302%203.15911C22.5238%203.17054%2022.6181%203.18399%2022.7124%203.19543L22.9024%203.22301C23.4562%203.30597%2024.0071%203.40664%2024.5551%203.52503C25.367%203.70261%2026.4097%203.76046%2026.7709%204.65508C26.8859%204.93894%2026.9381%205.25442%2027.0016%205.5524L27.0826%205.93245C27.0847%205.93927%2027.0863%205.94624%2027.0873%205.9533C27.2785%206.85017%2027.4701%207.74704%2027.6618%208.64391C27.6758%208.71017%2027.6762%208.77862%2027.6628%208.84501C27.6493%208.9114%2027.6225%208.97429%2027.5838%209.02977C27.5451%209.08525%2027.4955%209.13212%2027.4381%209.16746C27.3806%209.2028%2027.3165%209.22585%2027.2498%209.23517H27.2444L27.1274%209.25132L27.0117%209.26679C26.6452%209.31477%2026.2782%209.35961%2025.9108%209.40132C25.1871%209.48428%2024.4623%209.55603%2023.7364%209.61657C22.294%209.7372%2020.8486%209.81635%2019.4004%209.85401C18.6625%209.87374%2017.9247%209.88294%2017.1872%209.88159C14.2517%209.87926%2011.3188%209.70768%208.40283%209.36769C8.08714%209.33002%207.77145%209.28966%207.45577%209.24863C7.70056%209.28024%207.27786%209.22441%207.19225%209.2123C6.9916%209.18405%206.79095%209.15468%206.5903%209.12419C5.91679%209.02262%205.24729%208.8975%204.57511%208.78786C3.76249%208.65333%202.98531%208.72059%202.25026%209.12419C1.6469%209.45624%201.15857%209.96544%200.850401%2010.5838C0.533376%2011.243%200.439071%2011.9608%200.297279%2012.6691C0.155487%2013.3774%20-0.0652275%2014.1395%200.0183763%2014.8666C0.198292%2016.4359%201.28915%2017.7113%202.85823%2017.9965C4.33434%2018.2655%205.81847%2018.4835%207.30662%2018.6691C13.1524%2019.3892%2019.0582%2019.4753%2024.9223%2018.9261C25.3998%2018.8812%2025.8767%2018.8324%2026.3529%2018.7794C26.5016%2018.763%2026.6521%2018.7802%2026.7934%2018.8299C26.9347%2018.8795%2027.0631%2018.9603%2027.1693%2019.0663C27.2755%2019.1724%2027.3567%2019.3009%2027.4071%2019.4426C27.4575%2019.5843%2027.4757%2019.7356%2027.4605%2019.8853L27.312%2021.3369C27.0128%2024.2701%2026.7136%2027.2031%2026.4144%2030.1358C26.1023%2033.2157%2025.7882%2036.2953%2025.472%2039.3747C25.3829%2040.242%2025.2937%2041.109%2025.2045%2041.9758C25.1189%2042.8294%2025.1069%2043.7099%2024.9457%2044.5534C24.6915%2045.8799%2023.7986%2046.6945%2022.4957%2046.9925C21.3021%2047.2657%2020.0827%2047.4091%2018.8586%2047.4203C17.5016%2047.4277%2016.1452%2047.3672%2014.7881%2047.3746C13.3395%2047.3826%2011.5651%2047.2481%2010.4468%2046.1638C9.46426%2045.2113%209.32849%2043.72%209.19472%2042.4306C9.01637%2040.7234%208.83957%2039.0164%208.66434%2037.3097L7.68116%2027.8192L7.0451%2021.6786C7.0344%2021.577%207.0237%2021.4768%207.01367%2021.3745C6.93742%2020.642%206.42176%2019.925%205.60913%2019.962C4.91354%2019.9929%204.12299%2020.5875%204.20458%2021.3745L4.67611%2025.927L5.65126%2035.3442C5.92905%2038.0191%206.20617%2040.6944%206.48262%2043.3703C6.53613%2043.8828%206.58628%2044.3967%206.64247%2044.9093C6.94812%2047.7102%209.075%2049.2196%2011.7089%2049.6448C13.2472%2049.8936%2014.8229%2049.9448%2016.384%2049.9703C18.3851%2050.0026%2020.4063%2050.08%2022.3747%2049.7154C25.2915%2049.1773%2027.4799%2047.2185%2027.7922%2044.1801C27.8814%2043.303%2027.9706%2042.4256%2028.0597%2041.548C28.3563%2038.6458%2028.6523%2035.7433%2028.9479%2032.8406L29.9151%2023.3562L30.3585%2019.0095C30.3806%2018.794%2030.4711%2018.5913%2030.6166%2018.4315C30.7621%2018.2717%2030.9549%2018.1633%2031.1665%2018.1223C32.0005%2017.9588%2032.7977%2017.6796%2033.391%2017.0413C34.3354%2016.0249%2034.5233%2014.6998%2034.1896%2013.3639ZM2.81542%2014.3016C2.82813%2014.2955%202.80472%2014.4052%202.79469%2014.4563C2.79268%2014.3789%202.7967%2014.3103%202.81542%2014.3016ZM2.89635%2014.9312C2.90304%2014.9265%202.9231%2014.9534%202.94384%2014.9857C2.9124%2014.9561%202.89234%2014.9339%202.89568%2014.9312H2.89635ZM2.97594%2015.0368C3.0047%2015.0859%203.02009%2015.1168%202.97594%2015.0368V15.0368ZM3.13579%2015.1673H3.1398C3.1398%2015.172%203.14716%2015.1767%203.14984%2015.1814C3.1454%2015.1762%203.14048%2015.1715%203.13513%2015.1673H3.13579ZM31.1277%2014.9722C30.828%2015.2588%2030.3766%2015.392%2029.9305%2015.4586C24.9276%2016.2052%2019.8519%2016.5832%2014.7942%2016.4164C11.1745%2016.292%207.59287%2015.8877%204.00928%2015.3785C3.65815%2015.3287%203.27758%2015.2642%203.03614%2015.0038C2.58133%2014.5128%202.80472%2013.524%202.9231%2012.9307C3.03145%2012.3872%203.23879%2011.6628%203.88154%2011.5854C4.88478%2011.467%206.04989%2011.8928%207.04243%2012.0442C8.2374%2012.2276%209.43684%2012.3744%2010.6407%2012.4848C15.7787%2012.9556%2021.0029%2012.8823%2026.1181%2012.1935C27.0505%2012.0675%2027.9795%2011.9211%2028.9051%2011.7543C29.7298%2011.6056%2030.6441%2011.3264%2031.1424%2012.1854C31.4841%2012.7706%2031.5296%2013.5536%2031.4768%2014.2148C31.4605%2014.5029%2031.3354%2014.7739%2031.127%2014.9722H31.1277Z'%20fill='%23FFDD00'/%3e%3c/svg%3e";
+function ua(e) {
+  const t = String(e.summary || e.capabilities || "").trim(), n = e.hubEvent === "nifti-send" ? "nifti-send" : "dicom-send", i = {
     id: String(e.id || "").trim(),
     product: String(e.product || "").trim(),
     title: String(e.title || "").trim(),
@@ -9887,99 +10870,172 @@ function _e(e) {
     summary: t,
     capabilities: t,
     hubEvent: n
-  }, i = String(e.githubUrl || "").trim();
-  i && (r.githubUrl = i);
-  const s = String(e.websiteUrl || "").trim();
-  s && (r.websiteUrl = s);
-  const o = String(e.buyMeACoffeeUrl || "").trim();
-  return o && (r.buyMeACoffeeUrl = o), r;
+  }, r = String(e.githubUrl || "").trim();
+  r && (i.githubUrl = r);
+  const o = String(e.websiteUrl || "").trim();
+  o && (i.websiteUrl = o);
+  const s = String(e.buyMeACoffeeUrl || "").trim();
+  s && (i.buyMeACoffeeUrl = s);
+  const a = String(e.iconUrl || "").trim();
+  a && (i.iconUrl = a);
+  const l = String(e.cite || "").trim();
+  l && (i.cite = l);
+  const h = String(e.citeUrl || "").trim();
+  h && (i.citeUrl = h);
+  const c = String(e.license || "").trim();
+  c && (i.license = c);
+  const u = String(e.licenseUrl || "").trim();
+  u && (i.licenseUrl = u);
+  const d = String(e.licenseRestriction || "").trim();
+  return d && (i.licenseRestriction = d), e.localCapable === true && (i.localCapable = true), i;
 }
-var x = Object.freeze([
-  _e(Kr),
-  _e(ii),
-  _e(di)
-]);
-function V(e) {
+function la(e) {
+  return (e == null ? void 0 : e.enabled) !== false;
+}
+var z = Object.freeze(
+  [Wo, es, ds, Es, ks, zs, aa].filter(la).map(ua)
+);
+var fa = Object.freeze(
+  z.filter((e) => e.localCapable === true)
+);
+function da(e) {
+  return !!(e && e.localCapable === true);
+}
+function P(e) {
   return String(e ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function bi(e) {
+function ba(e) {
   if (!e || typeof e != "object") return "";
-  const t = V(e.title), n = V(e.summary || e.capabilities), r = [
-    '<div class="cast-inference-info-card">',
-    `<div class="cast-inference-info-title">${t}</div>`
-  ];
-  n && r.push(`<p class="cast-inference-info-summary">${n}</p>`), r.push('<div class="cast-inference-info-links">');
-  const i = String(e.githubUrl || "").trim();
-  i && r.push(
-    `<a class="cast-inference-info-link cast-inference-info-github" href="${V(i)}" target="_blank" rel="noopener noreferrer"><svg class="cast-inference-info-github-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>`
+  const t = P(e.title), n = P(e.summary || e.capabilities), i = String(e.iconUrl || "").trim(), r = ['<div class="hub-inference-info-card">'];
+  i ? r.push(
+    `<div class="hub-inference-info-heading"><img class="hub-inference-info-icon" src="${P(i)}" alt="" width="28" height="28" decoding="async" /><div class="hub-inference-info-title">${t}</div></div>`
+  ) : r.push(`<div class="hub-inference-info-title">${t}</div>`), n && r.push(`<p class="hub-inference-info-summary">${n}</p>`);
+  const o = String(e.cite || "").trim(), s = String(e.citeUrl || "").trim();
+  if (o) {
+    const f = P(o);
+    s ? r.push(
+      `<p class="hub-inference-info-citation"><span class="hub-inference-info-citation-label">Citation:</span> <a class="hub-inference-info-citation-link" href="${P(s)}" target="_blank" rel="noopener noreferrer">${f}</a></p>`
+    ) : r.push(
+      `<p class="hub-inference-info-citation"><span class="hub-inference-info-citation-label">Citation:</span> ${f}</p>`
+    );
+  }
+  const a = String(e.license || "").trim(), l = String(e.licenseUrl || "").trim(), h = String(e.licenseRestriction || "").trim();
+  if (a || h) {
+    const f = ['<p class="hub-inference-info-license">'];
+    if (a) {
+      const m = P(a), g = l ? `<a class="hub-inference-info-license-link" href="${P(l)}" target="_blank" rel="noopener noreferrer">${m}</a>` : m;
+      f.push(
+        `<span class="hub-inference-info-license-label">License:</span> ${g}`
+      );
+    }
+    a && h && f.push(" "), h && f.push(
+      `<span class="hub-inference-info-restriction">${P(h)}</span>`
+    ), f.push("</p>"), r.push(f.join(""));
+  }
+  r.push('<div class="hub-inference-info-links">');
+  const c = String(e.githubUrl || "").trim();
+  c && r.push(
+    `<a class="hub-inference-info-link hub-inference-info-github" href="${P(c)}" target="_blank" rel="noopener noreferrer"><svg class="hub-inference-info-github-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>`
   );
-  const s = String(e.websiteUrl || "").trim();
-  s && r.push(
-    `<a class="cast-inference-info-link" href="${V(s)}" target="_blank" rel="noopener noreferrer">Website</a>`
+  const u = String(e.websiteUrl || "").trim();
+  u && r.push(
+    `<a class="hub-inference-info-link" href="${P(u)}" target="_blank" rel="noopener noreferrer">Website</a>`
+  ), s && r.push(
+    `<a class="hub-inference-info-link" href="${P(s)}" target="_blank" rel="noopener noreferrer" title="${P(o || "Citation")}">Cite</a>`
   );
-  const o = String(e.buyMeACoffeeUrl || "").trim();
-  return o && r.push(
-    `<a class="cast-inference-info-coffee" href="${V(o)}" target="_blank" rel="noopener noreferrer" title="Buy Me a Coffee"><span aria-hidden="true">\u2615</span> Buy me a coffee</a>`
+  const d = String(e.buyMeACoffeeUrl || "").trim();
+  return d && r.push(
+    `<a class="hub-inference-info-link hub-inference-info-coffee" href="${P(d)}" target="_blank" rel="noopener noreferrer" title="Buy Me a Coffee"><img class="hub-inference-info-coffee-icon" src="${ca}" alt="" width="12" height="16" decoding="async" />Buy me a coffee</a>`
   ), r.push("</div></div>"), r.join("");
 }
-function hi(e, t) {
+function ha(e, t) {
   if (!e || typeof e != "object")
     return "";
   const n = [
     String(e.title || "").trim(),
     String(e.summary || e.capabilities || "").trim(),
     `Location: ${String(e.location || "").trim()}`
-  ].filter((i) => i && !i.endsWith(": "));
+  ].filter((a) => a && !a.endsWith(": "));
   t && n.push(`Status: ${t}`);
-  const r = String(e.githubUrl || "").trim();
-  return r && n.push(r), n.join(`
+  const i = String(e.cite || "").trim();
+  i && n.push(`Citation: ${i}`);
+  const r = String(e.license || "").trim();
+  r && n.push(`License: ${r}`);
+  const o = String(e.licenseRestriction || "").trim();
+  o && n.push(o);
+  const s = String(e.githubUrl || "").trim();
+  return s && n.push(s), n.join(`
 `);
 }
-function sn(e) {
+function or(e) {
   const t = String(e || "").trim().toUpperCase().replace(/-/g, "_");
   if (!t)
     return null;
   const n = t.replace(/_/g, "");
-  return x.find((r) => {
-    const i = String(r.product || "").trim().toUpperCase().replace(/-/g, "_");
-    return i === t || i.replace(/_/g, "") === n;
+  return z.find((i) => {
+    const r = String(i.product || "").trim().toUpperCase().replace(/-/g, "_");
+    return r === t || r.replace(/_/g, "") === n;
   }) || null;
 }
-function on(e) {
+function ma(e, t = false) {
+  return t ? "Checking\u2026" : e ? e.error ? "Error" : e.online ? `Online${e.job ? ` \xB7 job ${e.job}` : ""}` : "Offline" : "Unknown";
+}
+function ga(e, t = z) {
+  const n = Array.isArray(e) ? [...e] : [], i = (o) => {
+    const s = String((o == null ? void 0 : o.id) || "").trim(), a = t.findIndex((l) => l.id === s);
+    return a < 0 ? Number.MAX_SAFE_INTEGER : a;
+  }, r = (o) => {
+    var s;
+    return (s = o == null ? void 0 : o.probe) != null && s.online ? 0 : o != null && o.probing || !(o != null && o.probe) ? 1 : 2;
+  };
+  return n.sort((o, s) => {
+    const a = r(o) - r(s);
+    return a !== 0 ? a : i(o.server) - i(s.server);
+  });
+}
+function pa(e, t) {
+  return String((e == null ? void 0 : e.id) || "").trim() === "totalseg" && (t != null && t.totalSegmentator) ? { totalSegmentator: t.totalSegmentator } : {};
+}
+function sr(e) {
   return String(e || "").trim().toUpperCase();
 }
-var cn = Object.freeze({
+var ar = Object.freeze({
   ira: (e) => e === "SLICERLIVE-IRA" || e.startsWith("SLICERLIVE-IRA"),
   ohif: (e) => e === "OHIF" || e.startsWith("OHIF"),
   volview: (e) => e === "VOLVIEW" || e.startsWith("VOLVIEW"),
   slicer: (e) => e === "3DSLICER-ID" || e === "SLICER-HUB" || e.startsWith("3DSLICER") || e.startsWith("SLICER-HUB"),
   /** hub-mirror Four-Up LiveScene stream client (not desktop Image Display). */
   hubMirror: (e) => e === "SLICERLIVE-HUB-MIRROR" || e.startsWith("SLICERLIVE-HUB-MIRROR"),
+  mhub: (e) => e === "MHUB" || e.startsWith("MHUB") || e === "MHUB_AI" || e.startsWith("MHUB_AI") || e === "MHUBAI" || e.startsWith("MHUBAI"),
   lung: (e) => e === "LUNGSCREENING" || e.startsWith("LUNGSCREENING"),
   totalseg: (e) => e === "TOTALSEG" || e.startsWith("TOTALSEG") || e === "TOTAL_SEGMENTATOR" || e.startsWith("TOTAL_SEGMENTATOR") || e === "TOTAL-SEGMENTATOR" || e.startsWith("TOTAL-SEGMENTATOR"),
   neuro: (e) => e === "NEURO_SEG" || e.startsWith("NEURO_SEG") || e === "NEUROSEG" || e.startsWith("NEUROSEG"),
-  reporting: (e) => e === "CAST-RPT" || e.startsWith("CAST-RPT")
+  dental: (e) => e === "DENTAL_SEG" || e.startsWith("DENTAL_SEG") || e === "DENTALSEG" || e.startsWith("DENTALSEG") || e === "DENTALSEGMENTATOR" || e.startsWith("DENTALSEGMENTATOR"),
+  txrv: (e) => e === "TORCHXRAYVISION" || e.startsWith("TORCHXRAYVISION") || e === "TXRV" || e.startsWith("TXRV") || e === "TORCH_XRAY_VISION" || e.startsWith("TORCH_XRAY_VISION") || e === "TORCH-XRAY-VISION" || e.startsWith("TORCH-XRAY-VISION"),
+  flexray: (e) => e === "FLEXRAY" || e.startsWith("FLEXRAY") || e === "FLEX_RAY" || e.startsWith("FLEX_RAY"),
+  reporting: (e) => e === "RPT" || e.startsWith("RPT-") || e === "CAST-RPT" || e.startsWith("CAST-RPT"),
+  classroom: (e) => e === "CLASSROOM" || e.startsWith("CLASSROOM-") || e === "CAST-CLASSROOM" || e.startsWith("CAST-CLASSROOM")
 });
-function mi(e, t) {
-  const n = cn[t];
-  return n ? n(on(e)) : false;
+function ya(e, t) {
+  const n = ar[t];
+  return n ? n(sr(e)) : false;
 }
-function an(e, t, n) {
+function cr(e, t, n) {
   if (!e || typeof e != "object")
     return { online: false, items: [], raw: n, ...t ? { productName: t } : {} };
-  const r = (
+  const i = (
     /** @type {{ items?: unknown }} */
     e
-  ), i = Array.isArray(r.items) ? r.items : [], s = it(i, "job");
+  ), r = Array.isArray(i.items) ? i.items : [], o = Bt(r, "job");
   return {
-    online: st(e),
-    items: i,
-    ...s ? { job: s } : {},
+    online: jt(e),
+    items: r,
+    ...o ? { job: o } : {},
     raw: n,
     ...t ? { productName: t } : {}
   };
 }
-function un(e) {
+function ur(e) {
   if (!e || typeof e != "object")
     return { online: false, items: [], error: "Empty STATUS result" };
   const t = (
@@ -9993,94 +11049,120 @@ function un(e) {
       error: `HTTP ${t.status ?? "?"}`,
       raw: t.data
     };
-  const { responses: n } = be(t.data);
-  for (const r of n) {
-    const i = r.data;
-    if (!i || typeof i != "object")
+  const { responses: n } = Be(t.data);
+  for (const i of n) {
+    const r = i.data;
+    if (!r || typeof r != "object")
       continue;
-    const s = Ie(r) || void 0, o = an(i, s, t.data);
-    if (o.online || Array.isArray(
+    const o = rt(i) || void 0, s = cr(r, o, t.data);
+    if (s.online || Array.isArray(
       /** @type {{ items?: unknown }} */
-      i.items
+      r.items
     ))
-      return o;
+      return s;
   }
   return { online: false, items: [], raw: t.data };
 }
-async function ct(e, t) {
+async function qt(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
-    return { ok: false, status: 0, data: { error: "No Cast client" } };
+    return { ok: false, status: 0, data: { error: "No Hub client" } };
   if (!n)
     return { ok: false, status: 0, data: { error: "No subscriber name" } };
-  const r = String((t == null ? void 0 : t.topic) || "").trim(), i = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), o = String((t == null ? void 0 : t.targetActor) || "*").trim() || "*", a = String((t == null ? void 0 : t.targetProductName) || "").trim();
+  const i = String((t == null ? void 0 : t.topic) || "").trim(), r = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), o = String((t == null ? void 0 : t.subscriberActor) || "").trim(), s = String((t == null ? void 0 : t.targetActor) || "*").trim() || "*", a = String((t == null ? void 0 : t.targetProductName) || "").trim();
   return e.request({
     "subscriber.name": n,
-    ...i ? { "subscriber.product.name": i } : {},
-    ...s ? { "subscriber.actor": s } : {},
-    "target.actor": o,
+    ...r ? { "subscriber.product.name": r } : {},
+    ...o ? { "subscriber.actor": o } : {},
+    "target.actor": s,
     ...a ? { "target.product.name": a } : {},
     event: {
-      "hub.event": he("STATUS"),
-      ...r ? { "hub.topic": r } : {},
+      "hub.event": Ie("STATUS"),
+      ...i ? { "hub.topic": i } : {},
       context: { dataType: "STATUS" }
     }
   });
 }
-async function pi(e, t) {
+async function Sa(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request))
-    return { ok: false, status: 0, data: { error: "No Cast client" } };
+    return { ok: false, status: 0, data: { error: "No Hub client" } };
   if (!n)
     return { ok: false, status: 0, data: { error: "No subscriber name" } };
-  const r = String((t == null ? void 0 : t.topic) || "").trim(), i = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), s = String((t == null ? void 0 : t.subscriberActor) || "").trim(), o = String((t == null ? void 0 : t.targetActor) || "ID").trim() || "ID", a = String((t == null ? void 0 : t.targetProductName) || "").trim();
+  const i = String((t == null ? void 0 : t.topic) || "").trim(), r = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), o = String((t == null ? void 0 : t.subscriberActor) || "").trim(), s = String((t == null ? void 0 : t.targetActor) || "ID").trim() || "ID", a = String((t == null ? void 0 : t.targetProductName) || "").trim();
   return e.request({
     "subscriber.name": n,
-    ...i ? { "subscriber.product.name": i } : {},
-    ...s ? { "subscriber.actor": s } : {},
-    "target.actor": o,
+    ...r ? { "subscriber.product.name": r } : {},
+    ...o ? { "subscriber.actor": o } : {},
+    "target.actor": s,
     ...a ? { "target.product.name": a } : {},
     event: {
-      "hub.event": he("LIVESCENE"),
-      ...r ? { "hub.topic": r } : {},
+      "hub.event": Ie("LIVESCENE"),
+      ...i ? { "hub.topic": i } : {},
       context: { dataType: "LIVESCENE" }
     }
   });
 }
-async function yi(e, t) {
-  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.subscriberName) || "").trim();
+async function Ca(e, t) {
+  const n = String((t == null ? void 0 : t.subscriberName) || "").trim(), i = String((t == null ? void 0 : t.studyInstanceUID) || "").trim();
   if (!(e != null && e.request))
-    return { online: false, items: [], error: "No Cast client" };
-  if (!r)
+    return { ok: false, status: 0, data: { error: "No Hub client" } };
+  if (!n)
+    return { ok: false, status: 0, data: { error: "No subscriber name" } };
+  if (!i)
+    return { ok: false, status: 0, data: { error: "No studyInstanceUID" } };
+  const r = String((t == null ? void 0 : t.topic) || "").trim(), o = String((t == null ? void 0 : t.seriesInstanceUID) || "").trim(), s = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), a = String((t == null ? void 0 : t.subscriberActor) || "").trim(), l = String((t == null ? void 0 : t.targetActor) || "ID").trim() || "ID", h = String((t == null ? void 0 : t.targetProductName) || "").trim();
+  return e.request({
+    "subscriber.name": n,
+    ...s ? { "subscriber.product.name": s } : {},
+    ...a ? { "subscriber.actor": a } : {},
+    "target.actor": l,
+    ...h ? { "target.product.name": h } : {},
+    event: {
+      "hub.event": Ie("DICOM"),
+      ...r ? { "hub.topic": r } : {},
+      context: {
+        dataType: "DICOM",
+        studyInstanceUID: i,
+        ...o ? { seriesInstanceUID: o } : {}
+      }
+    }
+  });
+}
+async function Ea(e, t) {
+  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), i = String((t == null ? void 0 : t.subscriberName) || "").trim();
+  if (!(e != null && e.request))
+    return { online: false, items: [], error: "No Hub client" };
+  if (!i)
     return { online: false, items: [], error: "No subscriber name" };
   if (!n)
     return { online: false, items: [], error: "No target product" };
   try {
-    const i = await ct(e, {
-      subscriberName: r,
+    const r = await qt(e, {
+      subscriberName: i,
       subscriberProductName: t == null ? void 0 : t.subscriberProductName,
       subscriberActor: t == null ? void 0 : t.subscriberActor,
       topic: t == null ? void 0 : t.topic,
       targetProductName: n
     });
-    return un(i);
-  } catch (i) {
+    return ur(r);
+  } catch (r) {
     return {
       online: false,
       items: [],
-      error: i instanceof Error ? i.message : String(i)
+      error: r instanceof Error ? r.message : String(r)
     };
   }
 }
-function gi(e, t) {
+function wa(e, t) {
   if (!e) return false;
-  const n = sn(e);
-  return n && n.id === t.id ? true : t.id === "totalseg" ? Ne(e) : t.id === "lung" ? Ae(e) : t.id === "neuro" ? ve(e) : false;
+  const n = or(e);
+  return n && n.id === t.id ? true : t.id === "mhub" ? nt(e) : t.id === "totalseg" ? Ze(e) : t.id === "lung" ? Ke(e) : t.id === "neuro" ? Qe(e) : t.id === "dental" ? et(e) : t.id === "txrv" ? tt(e) : t.id === "flexray" ? Dt(e) : false;
 }
-function ln(e) {
+function lr(e) {
   if (!e || typeof e != "object")
-    return x.map((r) => ({
-      server: r,
+    return z.map((i) => ({
+      server: i,
       probe: { online: false, items: [], error: "Empty STATUS result" }
     }));
   const t = (
@@ -10088,98 +11170,98 @@ function ln(e) {
     e
   );
   if (t.ok === false) {
-    const r = `HTTP ${t.status ?? "?"}`;
-    return x.map((i) => ({
-      server: i,
-      probe: { online: false, items: [], error: r, raw: t.data }
+    const i = `HTTP ${t.status ?? "?"}`;
+    return z.map((r) => ({
+      server: r,
+      probe: { online: false, items: [], error: i, raw: t.data }
     }));
   }
-  const { responses: n } = be(t.data);
-  return x.map((r) => {
-    for (const i of n) {
-      const s = Ie(i);
-      if (!gi(s, r)) continue;
-      const o = i.data;
+  const { responses: n } = Be(t.data);
+  return z.map((i) => {
+    for (const r of n) {
+      const o = rt(r);
+      if (!wa(o, i)) continue;
+      const s = r.data;
       return {
-        server: r,
-        probe: an(
-          o,
-          s || r.product,
+        server: i,
+        probe: cr(
+          s,
+          o || i.product,
           t.data
         )
       };
     }
     return {
-      server: r,
+      server: i,
       probe: { online: false, items: [], raw: t.data }
     };
   });
 }
-async function Si(e, t) {
+async function Ta(e, t) {
   const n = String((t == null ? void 0 : t.subscriberName) || "").trim();
   if (!(e != null && e.request) || !n)
-    return x.map((r) => ({
-      server: r,
+    return z.map((i) => ({
+      server: i,
       probe: {
         online: false,
         items: [],
-        error: e != null && e.request ? "No subscriber name" : "No Cast client"
+        error: e != null && e.request ? "No subscriber name" : "No Hub client"
       }
     }));
   try {
-    const r = await ct(e, {
+    const i = await qt(e, {
       subscriberName: n,
       subscriberProductName: t == null ? void 0 : t.subscriberProductName,
       subscriberActor: t == null ? void 0 : t.subscriberActor,
       topic: t == null ? void 0 : t.topic,
       targetActor: "*"
     });
-    return ln(r);
-  } catch (r) {
-    const i = r instanceof Error ? r.message : String(r);
-    return x.map((s) => ({
-      server: s,
-      probe: { online: false, items: [], error: i }
+    return lr(i);
+  } catch (i) {
+    const r = i instanceof Error ? i.message : String(i);
+    return z.map((o) => ({
+      server: o,
+      probe: { online: false, items: [], error: r }
     }));
   }
 }
-async function Ci(e, t) {
-  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), r = String((t == null ? void 0 : t.hubEvent) || "").trim(), i = String((t == null ? void 0 : t.subscriberName) || "").trim(), s = String((t == null ? void 0 : t.topic) || "").trim(), o = Array.isArray(t == null ? void 0 : t.files) ? t.files : [];
+async function Na(e, t) {
+  const n = String((t == null ? void 0 : t.targetProductName) || "").trim(), i = String((t == null ? void 0 : t.hubEvent) || "").trim(), r = String((t == null ? void 0 : t.subscriberName) || "").trim(), o = String((t == null ? void 0 : t.topic) || "").trim(), s = Array.isArray(t == null ? void 0 : t.files) ? t.files : [];
   if (!(e != null && e.publish))
-    return { ok: false, detail: "No Cast client" };
-  if (!i)
+    return { ok: false, detail: "No Hub client" };
+  if (!r)
     return { ok: false, detail: "No subscriber name" };
-  if (!s)
-    return { ok: false, detail: "No Cast topic" };
+  if (!o)
+    return { ok: false, detail: "No Hub topic" };
   if (!n)
     return { ok: false, detail: "No target product" };
-  if (!r)
+  if (!i)
     return { ok: false, detail: "No hub.event" };
-  if (!o.length)
+  if (!s.length)
     return { ok: false, detail: "No volume files" };
-  const a = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), d = String((t == null ? void 0 : t.subscriberActor) || "").trim(), f = t != null && t.contextExtras && typeof t.contextExtras == "object" ? t.contextExtras : {};
+  const a = String((t == null ? void 0 : t.subscriberProductName) || "").trim(), l = String((t == null ? void 0 : t.subscriberActor) || "").trim(), h = t != null && t.contextExtras && typeof t.contextExtras == "object" ? t.contextExtras : {};
   try {
     const c = await e.publish({
-      "subscriber.name": i,
+      "subscriber.name": r,
       ...a ? { "subscriber.product.name": a } : {},
-      ...d ? { "subscriber.actor": d } : {},
+      ...l ? { "subscriber.actor": l } : {},
       "target.product.name": n,
       event: {
-        "hub.topic": s,
-        "hub.event": r,
+        "hub.topic": o,
+        "hub.event": i,
         context: {
-          files: o.map((l) => ({
-            url: String(l.url || "").trim(),
-            fileName: String(l.fileName || "volume").trim() || "volume"
+          files: s.map((d) => ({
+            url: String(d.url || "").trim(),
+            fileName: String(d.fileName || "volume").trim() || "volume"
           })),
-          ...f
+          ...h
         }
       }
-    }), b = !!(c && /** @type {{ ok?: boolean }} */
+    }), u = !!(c && /** @type {{ ok?: boolean }} */
     c.ok !== false);
     return {
-      ok: b,
-      detail: b ? "published" : `publish status ${/** @type {{ status?: number }} */
+      ok: u,
+      detail: u ? "published" : `publish status ${/** @type {{ status?: number }} */
       (c == null ? void 0 : c.status) ?? "?"}`,
       response: c
     };
@@ -10190,9 +11272,9 @@ async function Ci(e, t) {
     };
   }
 }
-var wi = 1e4;
-var wt = 5e3;
-var Et = {
+var La = 1e4;
+var ln = 5e3;
+var fn = {
   config: {
     hub: {},
     session: {},
@@ -10209,16 +11291,16 @@ var Et = {
   onMessageCallback: null,
   onConnectionStateChangeCallback: null
 };
-function Ei(e, t) {
-  t.classHierarchy.push("vtkCastClient");
-  function n(c, b) {
-    t.onConnectionStateChangeCallback && t.onConnectionStateChangeCallback(c, b);
-  }
-  function r() {
-    const c = t.session.productName || t.config.productName || Me;
-    return Cn(c);
+function va(e, t) {
+  t.classHierarchy.push("HubClient");
+  function n(c, u) {
+    t.onConnectionStateChangeCallback && t.onConnectionStateChangeCallback(c, u);
   }
   function i() {
+    const c = t.session.productName || t.config.productName || Et;
+    return Hr(c);
+  }
+  function r() {
     const c = t.hub.authorization_endpoint;
     if (typeof c == "string" && c.trim())
       return c.trim();
@@ -10228,34 +11310,34 @@ function Ei(e, t) {
       return "";
     }
   }
-  function s() {
-    console.debug("CastClient: websocket is closed."), t.hub.resubscribeRequested = true, n("disconnected");
+  function o() {
+    console.debug("HubClient: websocket is closed."), t.hub.resubscribeRequested = true, n("disconnected");
   }
-  const o = Jn(() => ({
+  const s = Ci(() => ({
     hubEndpoint: t.hub.hub_endpoint,
     accessToken: t.hub.token
   }));
   function a(c) {
     try {
-      const b = JSON.parse(c);
-      if (b["hub.mode"])
+      const u = JSON.parse(c);
+      if (u["hub.mode"])
         return;
-      const l = b.event;
-      if (!l || l["hub.event"] === "heartbeat" || b.id === t.hub.lastPublishedMessageID)
+      const d = u.event;
+      if (!d || d["hub.event"] === "heartbeat" || u.id === t.hub.lastPublishedMessageID)
         return;
-      t.onMessageCallback && t.onMessageCallback(b);
-    } catch (b) {
-      console.warn("CastClient: websocket processing error:", b);
+      t.onMessageCallback && t.onMessageCallback(u);
+    } catch (u) {
+      console.warn("HubClient: websocket processing error:", u);
     }
   }
-  async function d() {
-    t.hub.resubscribeRequested && t.hub.subscribed && t.config.autoReconnect ? (console.debug("CastClient: Try to resubscribe"), t.hub.resubscribeRequested = false, await e.subscribe() !== 202 && (t.hub.resubscribeRequested = true)) : !t.hub.subscribed && t.hub.resubscribeRequested && (t.hub.resubscribeRequested = false);
+  async function l() {
+    t.hub.resubscribeRequested && t.hub.subscribed && t.config.autoReconnect ? (console.debug("HubClient: Try to resubscribe"), t.hub.resubscribeRequested = false, await e.subscribe() !== 202 && (t.hub.resubscribeRequested = true)) : !t.hub.subscribed && t.hub.resubscribeRequested && (t.hub.resubscribeRequested = false);
   }
   e.onMessage = (c) => {
     t.onMessageCallback = c;
   }, e.onConnectionStateChange = (c) => {
     t.onConnectionStateChangeCallback = c;
-  }, e.delete = gn(() => {
+  }, e.delete = Ur(() => {
     t.reconnectInterval && (clearInterval(t.reconnectInterval), t.reconnectInterval = null), e.unsubscribe();
   }, e.delete), e.getHubConfig = () => {
     const c = t.hub;
@@ -10292,7 +11374,7 @@ function Ei(e, t) {
       lastPublishedMessageID: c.lastPublishedMessageID
     };
   }, e.setTopic = (c) => {
-    console.debug("CastClient: setting topic to", c), t.session.topic = c;
+    console.debug("HubClient: setting topic to", c), t.session.topic = c;
   }, e.setToken = (c) => {
     t.hub.token = c;
   }, e.setSubscriberName = (c) => {
@@ -10300,44 +11382,44 @@ function Ei(e, t) {
   }, e.setUserName = (c) => {
     t.session.userName = c || "";
   }, e.authenticate = async () => {
-    const c = i();
+    const c = r();
     if (!c)
       throw new Error(
-        "CastClient.authenticate: no authorization_endpoint or token_endpoint configured."
+        "HubClient.authenticate: no authorization_endpoint or token_endpoint configured."
       );
     try {
-      const h = new URL(c);
+      const g = new URL(c);
       console.debug(
-        "CastClient: Authorizing at:",
-        `${h.origin}${h.pathname}`
+        "HubClient: Authorizing at:",
+        `${g.origin}${g.pathname}`
       );
     } catch {
-      console.debug("CastClient: Authorizing at hub");
+      console.debug("HubClient: Authorizing at hub");
     }
-    const b = t.session.productName || t.config.productName || "CAST", l = new URLSearchParams();
-    t.hub.lastIdToken ? l.append("id_token", t.hub.lastIdToken) : t.session.userName && l.append("user_name", t.session.userName), l.append("client_product_name", b), t.session.topic && l.append("topic", t.session.topic);
-    let u;
+    const u = t.session.productName || t.config.productName || "UNKNOWN", d = new URLSearchParams();
+    t.hub.lastIdToken ? d.append("id_token", t.hub.lastIdToken) : t.session.userName && d.append("user_name", t.session.userName), d.append("client_product_name", u), t.session.topic && d.append("topic", t.session.topic);
+    let f;
     try {
-      u = await fetch(c, {
+      f = await fetch(c, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: l
+        body: d
       });
-    } catch (h) {
-      const y = h instanceof Error ? h.message : String(h);
-      throw console.error("CastClient: Exception during authenticate:", y), h;
+    } catch (g) {
+      const p = g instanceof Error ? g.message : String(g);
+      throw console.error("HubClient: Exception during authenticate:", p), g;
     }
-    if (u.status !== 200) {
-      const h = await u.text().catch(() => "");
+    if (f.status !== 200) {
+      const g = await f.text().catch(() => "");
       throw console.error(
-        "CastClient: Authenticate failed. Status:",
-        u.status,
-        h
+        "HubClient: Authenticate failed. Status:",
+        f.status,
+        g
       ), new Error(
-        `CastClient.authenticate failed (HTTP ${u.status})`
+        `HubClient.authenticate failed (HTTP ${f.status})`
       );
     }
-    const m = await u.json();
+    const m = await f.json();
     return typeof m.user_name == "string" && m.user_name && (t.session.userName = m.user_name), {
       user_name: m.user_name || "",
       code: m.code || "",
@@ -10346,57 +11428,57 @@ function Ei(e, t) {
   }, e.getToken = async (c) => {
     if (typeof c != "string" || !c)
       return console.error(
-        "CastClient.getToken: code is required (call authenticate() first)."
+        "HubClient.getToken: code is required (call authenticate() first)."
       ), false;
     try {
-      const u = new URL(t.hub.token_endpoint);
+      const f = new URL(t.hub.token_endpoint);
       console.debug(
-        "CastClient: Exchanging code at:",
-        `${u.origin}${u.pathname}`
+        "HubClient: Exchanging code at:",
+        `${f.origin}${f.pathname}`
       );
     } catch {
-      console.debug("CastClient: Exchanging code at hub");
+      console.debug("HubClient: Exchanging code at hub");
     }
-    const b = t.session.productName || t.config.productName || "CAST", l = new URLSearchParams();
-    l.append("grant_type", "authorization_code"), l.append("code", c), l.append("client_id", t.hub.client_id || ""), l.append("client_secret", t.hub.client_secret || ""), l.append("client_product_name", b);
+    const u = t.session.productName || t.config.productName || "UNKNOWN", d = new URLSearchParams();
+    d.append("grant_type", "authorization_code"), d.append("code", c), d.append("client_id", t.hub.client_id || ""), d.append("client_secret", t.hub.client_secret || ""), d.append("client_product_name", u);
     try {
-      const u = await fetch(t.hub.token_endpoint, {
+      const f = await fetch(t.hub.token_endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: l
+        body: d
       });
-      if (u.status === 200) {
-        const m = await u.json();
+      if (f.status === 200) {
+        const m = await f.json();
         return typeof m.access_token == "string" && m.access_token && (t.hub.token = m.access_token), typeof m.id_token == "string" && m.id_token && (t.hub.lastIdToken = m.id_token), m.topic && typeof m.topic == "string" && (t.config.preserveSessionTopicFromToken || e.setTopic(m.topic), t.config.autoStart && e.subscribe()), !!t.hub.token;
       }
-      return await u.text(), console.error(
-        "CastClient: Error getting token. Status:",
-        u.status
+      return await f.text(), console.error(
+        "HubClient: Error getting token. Status:",
+        f.status
       ), false;
-    } catch (u) {
-      const m = u instanceof Error ? u.message : String(u);
-      return console.error("CastClient: Exception getting token:", m), false;
+    } catch (f) {
+      const m = f instanceof Error ? f.message : String(f);
+      return console.error("HubClient: Exception getting token:", m), false;
     }
   }, e.subscribe = async (c = false) => {
-    const b = t.session.topic && t.session.topic.trim();
-    if (!b)
+    const u = t.session.topic && t.session.topic.trim();
+    if (!u)
       return console.warn(
-        "CastClient: Error. subscription not sent. No topic defined."
+        "HubClient: Error. subscription not sent. No topic defined."
       ), "error: topic not defined";
-    if ((!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = je(
-      t.session.productName || t.config.productName || "CAST"
+    if ((!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = wt(
+      t.session.productName || t.config.productName || "UNKNOWN"
     )), !t.hub.token)
       return console.warn(
-        "CastClient: Error. subscription not sent. No token available."
+        "HubClient: Error. subscription not sent. No token available."
       ), "error: no token";
-    const l = bt(t.config.callbackUrl), u = ht(
+    const d = tn(t.config.callbackUrl), f = nn(
       "subscribe",
       {
         ...t.session,
-        topic: b,
+        topic: u,
         subscriberName: t.session.subscriberName
       },
-      l,
+      d,
       t.config.productVersion
     ), m = {
       method: "POST",
@@ -10404,99 +11486,99 @@ function Ei(e, t) {
         "Content-Type": "application/x-www-form-urlencoded",
         Authorization: `Bearer ${t.hub.token}`
       },
-      body: u,
-      signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(wt) : void 0
+      body: f,
+      signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(ln) : void 0
     };
     try {
       n("connecting");
-      const h = await fetch(t.hub.hub_endpoint, m);
-      if (h.status === 202) {
+      const g = await fetch(t.hub.hub_endpoint, m);
+      if (g.status === 202) {
         t.hub.resubscribeRequested = false;
-        let y;
+        let p;
         try {
-          y = await h.json();
+          p = await g.json();
         } catch (w) {
           t.hub.subscribed = false;
-          const I = w instanceof Error ? w.message : String(w);
+          const N = w instanceof Error ? w.message : String(w);
           return console.error(
-            "CastClient: Subscribe 202 body was not valid JSON:",
-            I
+            "HubClient: Subscribe 202 body was not valid JSON:",
+            N
           ), n("error"), 0;
         }
-        const S = y["hub.channel.endpoint"];
+        const S = p["hub.channel.endpoint"];
         if (!S || typeof S != "string")
           return t.hub.subscribed = false, console.error(
-            "CastClient: Subscribe 202 missing hub.channel.endpoint"
+            "HubClient: Subscribe 202 missing hub.channel.endpoint"
           ), n("error"), 0;
-        let g = S;
+        let A = S;
         try {
-          const w = new URL(t.hub.hub_endpoint), I = new URL(S), U = w.protocol === "https:" ? "wss:" : "ws:";
-          g = S.replace(
-            I.origin,
-            `${U}//${w.host}`
+          const w = new URL(t.hub.hub_endpoint), N = new URL(S), E = w.protocol === "https:" ? "wss:" : "ws:";
+          A = S.replace(
+            N.origin,
+            `${E}//${w.host}`
           );
         } catch {
         }
         if (t.hub.websocket) {
           try {
-            t.hub.websocket.removeEventListener("close", s), t.hub.websocket.close();
+            t.hub.websocket.removeEventListener("close", o), t.hub.websocket.close();
           } catch {
           }
           t.hub.websocket = null;
         }
-        let E;
+        let U;
         try {
-          E = new WebSocket(g);
+          U = new WebSocket(A);
         } catch (w) {
           t.hub.subscribed = false;
-          const I = w instanceof Error ? w.message : String(w);
+          const N = w instanceof Error ? w.message : String(w);
           return console.error(
-            "CastClient: Failed to open WebSocket after subscribe:",
-            I
+            "HubClient: Failed to open WebSocket after subscribe:",
+            N
           ), n("error"), 0;
         }
-        return t.hub.subscribed = true, t.hub.websocket = E, t.hub.websocket.onopen = function() {
+        return t.hub.subscribed = true, t.hub.websocket = U, t.hub.websocket.onopen = function() {
           this.send(
             JSON.stringify({
-              "hub.channel.endpoint": g
+              "hub.channel.endpoint": A
             })
           ), n("connected");
         }, t.hub.websocket.addEventListener("message", (w) => {
           typeof w.data == "string" && a(w.data);
-        }), t.hub.websocket.addEventListener("close", s), t.hub.websocket.onerror = function() {
-          console.warn("CastClient: Error reported on websocket"), n("error");
-        }, h.status;
+        }), t.hub.websocket.addEventListener("close", o), t.hub.websocket.onerror = function() {
+          console.warn("HubClient: Error reported on websocket"), n("error");
+        }, g.status;
       }
-      if (h.status === 401) {
+      if (g.status === 401) {
         if (console.warn(
-          "CastClient: Subscription response 401 - Token refresh needed."
+          "HubClient: Subscription response 401 - Token refresh needed."
         ), c)
-          return h.status;
+          return g.status;
         try {
-          const { code: y } = await e.authenticate();
-          if (y && await e.getToken(y))
+          const { code: p } = await e.authenticate();
+          if (p && await e.getToken(p))
             return await e.subscribe(true);
-        } catch (y) {
-          const S = y instanceof Error ? y.message : String(y);
+        } catch (p) {
+          const S = p instanceof Error ? p.message : String(p);
           console.error(
-            "CastClient: Token refresh after 401 failed:",
+            "HubClient: Token refresh after 401 failed:",
             S
           );
         }
       } else
         console.error(
-          "CastClient: Subscription rejected by hub. Status:",
-          h.status
+          "HubClient: Subscription rejected by hub. Status:",
+          g.status
         );
-      return h.status;
-    } catch (h) {
+      return g.status;
+    } catch (g) {
       t.hub.subscribed = false;
-      const y = h instanceof Error ? h.message : String(h);
-      return console.error("CastClient: Exception subscribing to the hub:", y), 0;
+      const p = g instanceof Error ? g.message : String(g);
+      return console.error("HubClient: Exception subscribing to the hub:", p), 0;
     }
   }, e.unsubscribe = async () => {
     t.hub.subscribed = false, t.hub.resubscribeRequested = false;
-    const c = bt(t.config.callbackUrl), b = ht(
+    const c = tn(t.config.callbackUrl), u = nn(
       "unsubscribe",
       t.session,
       c,
@@ -10509,333 +11591,392 @@ function Ei(e, t) {
           "Content-Type": "application/x-www-form-urlencoded",
           Authorization: `Bearer ${t.hub.token}`
         },
-        body: b,
-        signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(wt) : void 0
+        body: u,
+        signal: typeof AbortSignal < "u" && AbortSignal.timeout ? AbortSignal.timeout(ln) : void 0
       })).status === 202 && console.debug(
-        "CastClient: Unsubscribe successfully from hub",
+        "HubClient: Unsubscribe successfully from hub",
         t.hub.name
       );
-    } catch (l) {
-      const u = l instanceof Error ? l.message : String(l);
-      console.warn("CastClient: Error unsubscribing from the hub.", u);
+    } catch (d) {
+      const f = d instanceof Error ? d.message : String(d);
+      console.warn("HubClient: Error unsubscribing from the hub.", f);
     }
     t.hub.websocket && (t.hub.websocket.close(), t.hub.websocket = null), n("disconnected");
   };
-  function f(c, b = t.hub) {
-    const l = { ...c, timestamp: (/* @__PURE__ */ new Date()).toJSON() };
-    l.id = ce(r()), b.lastPublishedMessageID = l.id;
-    const u = t.session.subscriberName && t.session.subscriberName.trim(), m = t.session.productName && t.session.productName.trim();
-    if (u && l["subscriber.name"] === void 0 && (l["subscriber.name"] = u), m && l["subscriber.product.name"] === void 0 && (l["subscriber.product.name"] = m), l.event && !l.event["hub.topic"] && (l.event["hub.topic"] = t.session.topic), l["target.actor"] === void 0 && t.session.defaultTargetActor && !String(
-      l["target.subscriber.name"] || ""
+  function h(c, u = t.hub) {
+    const d = { ...c, timestamp: (/* @__PURE__ */ new Date()).toJSON() };
+    d.id = Re(i()), u.lastPublishedMessageID = d.id;
+    const f = t.session.subscriberName && t.session.subscriberName.trim(), m = t.session.productName && t.session.productName.trim();
+    if (f && d["subscriber.name"] === void 0 && (d["subscriber.name"] = f), m && d["subscriber.product.name"] === void 0 && (d["subscriber.product.name"] = m), d.event && !d.event["hub.topic"] && (d.event["hub.topic"] = t.session.topic), d["target.actor"] === void 0 && t.session.defaultTargetActor && !String(
+      d["target.subscriber.name"] || ""
     ).trim()) {
-      const y = ae(
+      const p = Oe(
         t.session.defaultTargetActor
       );
-      y && (l["target.actor"] = y);
+      p && (d["target.actor"] = p);
     }
-    return l;
+    return d;
   }
-  e.fetchPayload = (c) => o.fetchPayload(c), e.fetchAllPayloads = (c) => o.fetchAllPayloads(c), e.hasPendingPayload = (c) => o.hasPendingPayload(c), e.publishMultipart = async (c, b, l = t.hub) => {
-    let u = f(c, l);
-    const m = await fe(b);
-    u = Le(u);
-    let h = await dt(u);
-    if (!h.length) {
-      const S = (u.event && typeof u.event["hub.event"] == "string" ? u.event["hub.event"] : "") === "dicom-send" ? "dicom-send.dcm" : "nifti-send.nii.gz";
-      u.event.context = {
+  e.fetchPayload = (c) => s.fetchPayload(c), e.fetchAllPayloads = (c) => s.fetchAllPayloads(c), e.hasPendingPayload = (c) => s.hasPendingPayload(c), e.publishMultipart = async (c, u, d = t.hub) => {
+    let f = h(c, d);
+    const m = await Fe(u);
+    f = ct(f);
+    let g = await en(f);
+    if (!g.length) {
+      const S = (f.event && typeof f.event["hub.event"] == "string" ? f.event["hub.event"] : "") === "dicom-send" ? "dicom-send.dcm" : "nifti-send.nii.gz";
+      f.event.context = {
         files: [
           {
             data: m,
-            fileName: Tn(u, S),
+            fileName: Rr(f, S),
             mimeType: "application/octet-stream",
             byteLength: m.byteLength
           }
         ]
-      }, h = [m];
+      }, g = [m];
     }
-    return e.publishBinaryBatch(u, h, l);
-  }, e.publishBinaryBatch = async (c, b, l = t.hub) => {
-    const u = Le(
-      f(c, l)
+    return e.publishBinaryBatch(f, g, d);
+  }, e.publishBinaryBatch = async (c, u, d = t.hub) => {
+    const f = ct(
+      h(c, d)
     );
-    return _n({
-      msg: u,
-      fileBytesList: b,
-      hub: l,
-      messageIdPrefix: r
+    return Br({
+      msg: f,
+      fileBytesList: u,
+      hub: d,
+      messageIdPrefix: i
     });
-  }, e.publish = async (c, b = t.hub) => {
-    let l = f(c, b);
-    if (l = Le(l), An(l)) {
-      const u = await dt(l);
-      if (u.length)
-        return e.publishBinaryBatch(l, u, b);
+  }, e.publish = async (c, u = t.hub) => {
+    let d = h(c, u);
+    if (d = ct(d), Mr(d)) {
+      const f = await en(d);
+      if (f.length)
+        return e.publishBinaryBatch(d, f, u);
     }
     try {
-      return await fetch(b.hub_endpoint, {
+      return await fetch(u.hub_endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${b.token}`
+          Authorization: `Bearer ${u.token}`
         },
-        body: JSON.stringify(l)
+        body: JSON.stringify(d)
       });
-    } catch (u) {
-      const m = u instanceof Error ? u.message : String(u);
-      return console.debug("CastClient:", m), null;
+    } catch (f) {
+      const m = f instanceof Error ? f.message : String(f);
+      return console.debug("HubClient:", m), null;
     }
-  }, e.publishNiftiMultipart = async (c, b, l) => e.publishBinaryBatch(c, [b], l), e.request = async (c = {}) => {
-    const b = String(c["subscriber.name"] || "").trim();
-    if (!b)
-      throw new Error('CastClient.request: "subscriber.name" is required.');
-    const l = t.hub, u = l.token && l.token.trim();
+  }, e.publishNiftiMultipart = async (c, u, d) => e.publishBinaryBatch(c, [u], d), e.request = async (c = {}) => {
+    const u = String(c["subscriber.name"] || "").trim();
     if (!u)
+      throw new Error('HubClient.request: "subscriber.name" is required.');
+    const d = t.hub, f = d.token && d.token.trim();
+    if (!f)
       throw new Error(
-        "CastClient.request: token is required (call authenticate() then getToken(code) first)."
+        "HubClient.request: token is required (call authenticate() then getToken(code) first)."
       );
-    const m = `${(l.hub_endpoint || "").replace(
-      /\/+$/,
-      ""
-    )}/request`, h = {
-      "subscriber.name": b,
-      id: c.id && String(c.id).trim() || ce(r()),
+    const m = (d.hub_endpoint || "").replace(/\/+$/, ""), g = {
+      "subscriber.name": u,
+      id: c.id && String(c.id).trim() || Re(i()),
       timestamp: c.timestamp && String(c.timestamp).trim() || (/* @__PURE__ */ new Date()).toJSON()
     };
     if (c.event && typeof c.event == "object") {
-      h.event = { ...c.event };
-      const O = t.session.topic && String(t.session.topic).trim();
-      O && !h.event["hub.topic"] && (h.event["hub.topic"] = O);
+      g.event = { ...c.event };
+      const H = t.session.topic && String(t.session.topic).trim();
+      H && !g.event["hub.topic"] && (g.event["hub.topic"] = H);
     } else
       throw new Error(
-        'CastClient.request: "event" with hub.event is required.'
+        'HubClient.request: "event" with hub.event is required.'
       );
-    const y = h.event["hub.event"];
-    if (!y || !String(y).trim())
+    const p = g.event["hub.event"];
+    if (!p || !String(p).trim())
       throw new Error(
-        'CastClient.request: event["hub.event"] must be a *-request event name.'
+        'HubClient.request: event["hub.event"] must be a *-request event name.'
       );
-    c["subscriber.actor"] && String(c["subscriber.actor"]).trim() && (h["subscriber.actor"] = String(c["subscriber.actor"]).trim());
+    c["subscriber.actor"] && String(c["subscriber.actor"]).trim() && (g["subscriber.actor"] = String(c["subscriber.actor"]).trim());
     const S = Object.prototype.hasOwnProperty.call(
       c,
       "target.actor"
     );
-    let g = S ? ae(c["target.actor"]) : void 0;
-    g === void 0 && !S && t.session.defaultTargetActor && (g = ae(t.session.defaultTargetActor)), g !== void 0 && (h["target.actor"] = g);
-    const E = c["target.product.name"] !== void 0 ? c["target.product.name"] : c.targetProductName, w = Rt(E);
-    w !== void 0 && (h["target.product.name"] = w);
-    const I = await fetch(m, {
+    let A = S ? Oe(c["target.actor"]) : void 0;
+    A === void 0 && !S && t.session.defaultTargetActor && (A = Oe(t.session.defaultTargetActor)), A !== void 0 && (g["target.actor"] = A);
+    const U = c["target.product.name"] !== void 0 ? c["target.product.name"] : c.targetProductName, w = Nn(U);
+    w !== void 0 && (g["target.product.name"] = w);
+    const N = await fetch(m, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${u}`
+        Authorization: `Bearer ${f}`
       },
-      body: JSON.stringify(h)
+      body: JSON.stringify(g)
     });
-    let U;
-    if ((I.headers.get("content-type") || "").includes("application/json"))
+    let E;
+    if ((N.headers.get("content-type") || "").includes("application/json"))
       try {
-        U = await I.json();
+        E = await N.json();
       } catch {
-        U = "";
+        E = "";
       }
     else
-      U = await I.text();
-    return { ok: I.ok, status: I.status, data: U };
-  }, e.sendCastRequestResponse = (c, b, l, u) => {
+      E = await N.text();
+    return { ok: N.ok, status: N.status, data: E };
+  }, e.sendCastRequestResponse = (c, u, d, f) => {
     if (!t.hub.websocket || typeof WebSocket > "u" || t.hub.websocket.readyState !== WebSocket.OPEN)
       return;
     let m = "";
-    if (typeof b == "string" ? m = b.trim() : b != null && (m = String(b).trim()), !m) {
+    if (typeof u == "string" ? m = u.trim() : u != null && (m = String(u).trim()), !m) {
       console.error(
-        "CastClient.sendCastRequestResponse requires a non-empty dataType."
+        "HubClient.sendCastRequestResponse requires a non-empty dataType."
       );
       return;
     }
-    const h = Lt(m), y = {
+    const g = pn(m), p = {
       timestamp: (/* @__PURE__ */ new Date()).toJSON(),
-      id: ce(r()),
+      id: Re(i()),
       "subscriber.name": t.session.subscriberName || void 0,
       "subscriber.product.name": t.session.productName || void 0,
       event: {
-        "hub.topic": u || t.session.topic,
-        "hub.event": h,
+        "hub.topic": f || t.session.topic,
+        "hub.event": g,
         context: {
           id: c,
           dataType: m,
-          data: l
+          data: d
         }
       }
     };
-    Array.isArray(t.session.actors) && t.session.actors.length > 0 && (y.actor = t.session.actors[0]), t.hub.websocket.send(JSON.stringify(y));
+    Array.isArray(t.session.actors) && t.session.actors.length > 0 && (p.actor = t.session.actors[0]), t.hub.websocket.send(JSON.stringify(p));
   }, t.config.autoReconnect && (t.reconnectInterval = setInterval(
-    d,
-    wi
+    l,
+    La
   ));
 }
-function fn(e, t, n = {}) {
-  Object.assign(t, Et, n), t.config = { ...Et.config, ...n }, t.session = {
-    ...Fn(),
+function fr(e, t, n = {}) {
+  Object.assign(t, fn, n), t.config = { ...fn.config, ...n }, t.session = {
+    ...fi(),
     ...t.config.session || {}
-  }, (!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = je(
-    t.session.productName || t.config.productName || "CAST"
+  }, (!t.session.subscriberName || !String(t.session.subscriberName).trim()) && (t.session.subscriberName = wt(
+    t.session.productName || t.config.productName || "UNKNOWN"
   )), t.hub = {
-    ...Dn(),
+    ...li(),
     ...t.config.hub || {},
-    ...Mn()
-  }, pn(e, t), yn(e, t, ["config"]), Ei(e, t);
+    ...di()
+  }, Ar(e, t), Ir(e, t, ["config"]), va(e, t);
 }
-var Ti = Sn(fn, "vtkCastClient");
-var Ni = {
-  newInstance: Ti,
-  extend: fn,
-  applyCastPublishEnvelopeFields: Or,
-  batchContextFiles: Yt,
-  BINARY_PLACEHOLDER: ue,
-  buildDicomwebImagingStudyOpenContext: ar,
-  buildDicomUrlImagingStudyOpenContext: cr,
-  buildFilesImagingStudyOpenContext: Wt,
-  buildIdcImagingStudyOpenContext: lr,
-  buildLocalDicomImagingStudyOpenContext: ur,
-  buildNiftiUrlImagingStudyOpenContext: fr,
-  castMessageHasPendingFilePayloads: en,
-  buildCastConferenceView: Ye,
-  CAST_CONFERENCE_EXIT_ACK_MS: Pt,
-  CAST_CONFERENCE_POLL_MS: Qn,
-  CAST_CONFERENCE_POPUP_SIZE: Xn,
-  CAST_CONFERENCE_TITLE_PRESETS: Bt,
-  CAST_DEFAULT_SUBSCRIBER_ACTOR: Te,
-  createCastConferenceDialog: tr,
-  CAST_IMAGE_DISPLAY_ACTOR: Re,
-  createCastConferenceInviteController: rr,
-  createCastConferenceInviteDialog: qt,
-  parseConferenceInviteFromMessage: jt,
-  shouldShowConferenceInvite: nr,
-  CAST_DICOMWEB_ROOT: Qe,
-  CAST_ENVELOPE_ANY: R,
-  CAST_IDENTIFIER_DICOM_UID: ie,
-  CAST_IDENTIFIER_IDC: Ce,
-  CAST_IDENTIFIER_IDC_SOURCE_BUCKET: we,
-  CAST_IDENTIFIER_NIFTI_FILENAME: Ze,
-  CAST_IDENTIFIER_NIFTI_URL: Xe,
-  CAST_IDENTIFIER_OHIF_MODE: pe,
-  CAST_IDENTIFIER_VOLVIEW_SAMPLE_ID: me,
-  CAST_IDENTIFIER_WORKLIST_SAMPLE_ID: H,
-  CAST_IMAGING_STUDY_OPEN_PROFILE: re,
-  CAST_OPEN_MODE: G,
-  CAST_OPEN_MODE_DICOMWEB: X,
-  CAST_OPEN_MODE_DICOM_URL: ye,
-  CAST_OPEN_MODE_FILES: j,
-  CAST_OPEN_MODE_IDC: ge,
-  CAST_OPEN_MODE_LOCAL_DICOM: Se,
-  CAST_RADIO_ICON_CLASS: _t,
-  CAST_RADIO_ICON_SVG: kt,
-  CAST_RADIO_SLASH_CLASS: $t,
-  CAST_RADIO_STATUS_ICON_CLASS: Ut,
-  castRadioStatusMarkup: Pn,
-  castRadioStatusVisual: Bn,
-  collatedResponsesFromRequestResult: kn,
-  conferenceHostTopic: ne,
-  countEventContextObjects: nt,
-  createCastConference: Ft,
-  dataTypeFromEventName: xn,
-  decodeBase64ToArrayBuffer: Kt,
-  DEFAULT_CAST_PUBLISH_ENVELOPE_FIELDS: Rr,
-  deleteCastConference: Ke,
-  ensureCastSubscribeEvents: On,
-  extractDicomSeriesUid: D,
-  extractDicomStudyUid: F,
-  extractDicomwebRoot: xe,
-  extractFilePayloadsForEvent: Ir,
-  extractIdcSeriesUid: Oe,
-  extractIdcSourceBucket: Pe,
-  extractIdentifierValue: k,
-  extractImagingStudyFiles: q,
-  extractNiftiDownloadUrl: Z,
-  extractNiftiFilename: et,
-  extractOhifMode: zt,
-  extractOpenMode: Gt,
-  extractStudyContextItem: z,
-  extractStudyUIDFromResource: br,
-  extractVolviewSampleId: Ht,
-  fetchCastConferences: Y,
-  fetchCastConferenceTopics: Dt,
-  filePayloadToArrayBuffer: Zt,
-  filePayloadToFile: Lr,
-  findActiveCastConference: K,
-  generateSubscriberName: je,
-  getActorKeyword: Jt,
-  getHubEventLower: se,
-  getInboundTargetActorKeyword: hr,
-  httpUrlFromHubEndpoint: te,
-  isCastConferenceHost: We,
-  isCastConferenceParticipant: Je,
-  isHubEndpointInCloud: It,
-  isRequestEvent: $n,
-  isResponseEvent: Rn,
-  isRunningInCloud: vt,
-  isStatusPayloadOnline: st,
-  isStatusRequestDataType: jr,
-  isTotalSegmentatorProduct: Ne,
-  isLungScreeningProduct: Ae,
-  isNeuroSegProduct: ve,
-  isInferenceProduct: Br,
-  lungScreeningAvailableFromStatusResponses: Fr,
-  neuroSegAvailableFromStatusResponses: Mr,
-  normalizeProductToken: Fe,
-  CAST_INFERENCE_SERVERS: x,
-  findInferenceServerByProduct: sn,
-  inferenceServerInfoText: hi,
-  renderInferenceServerInfoCardHtml: bi,
-  CAST_PRODUCT_MATCHERS: cn,
-  matchesCastProduct: mi,
-  normalizeCastProductName: on,
-  parseProductStatusProbe: un,
-  publishCastUrlSend: Ci,
-  requestCastLiveScene: pi,
-  requestCastProductStatus: yi,
-  requestCastStatus: ct,
-  mapInferenceServersFromStatusResult: ln,
-  probeCastInferenceServers: Si,
-  cloneContextArray: mr,
-  messageEventContext: pr,
-  messageSubscriberName: yr,
-  messageProductName: gr,
-  messageActor: Sr,
-  parseStatusUpdateMessage: Cr,
-  normalizeConferenceParticipants: Ve,
-  normalizeDataType: He,
-  normalizeImagingStudyContext: tt,
-  normalizeOptionalEnvelopeField: Q,
-  normalizeStudyUID: Be,
-  openCastHubPopup: Zn,
-  parseCollatedRequestResult: be,
-  productNameFromStatusResponseItem: Ie,
-  REQUEST_SUFFIX: W,
-  requestEventFor: he,
-  resolveCastConferenceClientUrl: Yn,
-  resolveCastConferenceState: er,
-  resolveCastConferenceView: Mt,
-  resolveCastFileMessage: Pr,
-  resolveCastHubAdminUrl: Kn,
-  resolveCastPublishEnvelopeFields: xr,
-  resolveImagingStudyOpenPlan: dr,
-  resolveTargetActorForWire: ae,
-  resolveTargetProductNameForWire: Rt,
-  responseEventFor: Lt,
-  RESPONSE_SUFFIX: J,
-  sanitizeCastMessageForDisplay: $r,
-  selectFirstMatchingHubKey: Un,
-  statusItemValue: it,
-  stringifyForLog: De,
-  summarizeInboundCastMessage: Ur,
-  summarizeOutboundCastPublish: kr,
-  TOTAL_SEGMENTATOR_PRODUCT_ALIASES: tn,
-  LUNG_SCREENING_PRODUCT_ALIASES: nn,
-  NEURO_SEG_PRODUCT_ALIASES: rn,
-  totalSegmentatorAvailableFromStatusResponses: Dr
+var Aa = xr(fr, "HubClient");
+var Ia = {
+  newInstance: Aa,
+  extend: fr,
+  applyCastPublishEnvelopeFields: To,
+  batchContextFiles: Xn,
+  BINARY_PLACEHOLDER: Me,
+  buildDicomwebImagingStudyOpenContext: Ji,
+  buildDicomUrlImagingStudyOpenContext: Xi,
+  buildFilesImagingStudyOpenContext: zn,
+  buildIdcImagingStudyOpenContext: Zi,
+  buildLocalDicomImagingStudyOpenContext: Yi,
+  buildNiftiUrlImagingStudyOpenContext: Ki,
+  castMessageHasPendingFilePayloads: Kn,
+  buildCastConferenceView: xt,
+  castConferenceSelfStatusLabel: $t,
+  castConferencePlaceStatusLabel: _n,
+  castConferenceLeaderPlace: Ht,
+  castConferenceParticipantRowStatus: Rn,
+  resolveHubConferenceHeaderActions: Mn,
+  applyCastConferenceHeaderActions: Pi,
+  renderCastConferencePresence: Ri,
+  openHubConferenceParticipantsPopup: Mi,
+  closeCastConferenceParticipantsPopup: W,
+  isHubConferenceParticipantsPopupOpen: Oi,
+  HUB_CONFERENCE_EXIT_ACK_MS: An,
+  HUB_CONFERENCE_POLL_MS: Hi,
+  HUB_CONFERENCE_POPUP_SIZE: Ti,
+  HUB_REPORTING_WINDOW_NAME: Ni,
+  HUB_CLASSROOM_WINDOW_NAME: Li,
+  HUB_WORKLIST_WINDOW_NAME: vi,
+  clearHubDialogNearAnchor: kt,
+  placeHubDialogNearAnchor: Pn,
+  HUB_CONFERENCE_TITLE_PRESETS: In,
+  HUB_CONFERENCE_STRINGS_EN: bt,
+  HUB_DEFAULT_SUBSCRIBER_ACTOR: Ye,
+  createHubConferenceDialog: Di,
+  confirmHubConferenceTakeover: qi,
+  HUB_IMAGE_DISPLAY_ACTOR: ht,
+  createHubConferenceInviteController: ji,
+  createHubConferenceInviteDialog: Dn,
+  interpolateCastConferenceString: ye,
+  mergeCastConferenceStrings: ee,
+  parseConferenceInviteFromMessage: Fn,
+  shouldShowConferenceInvite: Bi,
+  showHubInfoToast: Wi,
+  HUB_DICOMWEB_ROOT: Ot,
+  HUB_ENVELOPE_ANY: Q,
+  HUB_IDENTIFIER_DICOM_UID: $e,
+  HUB_IDENTIFIER_IDC: Ge,
+  HUB_IDENTIFIER_IDC_SOURCE_BUCKET: Xe,
+  HUB_IDENTIFIER_NIFTI_FILENAME: Rt,
+  HUB_IDENTIFIER_NIFTI_URL: _t,
+  HUB_IDENTIFIER_OHIF_MODE: qe,
+  HUB_IDENTIFIER_VOLVIEW_SAMPLE_ID: je,
+  HUB_IDENTIFIER_WORKLIST_SAMPLE_ID: fe,
+  HUB_IMAGING_STUDY_OPEN_PROFILE: He,
+  HUB_OPEN_MODE: de,
+  HUB_OPEN_MODE_DICOMWEB: Te,
+  HUB_OPEN_MODE_DICOM_URL: We,
+  HUB_OPEN_MODE_FILES: ce,
+  HUB_OPEN_MODE_IDC: ze,
+  HUB_OPEN_MODE_LOCAL_DICOM: Ve,
+  HUB_CONFERENCE_ICON_CLASS: Tn,
+  HUB_CONFERENCE_ICON_SVG: ai,
+  HUB_RADIO_ICON_CLASS: Sn,
+  HUB_RADIO_ICON_SVG: Cn,
+  HUB_RADIO_SLASH_CLASS: wn,
+  HUB_RADIO_STATUS_ICON_CLASS: En,
+  castRadioStatusMarkup: ci,
+  castRadioStatusVisual: ui,
+  collatedResponsesFromRequestResult: jr,
+  conferenceHostTopic: X,
+  conferenceSceneLeaderTopic: vt,
+  countEventContextObjects: Ft,
+  createHubConference: Hn,
+  joinHubConference: $n,
+  dataTypeFromEventName: oi,
+  decodeBase64ToArrayBuffer: Gn,
+  DEFAULT_CAST_PUBLISH_ENVELOPE_FIELDS: Eo,
+  deleteHubConference: Ut,
+  DICOMSR_UPDATE: ei,
+  DICOM_SEND: Jr,
+  ensureCastSubscribeEvents: si,
+  ensureHubSubscribeEvents: yn,
+  extractDicomSeriesUid: oe,
+  extractDicomStudyUid: se,
+  extractDicomwebRoot: mt,
+  extractFilePayloadsForEvent: mo,
+  extractIdcSeriesUid: gt,
+  extractIdcSourceBucket: pt,
+  extractIdentifierValue: j,
+  extractImagingStudyFiles: ue,
+  extractNiftiDownloadUrl: Ne,
+  extractNiftiFilename: Mt,
+  extractOhifMode: Bn,
+  extractOpenMode: qn,
+  extractStudyContextItem: le,
+  extractStudyUIDFromResource: eo,
+  extractVolviewSampleId: jn,
+  fetchHubConferences: we,
+  fetchHubConferenceTopics: xn,
+  filePayloadToArrayBuffer: Yn,
+  filePayloadToFile: go,
+  findActiveHubConference: Ee,
+  generateSubscriberName: wt,
+  getActorKeyword: Vn,
+  getHubEventLower: ke,
+  getInboundTargetActorKeyword: to,
+  HEARTBEAT: ni,
+  httpUrlFromHubEndpoint: Ue,
+  IDC_CLAUDE_SEND: Kr,
+  IMAGINGSTUDY_CLOSE: zr,
+  IMAGINGSTUDY_OPEN: Wr,
+  NIFTI_SEND: Yr,
+  PNG_SEND: Zr,
+  SCENE_UPDATE: Vr,
+  STATUS_UPDATE: dt,
+  SUBSCRIPTION_REMOVED: ti,
+  ANNOTATION_DELETE: Xr,
+  ANNOTATION_UPDATE: Gr,
+  CONFERENCE_CHAT: Qr,
+  isHubConferenceHost: At,
+  isHubConferenceParticipant: It,
+  isHubConferenceSceneLeader: Un,
+  isHubEndpointInCloud: gn,
+  isCastBinaryEvent: $r,
+  isHubBinaryEvent: ve,
+  isRequestEvent: ri,
+  isResponseEvent: ii,
+  isRunningInCloud: mn,
+  isStatusPayloadOnline: jt,
+  isStatusRequestDataType: ko,
+  isTotalSegmentatorProduct: Ze,
+  isLungScreeningProduct: Ke,
+  isNeuroSegProduct: Qe,
+  isDentalSegProduct: et,
+  isTorchXrayVisionProduct: tt,
+  isFlexrayProduct: Dt,
+  isMhubProduct: nt,
+  isInferenceProduct: vo,
+  lungScreeningAvailableFromStatusResponses: Io,
+  neuroSegAvailableFromStatusResponses: Uo,
+  dentalSegAvailableFromStatusResponses: xo,
+  torchXrayVisionAvailableFromStatusResponses: Ho,
+  mhubAvailableFromStatusResponses: $o,
+  normalizeProductToken: Ct,
+  HUB_INFERENCE_SERVERS: z,
+  LOCAL_AI_SERVERS: fa,
+  buildInferenceRunContextExtras: pa,
+  findInferenceServerByProduct: or,
+  inferenceProbeAvailabilityLabel: ma,
+  inferenceServerInfoText: ha,
+  isLocalCapableInferenceServer: da,
+  orderInferenceServerProbeRows: ga,
+  renderInferenceServerInfoCardHtml: ba,
+  HUB_PRODUCT_MATCHERS: ar,
+  matchesHubProduct: ya,
+  normalizeHubProductName: sr,
+  parseProductStatusProbe: ur,
+  publishCastUrlSend: Na,
+  requestHubDicom: Ca,
+  requestHubLiveScene: Sa,
+  requestHubProductStatus: Ea,
+  requestHubStatus: qt,
+  mapInferenceServersFromStatusResult: lr,
+  probeCastInferenceServers: Ta,
+  cloneContextArray: no,
+  messageEventContext: ro,
+  messageSubscriberName: io,
+  messageProductName: oo,
+  messageActor: so,
+  parseStatusUpdateMessage: ao,
+  normalizeConferenceParticipants: Lt,
+  normalizeDataType: Nt,
+  normalizeImagingStudyContext: Pt,
+  normalizeOptionalEnvelopeField: Le,
+  normalizeStudyUID: yt,
+  openCastHubPopup: xi,
+  castReportingPopupPlacement: Ai,
+  hubReportingPopupFeatures: Ii,
+  placeHubPopupWindow: Ui,
+  parseCollatedRequestResult: Be,
+  productNameFromStatusResponseItem: rt,
+  REQUEST_SUFFIX: Se,
+  requestEventFor: Ie,
+  resolveHubConferenceClientUrl: wi,
+  resolveHubConferenceState: ki,
+  resolveHubConferenceView: kn,
+  resolveHubFileMessage: No,
+  resolveHubAdminUrl: Ei,
+  resolveHubPublishEnvelopeFields: wo,
+  resolveImagingStudyOpenPlan: Qi,
+  resolveTargetActorForWire: Oe,
+  resolveTargetProductNameForWire: Nn,
+  responseEventFor: pn,
+  RESPONSE_SUFFIX: Ce,
+  sanitizeCastMessageForDisplay: Co,
+  selectFirstMatchingHubKey: qr,
+  statusItemValue: Bt,
+  stringifyForLog: St,
+  summarizeInboundCastMessage: So,
+  summarizeOutboundCastPublish: yo,
+  TOTAL_SEGMENTATOR_PRODUCT_ALIASES: Qn,
+  LUNG_SCREENING_PRODUCT_ALIASES: er,
+  NEURO_SEG_PRODUCT_ALIASES: tr,
+  DENTAL_SEG_PRODUCT_ALIASES: nr,
+  TORCHXRAYVISION_PRODUCT_ALIASES: rr,
+  MHUB_PRODUCT_ALIASES: ir,
+  totalSegmentatorAvailableFromStatusResponses: Ao,
+  transferHubConferenceLead: $i
 };
 
-// SlicerLive/render/cast-transport.ts
+// render/cast-transport.ts
 var LIVESYNC_CONTEXT_KEY = "livesync";
 function livesyncContextFromWire(wire) {
   return [{ key: LIVESYNC_CONTEXT_KEY, resource: wire }];
@@ -10907,7 +12048,7 @@ var CastTransport = class {
   }
 };
 
-// SlicerLive/render/demos/hub-mirror/hub-mirror-cast.ts
+// render/demos/hub-mirror/hub-mirror-cast.ts
 var LOG = "[hub-mirror-cast]";
 var HUB_CREDENTIALS = {
   client_id: "client_id_3d_Slicer",
@@ -10924,15 +12065,15 @@ var LOCAL_HUB = {
 var ID_ACTOR = "ID";
 var PRODUCT_NAME = "SLICERLIVE-HUB-MIRROR";
 var HUB_BLOBS_EVENT = "HubBlobs";
-function isServedFromCastHubMount(location2 = globalThis.location) {
+function isServedFromSlicerHubMount(location2 = globalThis.location) {
   const path = String(location2?.pathname || "");
   if (!path.startsWith("/hub-mirror")) return false;
-  if (vt(location2)) return true;
+  if (mn(location2)) return true;
   const port = location2.port || (location2.protocol === "https:" ? "443" : "80");
   return port === "2018";
 }
 function shouldUseSameOriginHub(location2 = globalThis.location) {
-  return isServedFromCastHubMount(location2) || vt(location2);
+  return isServedFromSlicerHubMount(location2) || mn(location2);
 }
 function resolveHubConfig(location2 = globalThis.location) {
   if (!shouldUseSameOriginHub(location2)) {
@@ -11011,8 +12152,8 @@ function isHubBlobsWire(wire) {
   const ev = String(wire.event || "").trim();
   return ev === HUB_BLOBS_EVENT;
 }
-async function sleep(ms) {
-  await new Promise((r) => globalThis.setTimeout(r, ms));
+async function sleep(ms2) {
+  await new Promise((r) => globalThis.setTimeout(r, ms2));
 }
 async function fetchHubBlobFilesWithRetry(client, files, opts = {}) {
   const attempts = opts.attempts ?? 8;
@@ -11031,12 +12172,12 @@ async function fetchHubBlobFilesWithRetry(client, files, opts = {}) {
           context: { files: pending.map((f) => ({ ...f })) }
         }
       };
-      const resolved = await Pr(
+      const resolved = await No(
         client,
         synthetic
       );
       const event = resolved.event || synthetic.event;
-      return Yt(event);
+      return Xn(event);
     } catch (err) {
       lastErr = err;
       const delay = baseDelayMs * Math.pow(2, Math.min(i, 4));
@@ -11055,7 +12196,7 @@ async function connectHubMirrorCast() {
   let token = params.get("id-token")?.trim() || sessionStorage.getItem("hub-mirror.cast.token")?.trim() || "";
   if (!topic || !token) {
     throw new Error(
-      "hub-mirror requires ?topic= and ?id-token= (open from worklist 3D Slicer button)"
+      "hub-mirror requires ?topic= and ?id-token= (open from worklist 3D Slicer web mirror button)"
     );
   }
   try {
@@ -11070,7 +12211,7 @@ async function connectHubMirrorCast() {
   } catch {
   }
   const hub = resolveHubConfig();
-  const subscriberName = je("HubMirror");
+  const subscriberName = wt("HubMirror");
   const hashToBytes = /* @__PURE__ */ new Map();
   installHubBlobFetch(hashToBytes);
   let resolveReady;
@@ -11082,7 +12223,7 @@ async function connectHubMirrorCast() {
       r();
     };
   });
-  const client = Ni.newInstance({
+  const client = Ia.newInstance({
     hub,
     session: {
       subscriberName,
@@ -11091,11 +12232,11 @@ async function connectHubMirrorCast() {
       actors: [ID_ACTOR],
       topic: topic || void 0,
       // Scene control + HubBlobs payload refs only — no imagingstudy-* subscription.
-      events: ["scene-update"],
+      events: [Vr],
       lease: 7200,
       defaultTargetActor: "ID"
     },
-    callbackUrl: `${globalThis.location.origin}/castCallback`,
+    callbackUrl: `${globalThis.location.origin}/hubCallback`,
     preserveSessionTopicFromToken: Boolean(topic),
     autoReconnect: true
   });
@@ -11106,7 +12247,7 @@ async function connectHubMirrorCast() {
       await client.publish({
         event: {
           "hub.topic": topic,
-          "hub.event": "scene-update",
+          "hub.event": Vr,
           context: livesyncContextFromWire(wire)
         },
         actor: ID_ACTOR,
@@ -11129,15 +12270,15 @@ async function connectHubMirrorCast() {
     }
   }, 6e4);
   client.onMessage(async (message) => {
-    const eventName = se(message?.event);
-    const from = yr(message);
+    const eventName = ke(message?.event);
+    const from = io(message);
     if (from && from === subscriberName) return;
-    if (eventName !== "scene-update") return;
+    if (eventName !== Vr) return;
     const eventObj = message.event || {};
     const rawContext = eventObj.context;
-    const contextFiles = Yt(eventObj);
+    const contextFiles = Xn(eventObj);
     const wire = wireFromSceneUpdateContext(
-      rawContext != null ? rawContext : pr(message)
+      rawContext != null ? rawContext : ro(message)
     );
     const hubBlobs = isHubBlobsWire(wire) || contextFiles.some((f) => {
       const ids = f.payloadIds;
@@ -11211,7 +12352,7 @@ async function connectHubMirrorCast() {
 }
 var HUB_MIRROR_BLOB_BASE = "http://hub-mirror.local/mrson/";
 
-// SlicerLive/render/demos/hub-mirror/hub-mirror-browser.ts
+// render/demos/hub-mirror/hub-mirror-browser.ts
 var status = (m) => {
   const e = document.getElementById("status-text");
   if (e) e.textContent = m;
@@ -11225,14 +12366,14 @@ async function main() {
     return;
   }
   const p = new URLSearchParams(location.search);
-  status("connecting to Cast hub\u2026");
+  status("connecting to Slicer hub\u2026");
   let cast;
   try {
     cast = await connectHubMirrorCast();
     await Promise.race([
       cast.ready,
       new Promise(
-        (_2, rej) => setTimeout(() => rej(new Error("Cast connect timeout")), 2e4)
+        (_, rej) => setTimeout(() => rej(new Error("Cast connect timeout")), 2e4)
       )
     ]);
   } catch (err) {
@@ -11303,9 +12444,9 @@ async function main() {
       clearCanvas(c);
       return;
     }
-    const [lo, hi2] = volumeField.aabb();
+    const [lo2, hi2] = volumeField.aabb();
     const axis = pl.orient === "axial" ? 2 : pl.orient === "coronal" ? 1 : 0;
-    const off01 = Math.max(0, Math.min(1, (pl.posMm - lo[axis]) / Math.max(hi2[axis] - lo[axis], 1e-6)));
+    const off01 = Math.max(0, Math.min(1, (pl.posMm - lo2[axis]) / Math.max(hi2[axis] - lo2[axis], 1e-6)));
     if (!sliceBranched[c]) {
       if (pl.centerRAS && pl.fovX && pl.fovY) slice.setMirrorFrame(pl.orient, pl.centerRAS, pl.fovX, pl.fovY);
       else slice.resetView(pl.orient);
@@ -11317,15 +12458,15 @@ async function main() {
     for (const c of SLICE_CELLS) renderSlice(c);
   };
   const rebuild3d = () => {
-    const fs = [...fields3d.values()];
-    if (volumeShown3D && volumeField) fs.unshift(volumeField);
-    if (fs.length === 0) {
+    const fs2 = [...fields3d.values()];
+    if (volumeShown3D && volumeField) fs2.unshift(volumeField);
+    if (fs2.length === 0) {
       scene = null;
       clearCanvas("threeD");
       return;
     }
     if (!scene) scene = new SceneRenderer(gpu, srgb);
-    scene.build(fs);
+    scene.build(fs2);
     if (clip) scene.setClipBox(clip.lo, clip.hi);
     a3d.draw();
   };
@@ -11353,12 +12494,12 @@ async function main() {
     a3d.draw();
   };
   const view = {
-    setField(k2, f) {
-      fields3d.set(k2, f);
+    setField(k, f) {
+      fields3d.set(k, f);
       rebuild3d();
     },
-    removeField(k2) {
-      if (fields3d.delete(k2)) rebuild3d();
+    removeField(k) {
+      if (fields3d.delete(k)) rebuild3d();
     },
     // A field changed IN PLACE (markup point moved, colours, etc.): re-pack the material uniforms
     // (sphere/segment positions live there) so the change reaches the GPU — the render's flush()
@@ -11375,8 +12516,8 @@ async function main() {
       if (c.viewAngle) camera.viewAngle = c.viewAngle;
       a3d.draw();
     },
-    setClipBox(lo, hi2) {
-      clip = lo ? { lo, hi: hi2 } : null;
+    setClipBox(lo2, hi2) {
+      clip = lo2 ? { lo: lo2, hi: hi2 } : null;
       if (scene) {
         if (clip) scene.setClipBox(clip.lo, clip.hi);
         else scene.setClipPlanes([]);
@@ -11386,8 +12527,8 @@ async function main() {
     setVolumeField(f, wl) {
       volumeField = f;
       if (f) {
-        const [lo, hi2] = f.aabb();
-        slice.setVolume(f.patientToTexture(), lo, hi2);
+        const [lo2, hi2] = f.aabb();
+        slice.setVolume(f.patientToTexture(), lo2, hi2);
         slice.setTextures(f.volumeTexture(), segOverlay ?? void 0);
         if (wl) slice.setWindowLevel(wl.win, wl.lev);
         slice.setOverlayOpacity(segOverlay ? segFill : 0);
@@ -11432,7 +12573,7 @@ async function main() {
     a3d.draw();
   });
   const seged = location.pathname.includes("seged") || p.has("seged");
-  const segManager = seged ? new SegEditDisplayableManager(gpu.device, { onEdit: (k2) => status("seged: applied " + k2) }) : new SegmentationDisplayableManager(gpu.device, 1.5);
+  const segManager = seged ? new SegEditDisplayableManager(gpu.device, { onEdit: (k) => status("seged: applied " + k) }) : new SegmentationDisplayableManager(gpu.device, 1.5);
   const markupsDM = new MarkupsDisplayableManager();
   const live = new LiveScene(httpBase, [
     new LayoutDisplayableManager(),
@@ -11497,12 +12638,12 @@ async function main() {
   const pick = (sx, sy) => {
     let best = null, bestD = HIT_PX * dpr;
     for (const hd of markupsDM.handles()) {
-      const pr2 = camera.worldToDisplay(hd.ras, cv.threeD.width, cv.threeD.height);
-      if (pr2.depth <= 0) continue;
-      const d = Math.hypot(pr2.x - sx, pr2.y - sy);
+      const pr = camera.worldToDisplay(hd.ras, cv.threeD.width, cv.threeD.height);
+      if (pr.depth <= 0) continue;
+      const d = Math.hypot(pr.x - sx, pr.y - sy);
       if (d < bestD) {
         bestD = d;
-        best = { id: hd.id, index: hd.index, depth: pr2.depth };
+        best = { id: hd.id, index: hd.index, depth: pr.depth };
       }
     }
     return best;
@@ -11624,8 +12765,8 @@ async function main() {
   let playSched = [];
   let playTotal = 0;
   function buildSchedule(startT) {
-    const [lo, hi2] = src.span();
-    const s0 = Math.max(lo, Math.min(hi2, startT));
+    const [lo2, hi2] = src.span();
+    const s0 = Math.max(lo2, Math.min(hi2, startT));
     const times = [s0, ...src.frameTimes().filter((t) => t > s0 && t <= hi2)];
     if (times[times.length - 1] < hi2) times.push(hi2);
     playSched = [];
@@ -11642,10 +12783,10 @@ async function main() {
     return src.span()[1];
   };
   let t0 = 0;
-  const tAt = (v2) => {
+  const tAt = (v) => {
     if (!src) return 0;
     const [a, b] = src.span();
-    return a + v2 / 1e3 * Math.max(0, b - a);
+    return a + v / 1e3 * Math.max(0, b - a);
   };
   const fmt = (t) => {
     const s = Math.max(0, (t - t0) / 1e3);
@@ -11764,8 +12905,8 @@ async function main() {
     if (th) {
       preview.src = th.url;
       preview.style.display = "block";
-      const frac = Number(scrub.value) / 1e3, x2 = 12 + frac * (window.innerWidth - 24 - 200);
-      preview.style.left = `${Math.max(6, Math.min(window.innerWidth - 206, x2))}px`;
+      const frac = Number(scrub.value) / 1e3, x = 12 + frac * (window.innerWidth - 24 - 200);
+      preview.style.left = `${Math.max(6, Math.min(window.innerWidth - 206, x))}px`;
     }
     timeLbl.textContent = fmt(tAt(Number(scrub.value)));
   });
@@ -11791,7 +12932,7 @@ async function main() {
         stopPlay();
         return;
       }
-      const [lo, hi2] = src.span();
+      const [lo2, hi2] = src.span();
       const E = Date.now() - playAnchorWall;
       if (E >= playTotal) {
         stopPlay();
@@ -11800,7 +12941,7 @@ async function main() {
         return;
       }
       const t = warp(E);
-      scrub.value = String(Math.round((t - lo) / Math.max(1, hi2 - lo) * 1e3));
+      scrub.value = String(Math.round((t - lo2) / Math.max(1, hi2 - lo2) * 1e3));
       timeLbl.textContent = fmt(t);
       restore(t);
     }, 120);
@@ -11830,15 +12971,15 @@ async function main() {
   cv.threeD.addEventListener("contextmenu", (e) => e.preventDefault());
   cv.threeD.addEventListener("pointerdown", (e) => {
     if (drag) return;
-    const { x: x2, y } = xy3d(e);
-    cam3d.start(e.button, x2, y, cv.threeD.clientHeight, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey });
+    const { x, y: y2 } = xy3d(e);
+    cam3d.start(e.button, x, y2, cv.threeD.clientHeight, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey });
     cv.threeD.setPointerCapture(e.pointerId);
     branch();
   });
   cv.threeD.addEventListener("pointermove", (e) => {
     if (cam3d.action === "none") return;
-    const { x: x2, y } = xy3d(e);
-    cam3d.move(x2, y, cv.threeD.clientWidth, cv.threeD.clientHeight);
+    const { x, y: y2 } = xy3d(e);
+    cam3d.move(x, y2, cv.threeD.clientWidth, cv.threeD.clientHeight);
   });
   const end3d = (e) => {
     if (cam3d.action !== "none") {
@@ -11866,9 +13007,9 @@ async function main() {
         step: (fwd) => {
           const pl = planes[c];
           if (!pl || !volumeField) return;
-          const [lo, hi2] = volumeField.aabb();
+          const [lo2, hi2] = volumeField.aabb();
           const axis = pl.orient === "axial" ? 2 : pl.orient === "coronal" ? 1 : 0;
-          pl.posMm = Math.max(lo[axis], Math.min(hi2[axis], pl.posMm + (hi2[axis] - lo[axis]) * 0.02 * (fwd ? -1 : 1)));
+          pl.posMm = Math.max(lo2[axis], Math.min(hi2[axis], pl.posMm + (hi2[axis] - lo2[axis]) * 0.02 * (fwd ? -1 : 1)));
         },
         redraw: () => {
           sliceBranched[c] = true;

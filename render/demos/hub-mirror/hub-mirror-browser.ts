@@ -45,7 +45,7 @@ async function main() {
   if (!(navigator as unknown as { gpu?: unknown }).gpu) { status("WebGPU not available"); return; }
   const p = new URLSearchParams(location.search);
 
-  status("connecting to Cast hub…");
+  status("connecting to Slicer hub…");
   let cast;
   try {
     cast = await connectHubMirrorCast();

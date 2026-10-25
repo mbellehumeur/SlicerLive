@@ -181,7 +181,7 @@ import {
 import {
   batchContextFiles,
   resolveImagingStudyOpenPlan,
-} from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+} from "../../../../../SlicerHub-js-clients/packages/client/dist/hub-client.js";
 
 function dicomSendFileBytes(entry: Record<string, unknown>): ArrayBuffer | null {
   const data = entry.data;

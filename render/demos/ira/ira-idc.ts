@@ -1,7 +1,7 @@
 /**
  * Map Cast ImagingStudy-open (open-mode idc, CRDC prefix URLs) → IRA Source for loadSeries.
  */
-import { resolveImagingStudyOpenPlan } from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+import { resolveImagingStudyOpenPlan } from "../../../../../SlicerHub-js-clients/packages/client/dist/hub-client.js";
 
 export type IraIdcSource = {
   c: string;

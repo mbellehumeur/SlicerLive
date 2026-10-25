@@ -2,7 +2,7 @@
  * Convert a Cast dicom-send DICOM SEG into an IRA SegLabelmap
  * resampled onto the open CT IJK grid (same geometry path as IDC SEG).
  */
-import { batchContextFiles } from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+import { batchContextFiles } from "../../../../../SlicerHub-js-clients/packages/client/dist/hub-client.js";
 import { loadDcmjs } from "../../../logic/readers/dicom-series.ts";
 import type { SegLabelmap, SegmentTerminology } from "../../vendor/idc_tools/types.js";
 import { colorForLabel } from "./ira-nifti-seg.ts";

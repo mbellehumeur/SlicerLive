@@ -4,7 +4,7 @@
 import {
   buildFilesImagingStudyOpenContext,
   resolveImagingStudyOpenPlan,
-} from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+} from "../../../../../SlicerHub-js-clients/packages/client/dist/hub-client.js";
 import type { SceneVolume } from "../../scene-volume.ts";
 import type { CTVolume } from "../../vendor/idc_tools/types.js";
 import type { Volume } from "../../../logic/readers/nifti.ts";

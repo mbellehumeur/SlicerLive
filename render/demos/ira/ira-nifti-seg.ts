@@ -2,7 +2,7 @@
  * Convert a Cast nifti-send multilabel volume into an IRA SegLabelmap
  * resampled onto the open CT IJK grid (RAS nearest-neighbor).
  */
-import { batchContextFiles } from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+import { batchContextFiles } from "../../../../../SlicerHub-js-clients/packages/client/dist/hub-client.js";
 import { parseNifti } from "../../../logic/readers/nifti.ts";
 import { resampleLabelmapToCt } from "../../labelmap-resample.ts";
 import type { SegLabelmap, SegmentTerminology } from "../../vendor/idc_tools/types.js";

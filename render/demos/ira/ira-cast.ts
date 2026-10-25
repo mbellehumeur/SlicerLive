@@ -1,42 +1,52 @@
 /**
- * Cast join for IRA — deep-link ?topic=&id-token= like OHIF CastService / worklist viewers.
+ * Hub join for IRA — deep-link ?topic=&id-token= like OHIF HubService / worklist viewers.
  * Subscribes as Image Display (ID), answers status-request, emits status-request after
- * subscribe to catch up on an already-open worklist study, and forwards ImagingStudy-open.
+ * subscribe to catch up on an already-open worklist study, and forwards imagingstudy-open.
  */
-import CastClient, {
+import HubClient, {
+  DICOM_SEND,
+  DICOMSR_UPDATE,
+  IMAGINGSTUDY_CLOSE,
+  IMAGINGSTUDY_OPEN,
+  NIFTI_SEND,
+  SCENE_UPDATE,
+  STATUS_UPDATE,
+  SUBSCRIPTION_REMOVED,
+  batchContextFiles,
   castRadioStatusVisual,
-  castReportingPopupFeatures,
   castReportingPopupPlacement,
-  CAST_REPORTING_WINDOW_NAME,
-  CAST_WORKLIST_WINDOW_NAME,
   cloneContextArray,
   generateSubscriberName,
   getHubEventLower,
+  hubReportingPopupFeatures,
+  HUB_REPORTING_WINDOW_NAME,
+  HUB_WORKLIST_WINDOW_NAME,
   isRequestEvent,
   isRunningInCloud,
+  isStatusRequestDataType,
   mapInferenceServersFromStatusResult,
-  matchesCastProduct,
+  matchesHubProduct,
   messageActor,
   messageEventContext,
   messageProductName,
   messageSubscriberName,
+  normalizeDataType,
   parseStatusUpdateMessage,
-  placeCastPopupWindow,
+  placeHubPopupWindow,
   publishCastUrlSend,
-  requestCastProductStatus,
   requestEventFor,
-  resolveCastConferenceView,
-  resolveCastFileMessage,
-  resolveCastHubAdminUrl,
-  batchContextFiles,
-  showCastInfoToast,
+  requestHubProductStatus,
+  resolveHubAdminUrl,
+  resolveHubConferenceView,
+  resolveHubFileMessage,
+  showHubInfoToast,
   type CastConferenceView,
   type CastProductStatusProbe,
-} from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+} from "../../../../../SlicerHub-js-clients/packages/client/dist/hub-client.js";
 import {
   SKIP_STUDY_RELOAD_TOAST,
   sameOpenImagingStudyContext,
-} from "../../../../cast-context-identity.ts";
+} from "../../../../../SlicerHub-js-clients/packages/context-identity/index.ts";
 import {
   contextItemsFromOpenContext,
   materializeLiveSceneBlobUrls,
@@ -55,7 +65,7 @@ const HUB_CREDENTIALS = {
   client_secret: "client_secret_3d_Slicer",
 } as const;
 
-/** Standalone / local demos default (localhost Cast hub). */
+/** Standalone / local demos default (localhost Slicer hub). */
 const LOCAL_HUB = {
   name: "local",
   version: "1.0",
@@ -67,8 +77,8 @@ const LOCAL_HUB = {
 
 type HubConfig = typeof LOCAL_HUB;
 
-/** True when served from the Cast hub `/slicerlive` SPA mount. */
-function isHostedOnCastHub(
+/** True when served from the Slicer hub `/slicerlive` SPA mount. */
+function isHostedOnSlicerHub(
   location: Location = globalThis.location
 ): boolean {
   return String(location?.pathname || "").startsWith("/slicerlive");
@@ -77,7 +87,7 @@ function isHostedOnCastHub(
 function shouldUseSameOriginHub(
   location: Location = globalThis.location
 ): boolean {
-  return isHostedOnCastHub(location) || isRunningInCloud(location);
+  return isHostedOnSlicerHub(location) || isRunningInCloud(location);
 }
 
 /** Local hub for demos; same-origin endpoints when hosted on hub / in cloud. */
@@ -147,7 +157,7 @@ export function isSlicerIdSubscriberName(subscriberName: unknown): boolean {
     .startsWith("3DSLICER");
 }
 
-let client: ReturnType<typeof CastClient.newInstance> | null = null;
+let client: ReturnType<typeof HubClient.newInstance> | null = null;
 let topic = "";
 let subscriberName = "";
 let userName = "";
@@ -383,7 +393,7 @@ async function syncIraConferenceView(): Promise<void> {
   try {
     const hubEndpoint =
       client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
-    const view = await resolveCastConferenceView(
+    const view = await resolveHubConferenceView(
       hubEndpoint,
       topic,
       subscriberName,
@@ -439,7 +449,7 @@ function handleConferenceHubEvent(message: Record<string, unknown>): boolean {
 export function getIraHubAdminUrl(): string {
   const endpoint =
     client?.getHubConfig?.()?.hub_endpoint || resolveHubConfig().hub_endpoint;
-  return resolveCastHubAdminUrl(endpoint) || endpoint;
+  return resolveHubAdminUrl(endpoint) || endpoint;
 }
 
 /**
@@ -485,8 +495,8 @@ type StatusResponseItem = {
   };
 };
 
-const REPORTING_WINDOW_NAME = CAST_REPORTING_WINDOW_NAME;
-const WORKLIST_WINDOW_NAME = CAST_WORKLIST_WINDOW_NAME;
+const REPORTING_WINDOW_NAME = HUB_REPORTING_WINDOW_NAME;
+const WORKLIST_WINDOW_NAME = HUB_WORKLIST_WINDOW_NAME;
 
 let worklistClientWindow: WorklistClientWindow | null = null;
 let reportingWindow: Window | null = null;
@@ -610,7 +620,7 @@ export function openIraReportingClient(): Window | null {
   if (nextToken) url.searchParams.set("id-token", nextToken);
   const href = url.toString();
   const place = reportingPopupPlacement();
-  const features = castReportingPopupFeatures(place);
+  const features = hubReportingPopupFeatures(place);
   // One open() only — named window reuses an existing castViewer-reporting if any.
   const win = globalThis.open(href, REPORTING_WINDOW_NAME, features);
   if (!win) {
@@ -618,7 +628,7 @@ export function openIraReportingClient(): Window | null {
     return globalThis.open(href, REPORTING_WINDOW_NAME);
   }
   reportingWindow = win;
-  placeCastPopupWindow(win, place);
+  placeHubPopupWindow(win, place);
   return win;
 }
 
@@ -836,7 +846,7 @@ export async function requestIraHubDicom(opts: {
   }
 }
 
-export function getIraCastClient(): ReturnType<typeof CastClient.newInstance> | null {
+export function getIraCastClient(): ReturnType<typeof HubClient.newInstance> | null {
   return client;
 }
 
@@ -1097,7 +1107,7 @@ export async function probeInferenceProduct(
     subscriberName || client.getSessionConfig()?.subscriberName?.trim() || "";
   if (!subscriber) return { online: false, items: [], error: "No subscriber name" };
 
-  return requestCastProductStatus(client, {
+  return requestHubProductStatus(client, {
     targetProductName: productName,
     subscriberName: subscriber,
     subscriberProductName: "SLICERLIVE-IRA",
@@ -1154,7 +1164,7 @@ export function getIraSegCatalog(): SegCatalog {
 let lastPublishedSegCount = 0;
 
 /**
- * Publish StructureReport-update with the current SegCatalog (metadata only).
+ * Publish dicomsr-update with the current SegCatalog (metadata only).
  * No-ops when not connected. Used so reporting clients update without STATUS poll.
  * When the segment count increases, focus the DICOM SR window this page opened
  * (browsers allow opener→popup focus; the popup cannot focus itself from WS).
@@ -1166,12 +1176,12 @@ export async function publishIraStructureReportUpdate(): Promise<boolean> {
   const context = [{ key: "segmentation", resource: lastSegCatalog }];
   try {
     const res = await client.publish(
-      buildIraPublishPayload("StructureReport-update", context)
+      buildIraPublishPayload(DICOMSR_UPDATE, context)
     );
     const ok = Boolean(res?.ok);
     if (!ok) {
       console.warn(
-        `${LOG} StructureReport-update failed`,
+        `${LOG} ${DICOMSR_UPDATE} failed`,
         res ? `HTTP ${res.status}` : "No response"
       );
     } else {
@@ -1179,7 +1189,7 @@ export async function publishIraStructureReportUpdate(): Promise<boolean> {
         (acc, s) => acc + (s.segments?.length || 0),
         0
       );
-      console.info(`${LOG} published StructureReport-update segments=`, n);
+      console.info(`${LOG} published ${DICOMSR_UPDATE} segments=`, n);
       if (n > lastPublishedSegCount) {
         focusReportingWindowAfterSegGrowth();
       }
@@ -1187,7 +1197,7 @@ export async function publishIraStructureReportUpdate(): Promise<boolean> {
     }
     return ok;
   } catch (err) {
-    console.error(`${LOG} StructureReport-update exception`, err);
+    console.error(`${LOG} ${DICOMSR_UPDATE} exception`, err);
     return false;
   }
 }
@@ -1334,7 +1344,7 @@ function isReportingPresencePeer(productName: string, actor: string): boolean {
   ) {
     return true;
   }
-  return matchesCastProduct(productName, "reporting");
+  return matchesHubProduct(productName, "reporting");
 }
 
 function isWorklistPresencePeer(productName: string, actor: string): boolean {
@@ -1500,7 +1510,7 @@ function handleStatusRequest(message: Record<string, unknown>): boolean {
   ) {
     return false;
   }
-  if (context.dataType !== "STATUS") return false;
+  if (!isStatusRequestDataType(context.dataType)) return false;
 
   // Same as worklist: inbound STATUS from reporting lights DICOM SR.
   markReportingConnectedApp(message);
@@ -1510,7 +1520,7 @@ function handleStatusRequest(message: Record<string, unknown>): boolean {
 
   client?.sendCastRequestResponse(
     correlationId,
-    "STATUS",
+    normalizeDataType("STATUS"),
     responseData,
     event["hub.topic"]
   );
@@ -1618,7 +1628,7 @@ async function handleResolvedFileSend(
 ): Promise<void> {
   if (!client || !handler) return;
   try {
-    const resolved = (await resolveCastFileMessage(client, message)) as Record<
+    const resolved = (await resolveHubFileMessage(client, message)) as Record<
       string,
       unknown
     >;
@@ -1813,7 +1823,7 @@ function rejectCrDxImagingStudyOpen(
   console.info(
     `${LOG} ImagingStudy-open rejected (${reason}): modality ${modality} — not opening in SlicerLive`
   );
-  showCastInfoToast(`Modality ${modality} — not opening`);
+  showHubInfoToast(`Modality ${modality} — not opening`);
 
   // Never adopt CR/DX as the open study.
   lastImagingStudyOpenContext = [];
@@ -1833,7 +1843,7 @@ async function resolveAndApplyImagingStudyOpen(
 ): Promise<void> {
   if (!client) return;
   try {
-    const resolved = (await resolveCastFileMessage(client, message)) as Record<
+    const resolved = (await resolveHubFileMessage(client, message)) as Record<
       string,
       unknown
     >;
@@ -1922,7 +1932,7 @@ async function requestStatusFromWorklist(opts?: {
   }
 
   if (!forceApply) statusRequestState = "pending";
-  const statusDataType = "STATUS";
+  const statusDataType = normalizeDataType("STATUS");
 
   try {
     const message: Record<string, unknown> = {
@@ -2025,7 +2035,7 @@ async function requestStatusFromWorklist(opts?: {
         forceApply ? "(follow host)" : ""
       );
       if (!forceApply) statusRequestState = "done";
-      showCastInfoToast(SKIP_STUDY_RELOAD_TOAST);
+      showHubInfoToast(SKIP_STUDY_RELOAD_TOAST);
       return;
     }
 
@@ -2119,11 +2129,11 @@ export async function connectIraCast(): Promise<void> {
   }
 
   stripCastParamsFromUrl();
-  setConnection("connecting", "Connecting to Cast hub…");
+  setConnection("connecting", "Connecting to Slicer hub…");
 
   subscriberName = generateSubscriberName("IRA");
   const hub = resolveHubConfig();
-  client = CastClient.newInstance({
+  client = HubClient.newInstance({
     hub,
     session: {
       subscriberName,
@@ -2132,22 +2142,22 @@ export async function connectIraCast(): Promise<void> {
       actors: [ID_ACTOR],
       topic: topic || undefined,
       events: [
-        "imagingstudy-open",
-        "imagingstudy-close",
-        "status-request",
-        "pngfullsize-request",
-        "subscription-removed",
-        "status-update",
+        IMAGINGSTUDY_OPEN,
+        IMAGINGSTUDY_CLOSE,
+        requestEventFor("STATUS"),
+        requestEventFor("PNGFULLSIZE"),
+        SUBSCRIPTION_REMOVED,
+        STATUS_UPDATE,
         "conference-start",
         "conference-end",
-        "dicom-send",
-        "nifti-send",
-        "scene-update",
+        DICOM_SEND,
+        NIFTI_SEND,
+        SCENE_UPDATE,
       ],
       lease: 7200,
       defaultTargetActor: "*",
     },
-    callbackUrl: `${globalThis.location.origin}/castCallback`,
+    callbackUrl: `${globalThis.location.origin}/hubCallback`,
     preserveSessionTopicFromToken: Boolean(topic),
     autoReconnect: true,
   });

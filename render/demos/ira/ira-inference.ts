@@ -1,13 +1,13 @@
 // Medical Inference dialog for IRA — probe Cast resource servers and run one.
 import {
-  CAST_INFERENCE_SERVERS,
+  HUB_INFERENCE_SERVERS,
   extractImagingStudyFiles,
   isLocalCapableInferenceServer,
   probeCastInferenceServers,
   renderInferenceServerInfoCardHtml,
-  type CastInferenceServerDef,
+  type HubInferenceServerDef,
   type CastProductStatusProbe,
-} from "../../../../../cast-interface/cast-js-client/dist/cast-client.js";
+} from "../../../../../SlicerHub-js-clients/packages/client/dist/hub-client.js";
 import { idcS3, s3ListKeys } from "../../vendor/idc_tools/index.js";
 import {
   getIraCastClient,
@@ -42,9 +42,9 @@ import {
   type FlexrayModelChoice,
 } from "./ira-flexray-models.ts";
 
-export type InferenceServerDef = CastInferenceServerDef;
+export type InferenceServerDef = HubInferenceServerDef;
 export type InferenceProbeResult = CastProductStatusProbe;
-export const INFERENCE_SERVERS: InferenceServerDef[] = [...CAST_INFERENCE_SERVERS];
+export const INFERENCE_SERVERS: InferenceServerDef[] = [...HUB_INFERENCE_SERVERS];
 
 const MAX_INFERENCE_DICOM_FILES = 300;
 
